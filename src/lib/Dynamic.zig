@@ -50,31 +50,30 @@ pub inline fn List(comptime T: type, signal_ptr: *Signal([]T), style: Style) fn 
     return local.CloseElement;
 }
 
-pub inline fn ListItem(key: []const u8, style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
+const ListItemOptions = struct {
+    key: []const u8,
+    style: *const Style = &.{},
+};
 
-    var elem_decl = ElementDecl{
-        .style = style,
+pub inline fn ListItem(options: ListItemOptions) fn (void) void {
+    // Create a mutable copy of the style struct
+    var mutable_style = options.style.*;
+
+    // Now you can safely modify the local, mutable copy
+    mutable_style.child_alignment.x = .center;
+    mutable_style.child_alignment.y = .center;
+
+    mutable_style.id = options.key;
+
+    const elem_decl = ElementDecl{
+        .style = &mutable_style,
         .elem_type = .ListItem,
         .dynamic = .dynamic,
     };
-    elem_decl.style.id = key;
-    const node = Fabric.current_ctx.open(elem_decl) catch |err| {
-        Fabric.println("Could not open ListItem Element {any}\n", .{err});
-        unreachable;
-    };
-    node.uuid = key;
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
+    const node = LifeCycle.open(elem_decl) orelse unreachable;
+    node.uuid = options.key;
+    _ = LifeCycle.configure(elem_decl);
+    return LifeCycle.close;
 }
 
 const HeaderSize = enum(u32) {
@@ -253,8 +252,7 @@ pub inline fn Input(
     return;
 }
 
-
-pub inline fn FlexBox(comptime T : type, signal: *Signal(T), style: Style) fn (void) void {
+pub inline fn FlexBox(comptime T: type, signal: *Signal(T), style: Style) fn (void) void {
     const elem_decl = ElementDecl{
         .style = style,
         .dynamic = .static,

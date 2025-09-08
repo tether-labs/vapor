@@ -113,7 +113,7 @@ pub export fn getOnInputCallback(node_ptr: ?*UINode) u32 {
         return 0;
     }
     const input_params = node_ptr.?.input_params.?;
-    switch (input_params) {
+    switch (input_params.*) {
         .int => {
             return 0;
         },
@@ -154,7 +154,7 @@ pub export fn getInputType(node_ptr: ?*UINode) usize {
         return 0;
     }
     const input_params = node_ptr.?.input_params.?;
-    switch (input_params) {
+    switch (input_params.*) {
         .int => {
             return 0;
         },
@@ -194,7 +194,7 @@ pub export fn createInput(node_ptr: ?*UINode) *u8 {
     }
     const input_params = node_ptr.?.input_params.?;
 
-    switch (input_params) {
+    switch (input_params.*) {
         .int => {
             input_struct_int.type = 0;
             const params = input_params.int;
@@ -475,7 +475,7 @@ pub export fn getInputSize(node_ptr: ?*UINode) u32 {
     }
     const input_params = node_ptr.?.input_params.?;
 
-    switch (input_params) {
+    switch (input_params.*) {
         .int => {
             return @sizeOf(InputInt);
         },

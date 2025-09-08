@@ -15,8 +15,11 @@ pub fn reconcile(old_ctx: *UIContext, new_ctx: *UIContext, _: []const u8) void {
 /// Compares two Style instances shallowly (all top-level fields).
 /// Returns true if every field is equal, false otherwise.
 pub fn nodesEqual(old_node: *UINode, new_node: *UINode) bool {
-    const a = old_node.style;
-    const b = new_node.style;
+    if (old_node.style == null and new_node.style == null) return true;
+    if (old_node.style == null or new_node.style != null) return false;
+    if (old_node.style != null or new_node.style == null) return false;
+    const a = old_node.style.?;
+    const b = new_node.style.?;
     // Compare optional string fields
     if (!compareOptionalSlice(a.id, b.id)) return false;
     if (!compareOptionalSlice(old_node.text, new_node.text)) return false;
@@ -229,6 +232,7 @@ fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
     }
 
     if (old_node.children.items.len != new_node.children.items.len) {
+
         // Here we remove items, since old_node
         if (old_node.children.items.len > new_node.children.items.len) {
             var end: usize = 0;
@@ -238,8 +242,8 @@ fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
             }
             for (old_node.children.items[end..]) |node| {
                 if (node.dynamic == .animation) {
-                    const class_name_enter = node.style.child_styles.?[0].style_id;
-                    const class_name_exit = node.style.child_styles.?[1].style_id;
+                    const class_name_enter = node.style.?.child_styles.?[0].style_id;
+                    const class_name_exit = node.style.?.child_styles.?[1].style_id;
                     const enter = std.mem.Allocator.dupe(Fabric.allocator_global, u8, class_name_enter) catch return;
                     const exit = std.mem.Allocator.dupe(Fabric.allocator_global, u8, class_name_exit) catch return;
                     const uuid = std.mem.Allocator.dupe(Fabric.allocator_global, u8, node.uuid) catch return;

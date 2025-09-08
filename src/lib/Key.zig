@@ -56,7 +56,7 @@ pub const KeyGenerator = struct {
         }
 
         // Hash important prop values if available
-        if (@hasField(@TypeOf(props), "uuid")) {
+        if (props != null and @hasField(@TypeOf(props.?.*), "uuid")) {
             if (@TypeOf(props.uuid) == []const u8) {
                 hasher.update(props.key);
             } else {
@@ -75,7 +75,7 @@ pub const KeyGenerator = struct {
         const key = std.fmt.bufPrint(&buf, "{x}_{s}_{d}", .{ hash, tag_name[0..@min(4, tag_name.len)], current_count }) catch &buf;
 
         // Allocate permanent storage for the key
-        if (node.dynamic == .animation and node.style.animation != null) {
+        if (node.dynamic == .animation and node.style.?.animation != null) {
             const result = std.fmt.allocPrint(allocator.*, "animation-{s}-genk", .{key}) catch |err| {
                 Fabric.println("Could not alloc new key {any}", .{err});
                 unreachable;

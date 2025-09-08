@@ -6,9 +6,64 @@ pub const TransitionProperty = @import("Transition.zig").TransitionProperty;
 const print = std.debug.print;
 const ColorTheme = @import("constants/Color.zig");
 const Animation = @import("Animation.zig");
-pub const ElementType = @import("user_config").ElementType;
+// pub const ElementType = @import("user_config").ElementType;
 pub const color_theme: ColorTheme = ColorTheme{};
 const isMobile = @import("utils.zig").isMobile;
+
+pub const ElementType = enum(u8) {
+    Rectangle,
+    Text,
+    Image,
+    FlexBox,
+    Input,
+    Button,
+    Block,
+    Box,
+    Header,
+    Svg,
+    Link,
+    EmbedLink,
+    List,
+    ListItem,
+    _If,
+    Hooks,
+    Layout,
+    Page,
+    Bind,
+    Dialog,
+    DialogBtnShow,
+    DialogBtnClose,
+    Draggable,
+    RedirectLink,
+    Select,
+    SelectItem,
+    CtxButton,
+    EmbedIcon,
+    Icon,
+    Label,
+    Form,
+    AllocText,
+    Table,
+    TableRow,
+    TableCell,
+    TableHeader,
+    TableBody,
+    TextArea,
+    Canvas,
+    SubmitCtxButton,
+    HooksCtx,
+    JsonEditor,
+    HtmlText,
+    Code,
+    Span,
+    LazyImage,
+    Intersection,
+    PreImage,
+    TextGradient,
+    Gradient,
+    Virtualize,
+};
+
 
 pub fn switchColorTheme() void {
     switch (color_theme.theme) {
@@ -1289,13 +1344,13 @@ pub const ButtonType = enum {
 
 pub const ElementDeclaration = struct {
     hooks: HooksIds = .{},
-    style: Style = .{},
+    style: ?*const Style = null,
     elem_type: ElementType,
     text: []const u8 = "",
     svg: []const u8 = "",
     href: []const u8 = "",
     show: bool = true,
-    input_params: ?InputParams = null,
+    input_params: ?*const InputParams = null,
     event_type: ?EventType = null,
     dynamic: StateType = .static,
     aria_label: ?[]const u8 = null,
@@ -1371,11 +1426,10 @@ pub fn addCustomChoice(_name: []const u8, comptime T: anytype) type {
 
 pub const RenderCommand = struct {
     /// Rectangular box that fully encloses this UI element
-    bounding_box: BoundingBox,
     elem_type: ElementType,
     text: []const u8 = "",
     href: []const u8 = "",
-    style: Style = undefined,
+    style: ?*const Style = null,
     id: []const u8 = "",
     show: bool = true,
     hooks: HooksIds,

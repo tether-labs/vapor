@@ -16,6 +16,7 @@ const BoxSizing = Types.BoxSizing;
 const Pos = Types.Pos;
 const FlexType = Types.FlexType;
 const TransformOrigin = Types.TransformOrigin;
+const Fabric = @import("Fabric.zig");
 const Animation = Fabric.Animation;
 const AnimationType = Types.AnimationType;
 const ListStyle = Types.ListStyle;
@@ -23,41 +24,136 @@ const Transition = Types.Transition;
 const Outline = Types.Outline;
 const Cursor = Types.Cursor;
 const Background = Types.Background;
-const RenderCommand = Types.RenderCommand;
-const Fabric = @import("Fabric.zig");
-const println = @import("Fabric.zig").println;
 
+const writer_t = std.io.FixedBufferStream([]u8).Writer;
 // Global buffer to store the CSS string for returning to JavaScript
 var css_buffer: [4096]u8 = undefined;
 
+fn writePropValue(prop: []const u8, value: anytype, writer: writer_t) void {
+    writer.writeAll(prop) catch {};
+    writer.writeByte(':') catch {};
+
+    switch (@TypeOf(value)) {
+        Types.PositionType => positionTypeToCSS(value, writer) catch {},
+        Types.Direction => directionToCSS(value, writer) catch {},
+        Types.Sizing => sizingTypeToCSS(value, writer) catch {},
+        Types.Padding => {
+            writer.print("{d}px {d}px {d}px {d}px", .{
+                value.top,
+                value.right,
+                value.bottom,
+                value.left,
+            }) catch {};
+        },
+        Types.Cursor => cursorToCSS(value, writer) catch {},
+        Types.Appearance => appearanceToCSS(value, writer) catch {},
+        Types.TransformType => {
+            switch (value.type) {
+                .none => {},
+                .scale => writer.print("scale({d})", .{value.scale_size}) catch {},
+                .scaleY => writer.print("scaleY({d})", .{value.scale_size}) catch {},
+                .scaleX => writer.print("scaleX({d})", .{value.scale_size}) catch {},
+                .translateX => writer.print("translateX({d}%)", .{value.percent * 100}) catch {},
+                .translateY => writer.print("translateY({d}%)", .{value.percent * 100}) catch {},
+            }
+        },
+        Types.TransformOrigin => transformOriginToCSS(value, writer) catch {},
+        Types.Margin => {
+            writer.print("{d}px {d}px {d}px {d}px", .{
+                value.top,
+                value.right,
+                value.bottom,
+                value.left,
+            }) catch {};
+        },
+        Types.Pos => posTypeToCSS(value, writer) catch {},
+        Types.TextDecoration => textDecoToCSS(value, writer) catch {},
+        Types.WhiteSpace => whiteSpaceToCSS(value, writer) catch {},
+        Types.FlexWrap => flexWrapToCSS(value, writer) catch {},
+        Types.Alignment => alignmentToCSS(value, writer) catch {},
+        Types.Background => colorToCSS(value, writer) catch {},
+        Types.ListStyle => listStyleToCSS(value, writer) catch {},
+        Types.Outline => outlineStyleToCSS(value, writer) catch {},
+        Animation.Specs => animationToCSS(value, writer) catch {},
+        Types.Transition => transitionStyleToCSS(value, writer),
+        Types.Shadow => {
+            writer.print("{d}px {d}px {d}px {d}px", .{
+                value.left,
+                value.top,
+                value.blur,
+                value.spread,
+            }) catch {};
+
+            colorToCSS(value.color, writer) catch {};
+        },
+        Types.Border => {
+            writer.print("{d}px {d}px {d}px {d}px", .{
+                value.top,
+                value.right,
+                value.bottom,
+                value.left,
+            }) catch {};
+        },
+        Types.BorderRadius => {
+            writer.print("{d}px {d}px {d}px {d}px", .{
+                value.top_left,
+                value.top_right,
+                value.bottom_right,
+                value.bottom_left,
+            }) catch {};
+        },
+        Types.FlexType => flexTypeToCSS(value, writer) catch {},
+        else => |_type| {
+            switch (@typeInfo(_type)) {
+                .pointer => |ptr_info| {
+                    switch (ptr_info.size) {
+                        .slice, .many, .one => {
+                            writer.writeAll(value) catch {};
+                        },
+                        else => {
+                            Fabric.println("Unknown pointer type {any}\n", .{_type});
+                            unreachable;
+                        },
+                    }
+                },
+                else => {
+                    Fabric.println("Unknown type {any} Prop: {s}\n", .{_type, prop});
+                    unreachable;
+                },
+            }
+        },
+    }
+    writer.writeAll(";\n") catch {};
+}
+
 // Helper function to convert Direction enum to CSS flex-direction
-fn directionToCSS(dir: Direction) []const u8 {
-    return switch (dir) {
-        .column => "column",
-        .row => "row",
-    };
+fn directionToCSS(dir: Direction, writer: writer_t) !void {
+    switch (dir) {
+        .column => try writer.writeAll("column"),
+        .row => try writer.writeAll("row"),
+    }
 }
 
 // Helper function to convert Alignment to CSS values
-fn alignmentToCSS(_align: Alignment) []const u8 {
-    return switch (_align) {
-        .center => "center",
-        .top => "flex-start",
-        .bottom => "flex-end",
-        .start => "flex-start",
-        .end => "flex-end",
-        .between => "space-between",
-        .even => "space-evenly",
-    };
+fn alignmentToCSS(_align: Alignment, writer: writer_t) !void {
+    switch (_align) {
+        .center => try writer.writeAll("center"),
+        .top => try writer.writeAll("flex-start"),
+        .bottom => try writer.writeAll("flex-end"),
+        .start => try writer.writeAll("flex-start"),
+        .end => try writer.writeAll("flex-end"),
+        .between => try writer.writeAll("space-between"),
+        .even => try writer.writeAll("space-evenly"),
+    }
 }
 
 // Helper function to convert PositionType to CSS values
-fn positionTypeToCSS(pos_type: PositionType) []const u8 {
+fn positionTypeToCSS(pos_type: PositionType, writer: writer_t) !void {
     return switch (pos_type) {
-        .relative => "relative",
-        .absolute => "absolute",
-        .fixed => "fixed",
-        .sticky => "sticky",
+        .relative => try writer.writeAll("relative"),
+        .absolute => try writer.writeAll("absolute"),
+        .fixed => try writer.writeAll("fixed"),
+        .sticky => try writer.writeAll("sticky"),
     };
 }
 
@@ -75,13 +171,14 @@ fn floatTypeToCSS(float_type: FloatType) []const u8 {
 fn sizingTypeToCSS(sizing: Sizing, writer: anytype) !void {
     switch (sizing.type) {
         .fit => try writer.writeAll("fit-content"),
+        .grow => try writer.writeAll("flex:1"),
         .percent => try writer.print("{d}%", .{sizing.size.minmax.min}),
         .fixed => try writer.print("{d}px", .{sizing.size.minmax.min}),
         .elastic => try writer.writeAll("auto"), // Could also use min/max width/height in separate properties
         .elastic_percent => try writer.print("{d}%", .{sizing.size.percent.min}),
         .clamp_px => try writer.print("clamp({d}px,{d}px,{d}px)", .{ sizing.size.clamp_px.min, sizing.size.clamp_px.preferred, sizing.size.clamp_px.max }),
         .clamp_percent => try writer.print("clamp({d}%,{d}%,{d}%)", .{ sizing.size.clamp_px.min, sizing.size.clamp_px.preferred, sizing.size.clamp_px.max }),
-        .none, .grow => {},
+        .none => {},
         else => {},
     }
 }
@@ -317,9 +414,9 @@ fn flexTypeToCSS(flex_type: FlexType, writer: anytype) !void {
 var style_style: []const u8 = "";
 var global_len: usize = 0;
 var show_scrollbar: bool = true;
-pub export fn getStyle(node_ptr: ?*UINode) [*]const u8 {
+pub export fn getStyle(node_ptr: ?*UINode) ?[*]const u8 {
     if (node_ptr == null) return style_style.ptr;
-    const style = node_ptr.?.style;
+    const style = node_ptr.?.style orelse return null;
     const ptr = node_ptr.?;
     // Create a default Hover style
 
@@ -332,57 +429,59 @@ pub export fn getStyle(node_ptr: ?*UINode) [*]const u8 {
 
     // Write position properties
     if (style.position) |p| {
-        writer.print("  position: {s};\n", .{positionTypeToCSS(p.type)}) catch {};
-        writer.writeAll("  left: ") catch {};
-        posTypeToCSS(p.left, writer) catch {};
-        writer.writeAll(";\n") catch {};
-
-        writer.writeAll("  right: ") catch {};
-        posTypeToCSS(p.right, writer) catch {};
-        writer.writeAll(";\n") catch {};
-
-        writer.writeAll("  top: ") catch {};
-        posTypeToCSS(p.top, writer) catch {};
-        writer.writeAll(";\n") catch {};
-
-        writer.writeAll("  bottom: ") catch {};
-        posTypeToCSS(p.bottom, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("position", p.type, writer);
+        writePropValue("left", p.left, writer);
+        writePropValue("right", p.right, writer);
+        writePropValue("top", p.top, writer);
+        writePropValue("bottom", p.bottom, writer);
     }
 
     // Write display and flex properties
     if (ptr.type == .FlexBox) {
-        writer.writeAll("  display: flex;\n") catch {};
-        writer.print("  flex-direction: {s};\n", .{directionToCSS(style.direction)}) catch {};
+        writePropValue("display", "flex", writer);
+        writePropValue("flex-direction", style.direction, writer);
 
         // justify content is x by default
         // align items is y by default and they swap when doing direction .column
         if (style.direction == .row) {
-            writer.print("  justify-content: {s};\n", .{alignmentToCSS(style.child_alignment.x)}) catch {};
-            writer.print("  align-items: {s};\n", .{alignmentToCSS(style.child_alignment.y)}) catch {};
+            writePropValue("justify-content", style.child_alignment.x, writer);
+            writePropValue("align-items", style.child_alignment.y, writer);
+            // writer.print("  justify-content: {s};\n", .{alignmentToCSS(style.child_alignment.x)}) catch {};
+            // writer.print("  align-items: {s};\n", .{alignmentToCSS(style.child_alignment.y)}) catch {};
         } else {
-            writer.print("  align-items: {s};\n", .{alignmentToCSS(style.child_alignment.x)}) catch {};
-            writer.print("  justify-content: {s};\n", .{alignmentToCSS(style.child_alignment.y)}) catch {};
+            writePropValue("align-items", style.child_alignment.x, writer);
+            writePropValue("justify-content", style.child_alignment.y, writer);
+            // writer.print("  align-items: {s};\n", .{alignmentToCSS(style.child_alignment.x)}) catch {};
+            // writer.print("  justify-content: {s};\n", .{alignmentToCSS(style.child_alignment.y)}) catch {};
         }
     } else if (style.display) |d| {
         if (ptr.text.len > 0 and d == .Center and ptr.type != .Svg) {
-            _ = writer.writeAll("  text-align: center;\n") catch {};
+            writePropValue("text-align", "center", writer);
+            // _ = writer.writeAll("  text-align: center;\n") catch {};
         } else {
-            writer.writeAll("  display: ") catch {};
-            flexTypeToCSS(d, writer) catch {};
-            writer.writeAll(";\n") catch {};
-            writer.print("  flex-direction: {s};\n", .{directionToCSS(style.direction)}) catch {};
+            writePropValue("display", d, writer);
+            // writer.writeAll("  display: ") catch {};
+            // flexTypeToCSS(d, writer) catch {};
+            // writer.writeAll(";\n") catch {};
+            writePropValue("flex-direction", style.direction, writer);
+            // writer.print("  flex-direction: {s};\n", .{directionToCSS(style.direction)}) catch {};
 
             if (d == .Center) {
-                _ = writer.writeAll("  justify-content: center;\n") catch {};
-                _ = writer.writeAll("  align-items: center;\n") catch {};
+                writePropValue("justify-content", "center", writer);
+                writePropValue("align-items", "center", writer);
+                // _ = writer.writeAll("  justify-content: center;\n") catch {};
+                // _ = writer.writeAll("  align-items: center;\n") catch {};
             } else {
                 if (style.direction == .row) {
-                    writer.print("  justify-content: {s};\n", .{alignmentToCSS(style.child_alignment.x)}) catch {};
-                    writer.print("  align-items: {s};\n", .{alignmentToCSS(style.child_alignment.y)}) catch {};
+                    writePropValue("justify-content", style.child_alignment.x, writer);
+                    writePropValue("align-items", style.child_alignment.y, writer);
+                    // writer.print("  justify-content: {s};\n", .{alignmentToCSS(style.child_alignment.x)}) catch {};
+                    // writer.print("  align-items: {s};\n", .{alignmentToCSS(style.child_alignment.y)}) catch {};
                 } else {
-                    writer.print("  align-items: {s};\n", .{alignmentToCSS(style.child_alignment.x)}) catch {};
-                    writer.print("  justify-content: {s};\n", .{alignmentToCSS(style.child_alignment.y)}) catch {};
+                    writePropValue("align-items", style.child_alignment.x, writer);
+                    writePropValue("justify-content", style.child_alignment.y, writer);
+                    // writer.print("  align-items: {s};\n", .{alignmentToCSS(style.child_alignment.x)}) catch {};
+                    // writer.print("  justify-content: {s};\n", .{alignmentToCSS(style.child_alignment.y)}) catch {};
                 }
             }
         }
@@ -391,302 +490,204 @@ pub export fn getStyle(node_ptr: ?*UINode) [*]const u8 {
     // Write width and height
     if (style.width.type != .none and style.width.type != .grow) {
         if (style.width.type == .min_max_vp) {
-            writer.writeAll("  max-width: ") catch {};
-            writer.print("{d}vw", .{style.width.size.min_max_vp.max}) catch {};
-            writer.writeAll(";\n") catch {};
-            writer.writeAll("  min-width: ") catch {};
-            writer.print("{d}vw", .{style.width.size.min_max_vp.min}) catch {};
-            writer.writeAll(";\n") catch {};
+            writer.print("max-width:{d}vw;\n", .{style.width.size.min_max_vp.max}) catch {};
+            writer.print("min-width:{d}vw;\n", .{style.width.size.min_max_vp.max}) catch {};
         } else if (style.width.type == .elastic_percent) {
-            writer.writeAll("  max-width: ") catch {};
-            writer.print("{d}%", .{style.width.size.percent.max}) catch {};
-            writer.writeAll(";\n") catch {};
-            writer.writeAll("  min-width: ") catch {};
-            writer.print("{d}%", .{style.width.size.percent.min}) catch {};
-            writer.writeAll(";\n") catch {};
+            writer.print("max-width:{d}%;\n", .{style.width.size.min_max_vp.max}) catch {};
+            writer.print("min-width:{d}%;\n", .{style.width.size.min_max_vp.max}) catch {};
         } else {
-            writer.writeAll("  width: ") catch {};
-            sizingTypeToCSS(style.width, writer) catch {};
-            writer.writeAll(";\n") catch {};
+            writePropValue("width", style.width, writer);
         }
     } else if (style.width.type == .grow) {
-        writer.writeAll("flex: 1;\n") catch {};
+        writePropValue("flex", "1", writer);
     }
 
     if (style.height.type != .none and style.height.type != .grow) {
         if (style.height.type == .min_max_vp) {
-            // writer.writeAll("  max-height: ") catch {};
-            // writer.print("{d}vh", .{style.height.size.min_max_vp.max}) catch {};
-            // writer.writeAll(";\n") catch {};
-            writer.writeAll("  min-height: ") catch {};
-            writer.print("{d}vh", .{style.height.size.min_max_vp.min}) catch {};
-            writer.writeAll(";\n") catch {};
+            writer.print("min-height:{d}vh;\n", .{style.height.size.min_max_vp.min}) catch {};
         } else {
-            writer.writeAll("  height: ") catch {};
-            sizingTypeToCSS(style.height, writer) catch {};
-            writer.writeAll(";\n") catch {};
+            writePropValue("height", style.height, writer);
         }
     } else if (style.height.type == .grow) {
-        writer.writeAll("flex: 1;\n") catch {};
+        writePropValue("flex", "1", writer);
     }
 
     // Write font properties
     if (style.font_size) |fs| {
-        writer.print("  font-size: {d}px;\n", .{fs}) catch {};
+        writer.print("font-size:{d}px;\n", .{fs}) catch {};
     }
     if (style.letter_spacing) |ls| {
-        writer.print("  letter-spacing: {d}px;\n", .{@as(f32, @floatFromInt(ls)) / 1000.0}) catch {};
+        writer.print("letter-spacing:{d}px;\n", .{@as(f32, @floatFromInt(ls)) / 1000.0}) catch {};
     }
     if (style.line_height) |lh| {
-        writer.print("  line-height: {d}px;\n", .{lh}) catch {};
+        writer.print("line-height:{d}px;\n", .{lh}) catch {};
     }
 
     if (style.font_weight) |sf| {
-        writer.print("  font-weight: {d};\n", .{sf}) catch {};
+        writer.print("font-weight:{d};\n", .{sf}) catch {};
     }
 
     if (style.font_family.len > 0) {
-        writer.print("  font-family: {s};\n", .{style.font_family}) catch {};
+        writer.print("font-family:{s};\n", .{style.font_family}) catch {};
     }
 
     if (style.border) |border| {
         const border_thickness = border.thickness;
-        writer.print("  border-width: {d}px {d}px {d}px {d}px;\n", .{
-            border_thickness.top,
-            border_thickness.right,
-            border_thickness.bottom,
-            border_thickness.left,
-        }) catch {};
-
+        writePropValue("border-width", border_thickness, writer);
         if (border.color) |border_color| {
-            writer.writeAll("  border-color: ") catch {};
-            colorToCSS(border_color, writer) catch {};
-            writer.writeAll(";\n") catch {};
+            writePropValue("border-color", border_color, writer);
         }
-        writer.writeAll("  border-style: solid;\n") catch {};
+        writer.writeAll("border-style: solid;\n") catch {};
 
         // Border radius
         if (border.radius) |border_radius| {
-            writer.print("  border-radius: {d}px {d}px {d}px {d}px;\n", .{
-                border_radius.top_left,
-                border_radius.top_right,
-                border_radius.bottom_right,
-                border_radius.bottom_left,
-            }) catch {};
+            writePropValue("border-radius", border_radius, writer);
         }
     } else if (style.border_thickness) |border_thickness| {
-        writer.print("  border-width: {d}px {d}px {d}px {d}px;\n", .{
-            border_thickness.top,
-            border_thickness.right,
-            border_thickness.bottom,
-            border_thickness.left,
-        }) catch {};
-
+        writePropValue("border-width", border_thickness, writer);
         if (style.border_color) |border_color| {
-            writer.writeAll("  border-color: ") catch {};
-            colorToCSS(border_color, writer) catch {};
-            writer.writeAll(";\n") catch {};
+            writePropValue("border-color", border_color, writer);
         }
-        writer.writeAll("  border-style: solid;\n") catch {};
+        writer.writeAll("border-style:solid;\n") catch {};
     } else if (ptr.type == .Button or ptr.type == .CtxButton) {
-        _ = writer.writeAll("  border-width: 0px;\n") catch {};
+        _ = writer.writeAll("border-width:0px;\n") catch {};
     }
 
     // Border radius
     if (style.border_radius) |border_radius| {
-        writer.print("  border-radius: {d}px {d}px {d}px {d}px;\n", .{
-            border_radius.top_left,
-            border_radius.top_right,
-            border_radius.bottom_right,
-            border_radius.bottom_left,
-        }) catch {};
+        writePropValue("border-radius", border_radius, writer);
     }
 
     // Text color
     if (style.text_color) |color| {
-        writer.writeAll("  color: ") catch {};
-        colorToCSS(color, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("color", color, writer);
     }
 
     // Padding
     if (style.padding) |padding| {
-        writer.print("  padding: {d}px {d}px {d}px {d}px;\n", .{
-            padding.top,
-            padding.right,
-            padding.bottom,
-            padding.left,
-        }) catch {};
+        writePropValue("padding", padding, writer);
     }
     if (style.margin) |margin| {
-        writer.print("  margin: {d}px {d}px {d}px {d}px;\n", .{
-            margin.top,
-            margin.right,
-            margin.bottom,
-            margin.left,
-        }) catch {};
+        writePropValue("margin", margin, writer);
     }
 
     // Alignment
 
     if (style.child_gap > 0) {
-        writer.print("  gap: {d}px;\n", .{style.child_gap}) catch {};
+        writer.print("gap:{d}px;\n", .{style.child_gap}) catch {};
     }
 
     // Background color
     if (style.background) |background| {
-        writer.writeAll("  background-color: ") catch {};
-        colorToCSS(background, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("background-color", background, writer);
     } else if (ptr.type == .Button or ptr.type == .CtxButton) {
-        _ = writer.writeAll("  background-color: rgba(0,0,0,0);\n") catch {};
+        _ = writer.writeAll("background-color:rgba(0,0,0,0);\n") catch {};
     }
 
     // Shadow
     if (style.shadow.blur > 0 or style.shadow.spread > 0 or
         style.shadow.top > 0 or style.shadow.left > 0)
     {
-        writer.writeAll("  box-shadow: ") catch {};
-        writer.print("{d}px {d}px {d}px {d}px ", .{
-            style.shadow.left,
-            style.shadow.top,
-            style.shadow.blur,
-            style.shadow.spread,
-        }) catch {};
-
-        colorToCSS(style.shadow.color, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("box-shadow", style.shadow, writer);
     }
 
     // Text-Deco
     if (style.text_decoration) |td| {
-        writer.writeAll("  text-decoration: ") catch {};
-        textDecoToCSS(td, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("text-decoration", td, writer);
     }
 
     if (style.white_space) |ws| {
-        writer.writeAll("  white-space: ") catch {};
-        whiteSpaceToCSS(ws, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("white-space", ws, writer);
     }
     if (style.flex_wrap) |fw| {
-        writer.writeAll("  flex-wrap: ") catch {};
-        flexWrapToCSS(fw, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("flex-wrap", fw, writer);
     }
 
     if (style.animation) |an| {
-        writer.writeAll("  animation: ") catch {};
-        animationToCSS(an, writer) catch {};
-        writer.writeAll(";\n") catch {};
-        writer.print("  animation-delay: {any}s", .{an.delay}) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("animation", an, writer);
+        writer.print("animation-delay:{any}s;\n", .{an.delay}) catch {};
     }
 
     if (style.z_index) |zi| {
-        writer.print("  z-index: {d}", .{zi}) catch {};
-        writer.writeAll(";\n") catch {};
+        writer.print("z-index:{d};\n", .{zi}) catch {};
     }
 
     if (style.blur) |bl| {
-        writer.print("  backdrop-filter: blur({d}px)", .{bl}) catch {};
-        writer.writeAll(";\n") catch {};
+        writer.print("backdrop-filter:blur({d}px);\n", .{bl}) catch {};
     }
 
     if (style.overflow) |ovf| {
         switch (ovf) {
-            .scroll => writer.writeAll("  overflow: scroll;\n") catch {},
-            .hidden => writer.writeAll("  overflow: hidden;\n") catch {},
+            .scroll => writer.writeAll("overflow:scroll;\n") catch {},
+            .hidden => writer.writeAll("overflow:hidden;\n") catch {},
         }
     }
 
     if (style.overflow_x) |ovf| {
         switch (ovf) {
-            .scroll => writer.writeAll("  overflow-x: scroll;\n") catch {},
-            .hidden => writer.writeAll("  overflow-x: hidden;\n") catch {},
+            .scroll => writer.writeAll("overflow-x:scroll;\n") catch {},
+            .hidden => writer.writeAll("overflow-x:hidden;\n") catch {},
         }
     }
 
     if (style.overflow_y) |ovf| {
         switch (ovf) {
-            .scroll => writer.writeAll("  overflow-y: scroll;\n") catch {},
-            .hidden => writer.writeAll("  overflow-y: hidden;\n") catch {},
+            .scroll => writer.writeAll("overflow-y:scroll;\n") catch {},
+            .hidden => writer.writeAll("overflow-y:hidden;\n") catch {},
         }
     }
 
     if (style.list_style) |ls| {
-        writer.writeAll("  list-style: ") catch {};
-        listStyleToCSS(ls, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("list-style", ls, writer);
     }
 
     if (style.outline) |ol| {
-        writer.writeAll("  outline: ") catch {};
-        outlineStyleToCSS(ol, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("outline", ol, writer);
     }
 
     // writer.print("  opacity: {d};\n", .{style.opacity}) catch {};
 
     if (style.transition) |tr| {
-        writer.writeAll("  transition: ") catch {};
-        transitionStyleToCSS(tr, writer);
-        writer.writeAll(";\n") catch {};
+        writePropValue("transition", tr, writer);
     }
 
     if (!style.show_scrollbar) {
-        writer.writeAll("  scrollbar-width: none;\n") catch {};
+        writer.writeAll("scrollbar-width:none;\n") catch {};
         show_scrollbar = false;
     }
 
     if (style.cursor) |c| {
-        writer.writeAll("  cursor: ") catch {};
-        cursorToCSS(c, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("cursor", c, writer);
     }
 
     if (style.appearance) |ap| {
-        writer.writeAll("  appearance: ") catch {};
-        appearanceToCSS(ap, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("appearance", ap, writer);
     }
 
     if (style.will_change) |wc| {
-        writer.writeAll("  will-change: ") catch {};
         switch (wc) {
             .transform => {
-                writer.print("{s}", .{@tagName(wc)}) catch {};
+                writer.print("will-change:{s};\n", .{@tagName(wc)}) catch {};
             },
             else => {},
         }
-        writer.writeAll(";\n") catch {};
     }
 
     // // Transform
     if (style.transform) |tr| {
-        writer.writeAll("  transform: ") catch {};
-        switch (tr.type) {
-            .none => {},
-            .scale => writer.print("scale({d})", .{tr.scale_size}) catch {},
-            .scaleY => writer.print("scaleY({d})", .{tr.scale_size}) catch {},
-            .scaleX => writer.print("scaleX({d})", .{tr.scale_size}) catch {},
-            .translateX => writer.print("translateX({d}%)", .{tr.percent * 100}) catch {},
-            .translateY => writer.print("translateY({d}%)", .{tr.percent * 100}) catch {},
-        }
-        writer.writeAll(";\n") catch {};
+        writePropValue("transform", tr, writer);
     }
 
     if (style.transform_origin) |to| {
-        writer.writeAll("  transform-origin: ") catch {};
-        transformOriginToCSS(to, writer) catch {};
-        writer.writeAll(";\n") catch {};
+        writePropValue("transform-origin", to, writer);
     }
 
-    // Close CSS block
-    // writer.writeAll("}\n") catch {};
+    writer.writeAll("box-sizing: border-box;\n") catch {};
 
-    // Null-terminate the string
+        // Close CSS block
+        // writer.writeAll("}\n") catch {};
+
+        // Null-terminate the string
     const len: usize = @intCast(fbs.getPos() catch 0);
     css_buffer[len] = 0;
     style_style = css_buffer[0..len];
@@ -703,605 +704,583 @@ export fn getStyleLen() usize {
     return style_style.len;
 }
 
-var check_mark_style: []const u8 = "";
-var chmrk_css_buffer: [4096]u8 = undefined;
-export fn getCheckMarkStylePtr(node_ptr: ?*UINode) [*]const u8 {
-    if (node_ptr == null) return check_mark_style.ptr;
-    const style = node_ptr.?.style.checkmark_style orelse return check_mark_style.ptr;
-    // Create a default Hover style
-
-    // Use a fixed buffer with a fbs to build the CSS string
-    var fbs = std.io.fixedBufferStream(&chmrk_css_buffer);
-    var writer = fbs.writer();
-
-    // Start CSS block
-    // writer.writeAll("{\n") catch {};
-
-    // Write position properties
-    if (style.position) |hp| {
-        writer.print("  position: {s};\n", .{positionTypeToCSS(hp.type)}) catch {};
-        writer.writeAll("  left: ") catch {};
-        posTypeToCSS(hp.left, writer) catch {};
-        writer.writeAll(";\n") catch {};
-
-        writer.writeAll("  right: ") catch {};
-        posTypeToCSS(hp.right, writer) catch {};
-        writer.writeAll(";\n") catch {};
-
-        writer.writeAll("  top: ") catch {};
-        posTypeToCSS(hp.top, writer) catch {};
-        writer.writeAll(";\n") catch {};
-
-        writer.writeAll("  bottom: ") catch {};
-        posTypeToCSS(hp.bottom, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    if (style.display) |d| {
-        writer.writeAll("  display: ") catch {};
-        flexTypeToCSS(d, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    // Write display and flex properties
-    // writer.writeAll("  display: flex;\n") catch {};
-    if (style.direction) |hd| {
-        writer.print("  flex-direction: {s};\n", .{directionToCSS(hd)}) catch {};
-    }
-
-    // Write width and height
-    if (style.width) |hw| {
-        if (hw.type == .grow) {
-            writer.writeAll("flex: 1;\n") catch {};
-        } else if (hw.type != .none) {
-            writer.writeAll("  width: ") catch {};
-            sizingTypeToCSS(hw, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-    }
-
-    if (style.height) |hh| {
-        if (hh.type == .grow) {
-            writer.writeAll("flex: 1;\n") catch {};
-        } else if (hh.type != .none) {
-            writer.writeAll("  height: ") catch {};
-            sizingTypeToCSS(hh, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-    }
-
-    // Write font properties
-    if (style.font_size) |fs| {
-        writer.print("  font-size: {d}px;\n", .{fs}) catch {};
-    }
-    if (style.letter_spacing) |ls| {
-        writer.print("  letter-spacing: {d}px;\n", .{@as(f32, @floatFromInt(ls)) / 1000.0}) catch {};
-    }
-    if (style.line_height) |lh| {
-        writer.print("  line-height: {d}px;\n", .{lh}) catch {};
-    }
-
-    if (style.font_weight) |hf| {
-        if (hf > 0) {
-            writer.print("  font-weight: {d};\n", .{hf}) catch {};
-        }
-    }
-
-    // Border properties
-    if (style.border_thickness) |hbt| {
-        if (hbt.top > 0 or
-            hbt.right > 0 or
-            hbt.bottom > 0 or
-            hbt.left > 0)
-        {
-            writer.print("  border-width: {d}px {d}px {d}px {d}px;\n", .{
-                hbt.top,
-                hbt.right,
-                hbt.bottom,
-                hbt.left,
-            }) catch {};
-
-            if (style.border_color) |border_color| {
-                writer.writeAll("  border-color: ") catch {};
-                colorToCSS(border_color, writer) catch {};
-                writer.writeAll(";\n") catch {};
-            }
-        }
-        writer.writeAll("  border-style: solid;\n") catch {};
-    }
-
-    // Border radius
-    if (style.border_radius) |hbr| {
-        if (hbr.top_left > 0 or
-            hbr.top_right > 0 or
-            hbr.bottom_right > 0 or
-            hbr.bottom_left > 0)
-        {
-            writer.print("  border-radius: {d}px {d}px {d}px {d}px;\n", .{
-                hbr.top_left,
-                hbr.top_right,
-                hbr.bottom_right,
-                hbr.bottom_left,
-            }) catch {};
-        }
-    }
-
-    // Text color
-    if (style.text_color) |tc| {
-        writer.writeAll("  color: ") catch {};
-        colorToCSS(tc, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    // Padding
-    if (style.padding) |tp| {
-        if (tp.top > 0 or
-            tp.right > 0 or
-            tp.bottom > 0 or
-            tp.left > 0)
-        {
-            writer.print("  padding: {d}px {d}px {d}px {d}px;\n", .{
-                tp.top,
-                tp.right,
-                tp.bottom,
-                tp.left,
-            }) catch {};
-        }
-    }
-
-    // Alignment
-    if (style.child_alignment) |hca| {
-        writer.print("  justify-content: {s};\n", .{alignmentToCSS(hca.x)}) catch {};
-        writer.print("  align-items: {s};\n", .{alignmentToCSS(hca.y)}) catch {};
-    }
-
-    if (style.child_gap > 0) {
-        writer.print("  gap: {d}px;\n", .{style.child_gap}) catch {};
-    }
-
-    // Background color
-    if (style.background) |hb| {
-        writer.writeAll("  background-color: ") catch {};
-        colorToCSS(hb, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    // Shadow
-    if (style.shadow.blur > 0 or style.shadow.spread > 0 or
-        style.shadow.top > 0 or style.shadow.left > 0)
-    {
-        writer.writeAll("  box-shadow: ") catch {};
-        writer.print("{d}px {d}px {d}px {d}px ", .{
-            style.shadow.left,
-            style.shadow.top,
-            style.shadow.blur,
-            style.shadow.spread,
-        }) catch {};
-
-        colorToCSS(style.shadow.color, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    // Transform
-    if (style.transform.type != .none) {
-        writer.writeAll("  transform: ") catch {};
-        transformToCSS(style.transform, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    // writer.print("  opacity: {d};\n", .{style.opacity}) catch {};
-
-    // Null-terminate the string
-    const len: usize = @intCast(fbs.getPos() catch 0);
-    chmrk_css_buffer[len] = 0;
-    check_mark_style = chmrk_css_buffer[0..len];
-
-    // Return a pointer to the CSS string
-    return check_mark_style.ptr;
-}
-
-export fn getCheckMarkLen() usize {
-    return check_mark_style.len;
-}
-export fn hasEctClasses(node_ptr: ?*UINode) usize {
-    if (node_ptr == null) return 0;
-    const style = node_ptr.?.style;
-    if (style.child_styles) |_| {
-        return 1;
-    }
-    return 0;
-}
-
-export fn addEctClasses(node_ptr: ?*UINode) void {
-    if (node_ptr == null) return;
-    const node_style = node_ptr.?.style;
-    // const ptr = node_ptr.?;
-    // Create a default Hover style
-
-    for (node_style.child_styles.?) |style| {
-        // Use a fixed buffer with a fbs to build the CSS string
-        var fbs = std.io.fixedBufferStream(&css_buffer);
-        var writer = fbs.writer();
-
-        // Write position properties
-        writer.print(".{s} ", .{style.style_id}) catch {};
-        writer.writeAll("{\n") catch {};
-        // Write position properties
-        if (style.position) |p| {
-            writer.print("  position: {s};\n", .{positionTypeToCSS(p.type)}) catch {};
-            writer.writeAll("  left: ") catch {};
-            posTypeToCSS(p.left, writer) catch {};
-            writer.writeAll(";\n") catch {};
-
-            writer.writeAll("  right: ") catch {};
-            posTypeToCSS(p.right, writer) catch {};
-            writer.writeAll(";\n") catch {};
-
-            writer.writeAll("  top: ") catch {};
-            posTypeToCSS(p.top, writer) catch {};
-            writer.writeAll(";\n") catch {};
-
-            writer.writeAll("  bottom: ") catch {};
-            posTypeToCSS(p.bottom, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-        // // Write display and flex properties
-        // if (ptr.type == .FlexBox or ptr.type == .List or style.display != null) {
-        //     writer.writeAll("  display: flex;\n") catch {};
-        //     writer.print("  flex-direction: {s};\n", .{directionToCSS(style.direction)}) catch {};
-        // }
-
-        // Write width and height
-        if (style.display) |d| {
-            writer.writeAll("  display: ") catch {};
-            flexTypeToCSS(d, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-
-        // Write width and height
-        if (style.width) |hw| {
-            if (hw.type != .none) {
-                writer.writeAll("  width: ") catch {};
-                sizingTypeToCSS(hw, writer) catch {};
-                writer.writeAll(";\n") catch {};
-            }
-        }
-
-        if (style.height) |hh| {
-            if (hh.type != .none) {
-                writer.writeAll("  height: ") catch {};
-                sizingTypeToCSS(hh, writer) catch {};
-                writer.writeAll(";\n") catch {};
-            }
-        }
-
-        // Border properties
-        if (style.border_thickness) |hbt| {
-            if (hbt.top > 0 or
-                hbt.right > 0 or
-                hbt.bottom > 0 or
-                hbt.left > 0)
-            {
-                writer.print("  border-width: {d}px {d}px {d}px {d}px;\n", .{
-                    hbt.top,
-                    hbt.right,
-                    hbt.bottom,
-                    hbt.left,
-                }) catch {};
-
-                writer.writeAll("  border-style: solid;\n") catch {};
-
-                if (style.border_color) |bc| {
-                    writer.writeAll("  border-color: ") catch {};
-                    colorToCSS(bc, writer) catch {};
-                    writer.writeAll(";\n") catch {};
-                }
-            }
-        }
-
-        // Border radius
-        if (style.border_radius) |hbr| {
-            if (hbr.top_left > 0 or
-                hbr.top_right > 0 or
-                hbr.bottom_right > 0 or
-                hbr.bottom_left > 0)
-            {
-                writer.print("  border-radius: {d}px {d}px {d}px {d}px;\n", .{
-                    hbr.top_left,
-                    hbr.top_right,
-                    hbr.bottom_right,
-                    hbr.bottom_left,
-                }) catch {};
-            }
-        }
-
-        // Text color
-        if (style.text_color) |tc| {
-            writer.writeAll("  color: ") catch {};
-            colorToCSS(tc, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-
-        // Padding
-        if (style.padding) |tp| {
-            if (tp.top > 0 or
-                tp.right > 0 or
-                tp.bottom > 0 or
-                tp.left > 0)
-            {
-                writer.print("  padding: {d}px {d}px {d}px {d}px;\n", .{
-                    tp.top,
-                    tp.right,
-                    tp.bottom,
-                    tp.left,
-                }) catch {};
-            }
-        }
-
-        if (style.margin) |m| {
-            writer.print("  margin: {d}px {d}px {d}px {d}px;\n", .{
-                m.top,
-                m.right,
-                m.bottom,
-                m.left,
-            }) catch {};
-        }
-
-        // Alignment
-        if (style.child_alignment) |ca| {
-            writer.print("  justify-content: {s};\n", .{alignmentToCSS(ca.x)}) catch {};
-            writer.print("  align-items: {s};\n", .{alignmentToCSS(ca.y)}) catch {};
-        }
-
-        if (style.child_gap > 0) {
-            writer.print("  gap: {d}px;\n", .{style.child_gap}) catch {};
-        }
-
-        // Background color
-        if (style.background) |b| {
-            writer.writeAll("  background-color: ") catch {};
-            colorToCSS(b, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-
-        // Shadow
-        if (style.shadow.blur > 0 or style.shadow.spread > 0 or
-            style.shadow.top > 0 or style.shadow.left > 0)
-        {
-            writer.writeAll("  box-shadow: ") catch {};
-            writer.print("{d}px {d}px {d}px {d}px ", .{
-                style.shadow.left,
-                style.shadow.top,
-                style.shadow.blur,
-                style.shadow.spread,
-            }) catch {};
-
-            colorToCSS(style.shadow.color, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-
-        // Text-Deco
-        if (style.text_decoration) |td| {
-            writer.writeAll("  text-decoration: ") catch {};
-            textDecoToCSS(td, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-
-        if (style.white_space) |ws| {
-            writer.writeAll("  white-space: ") catch {};
-            whiteSpaceToCSS(ws, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-        if (style.flex_wrap) |fw| {
-            writer.writeAll("  flex-wrap: ") catch {};
-            flexWrapToCSS(fw, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-
-        if (style.animation) |an| {
-            writer.writeAll("  animation: ") catch {};
-            animationToCSS(an, writer) catch {};
-            writer.writeAll(";\n") catch {};
-            writer.print("  animation-delay: {any}s", .{an.delay}) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-
-        if (style.z_index) |zi| {
-            writer.print("  z-index: {d}", .{zi}) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-
-        if (style.blur) |bl| {
-            writer.print("  backdrop-filter: blur({d}px)", .{bl}) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-
-        if (style.overflow) |ovf| {
-            switch (ovf) {
-                .scroll => writer.writeAll("  overflow: scroll;\n") catch {},
-                .hidden => writer.writeAll("  overflow: hidden;\n") catch {},
-            }
-        }
-
-        if (style.overflow_x) |ovf| {
-            switch (ovf) {
-                .scroll => writer.writeAll("  overflow-x: scroll;\n") catch {},
-                .hidden => writer.writeAll("  overflow-x: hidden;\n") catch {},
-            }
-        }
-
-        if (style.overflow_y) |ovf| {
-            switch (ovf) {
-                .scroll => writer.writeAll("  overflow-y: scroll;\n") catch {},
-                .hidden => writer.writeAll("  overflow-y: hidden;\n") catch {},
-            }
-        }
-
-        if (style.list_style) |ls| {
-            writer.writeAll("  list-style: ") catch {};
-            listStyleToCSS(ls, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-
-        if (style.outline) |ol| {
-            writer.writeAll("  outline: ") catch {};
-            outlineStyleToCSS(ol, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-
-        writer.print("  opacity: {d};\n", .{style.opacity}) catch {};
-
-        if (style.transition) |tr| {
-            writer.writeAll("  transition: ") catch {};
-            transitionStyleToCSS(tr, writer);
-            writer.writeAll(";\n") catch {};
-        }
-
-        if (!style.show_scrollbar) {
-            writer.writeAll("  scrollbar-width: none;\n") catch {};
-            show_scrollbar = false;
-        }
-
-        // Close CSS block
-        writer.writeAll("}\n") catch {};
-
-        // Null-terminate the string
-        const len: usize = @intCast(fbs.getPos() catch 0);
-        css_buffer[len] = 0;
-        style_style = css_buffer[0..len];
-        Fabric.createClass(style_style.ptr, style_style.len);
-    }
-}
-
-pub export fn nextMotion() bool {
-    if (Fabric.motions.items.len == 0) return false;
-    return true;
-}
-
-var key_frames_buffer: [4096]u8 = undefined;
-var key_frame_style: []const u8 = "";
-pub export fn getKeyFrames(_: *Fabric.Animation.Motion) ?[*]const u8 {
-    const motion = Fabric.motions.pop() orelse return null;
-    // Create a default Hover style
-
-    // Use a fixed buffer with a fbs to build the CSS string
-    var fbs = std.io.fixedBufferStream(&key_frames_buffer);
-    var writer = fbs.writer();
-
-    writer.print("@keyframes {s} ", .{motion.tag}) catch {};
-    writer.writeAll("{\n") catch {};
-    // FROM
-    writer.writeAll("  from {\n") catch {};
-    if (motion.from.type != .none) {
-        writer.writeAll("    transform: ") catch {};
-    }
-    switch (motion.from.type) {
-        .none => {},
-        .scale => writer.print("scale({d});\n", .{motion.from.scale_size}) catch {},
-        .scaleY => writer.print("scaleY({d});\n", .{motion.from.scale_size}) catch {},
-        .scaleX => writer.print("scaleX({d});\n", .{motion.from.scale_size}) catch {},
-        .translateX => writer.print("translateX({d}px);\n", .{motion.from.dist}) catch {},
-        .translateY => writer.print("translateY({d}px);\n", .{motion.from.dist}) catch {},
-    }
-    if (motion.from.opacity) |from_op| {
-        writer.print("    opacity: {d};\n", .{from_op}) catch {};
-    }
-    if (motion.from.height) |from_h| {
-        writer.writeAll("    height: ") catch {};
-        sizingTypeToCSS(from_h, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-    if (motion.from.width) |from_w| {
-        writer.writeAll("    width: ") catch {};
-        sizingTypeToCSS(from_w, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    writer.writeAll("  }\n") catch {};
-
-    // TO
-    writer.writeAll("  to {\n") catch {};
-    if (motion.from.type != .none) {
-        writer.writeAll("    transform: ") catch {};
-    }
-    switch (motion.to.type) {
-        .none => {},
-        .scale => writer.print("scale({d});\n", .{motion.to.scale_size}) catch {},
-        .scaleY => writer.print("scaleY({d});\n", .{motion.to.scale_size}) catch {},
-        .scaleX => writer.print("scaleX({d});\n", .{motion.to.scale_size}) catch {},
-        .translateX => writer.print("translateX({d}px);\n", .{motion.to.dist}) catch {},
-        .translateY => writer.print("translateY({d}px);\n", .{motion.to.dist}) catch {},
-    }
-    if (motion.to.opacity) |to_op| {
-        writer.print("    opacity: {d};\n", .{to_op}) catch {};
-    }
-    if (motion.to.height) |to_h| {
-        writer.writeAll("    height: ") catch {};
-        sizingTypeToCSS(to_h, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-    if (motion.to.width) |to_w| {
-        writer.writeAll("    width ") catch {};
-        sizingTypeToCSS(to_w, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    writer.writeAll("  }\n") catch {};
-    writer.writeAll("  }\n") catch {};
-
-    const len: usize = @intCast(fbs.getPos() catch 0);
-    key_frames_buffer[len] = 0;
-    key_frame_style = key_frames_buffer[0..len];
-
-    // Return a pointer to the CSS string
-    return key_frame_style.ptr;
-}
-export fn getKeyFramesLen() usize {
-    return key_frame_style.len;
-}
-
-// // Function to get just the style direction CSS value
-// export fn getHoverDirection() [*:0]const u8 {
-//     const style = Hover{};
-//     const dir_str = directionToCSS(style.direction);
+// var check_mark_style: []const u8 = "";
+// var chmrk_css_buffer: [4096]u8 = undefined;
+// export fn getCheckMarkStylePtr(node_ptr: ?*UINode) [*]const u8 {
+//     if (node_ptr == null) return check_mark_style.ptr;
+//     const style = node_ptr.?.style.checkmark_style orelse return check_mark_style.ptr;
+//     // Create a default Hover style
 //
-//     // Copy to buffer and null-terminate
-//     @memcpy(&css_buffer, dir_str);
-//     css_buffer[dir_str.len] = 0;
+//     // Use a fixed buffer with a fbs to build the CSS string
+//     var fbs = std.io.fixedBufferStream(&chmrk_css_buffer);
+//     var writer = fbs.writer();
 //
-//     return &css_buffer;
-// }
+//     // Start CSS block
+//     // writer.writeAll("{\n") catch {};
 //
-// // Function to debug the memory layout of the Hover struct
-// export fn debugHoverLayout() void {
-//     std.debug.print("Size of Hover: {}\n", .{@sizeOf(Hover)});
+//     // Write position properties
+//     if (style.position) |hp| {
+//         writer.print("  position: {s};\n", .{positionTypeToCSS(hp.type)}) catch {};
+//         writer.writeAll("  left: ") catch {};
+//         posTypeToCSS(hp.left, writer) catch {};
+//         writer.writeAll(";\n") catch {};
 //
-//     inline for (std.meta.fields(Hover)) |field| {
-//         std.debug.print("Field {s}: offset={}, size={}\n", .{ field.name, @offsetOf(Hover, field.name), @sizeOf(field.type) });
+//         writer.writeAll("  right: ") catch {};
+//         posTypeToCSS(hp.right, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//
+//         writer.writeAll("  top: ") catch {};
+//         posTypeToCSS(hp.top, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//
+//         writer.writeAll("  bottom: ") catch {};
+//         posTypeToCSS(hp.bottom, writer) catch {};
+//         writer.writeAll(";\n") catch {};
 //     }
 //
-//     // Specifically for direction
-//     std.debug.print("Direction offset: {}\n", .{@offsetOf(Hover, "direction")});
-//     std.debug.print("Direction size: {}\n", .{@sizeOf(Direction)});
+//     if (style.display) |d| {
+//         writer.writeAll("  display: ") catch {};
+//         flexTypeToCSS(d, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     // Write display and flex properties
+//     // writer.writeAll("  display: flex;\n") catch {};
+//     if (style.direction) |hd| {
+//         writer.print("  flex-direction: {s};\n", .{directionToCSS(hd)}) catch {};
+//     }
+//
+//     // Write width and height
+//     if (style.width) |hw| {
+//         if (hw.type == .grow) {
+//             writer.writeAll("flex: 1;\n") catch {};
+//         } else if (hw.type != .none) {
+//             writer.writeAll("  width: ") catch {};
+//             sizingTypeToCSS(hw, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//     }
+//
+//     if (style.height) |hh| {
+//         if (hh.type == .grow) {
+//             writer.writeAll("flex: 1;\n") catch {};
+//         } else if (hh.type != .none) {
+//             writer.writeAll("  height: ") catch {};
+//             sizingTypeToCSS(hh, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//     }
+//
+//     // Write font properties
+//     if (style.font_size) |fs| {
+//         writer.print("  font-size: {d}px;\n", .{fs}) catch {};
+//     }
+//     if (style.letter_spacing) |ls| {
+//         writer.print("  letter-spacing: {d}px;\n", .{@as(f32, @floatFromInt(ls)) / 1000.0}) catch {};
+//     }
+//     if (style.line_height) |lh| {
+//         writer.print("  line-height: {d}px;\n", .{lh}) catch {};
+//     }
+//
+//     if (style.font_weight) |hf| {
+//         if (hf > 0) {
+//             writer.print("  font-weight: {d};\n", .{hf}) catch {};
+//         }
+//     }
+//
+//     // Border properties
+//     if (style.border_thickness) |hbt| {
+//         if (hbt.top > 0 or
+//             hbt.right > 0 or
+//             hbt.bottom > 0 or
+//             hbt.left > 0)
+//         {
+//             writer.print("  border-width: {d}px {d}px {d}px {d}px;\n", .{
+//                 hbt.top,
+//                 hbt.right,
+//                 hbt.bottom,
+//                 hbt.left,
+//             }) catch {};
+//
+//             if (style.border_color) |border_color| {
+//                 writer.writeAll("  border-color: ") catch {};
+//                 colorToCSS(border_color, writer) catch {};
+//                 writer.writeAll(";\n") catch {};
+//             }
+//         }
+//         writer.writeAll("  border-style: solid;\n") catch {};
+//     }
+//
+//     // Border radius
+//     if (style.border_radius) |hbr| {
+//         if (hbr.top_left > 0 or
+//             hbr.top_right > 0 or
+//             hbr.bottom_right > 0 or
+//             hbr.bottom_left > 0)
+//         {
+//             writer.print("  border-radius: {d}px {d}px {d}px {d}px;\n", .{
+//                 hbr.top_left,
+//                 hbr.top_right,
+//                 hbr.bottom_right,
+//                 hbr.bottom_left,
+//             }) catch {};
+//         }
+//     }
+//
+//     // Text color
+//     if (style.text_color) |tc| {
+//         writer.writeAll("  color: ") catch {};
+//         colorToCSS(tc, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     // Padding
+//     if (style.padding) |tp| {
+//         if (tp.top > 0 or
+//             tp.right > 0 or
+//             tp.bottom > 0 or
+//             tp.left > 0)
+//         {
+//             writer.print("  padding: {d}px {d}px {d}px {d}px;\n", .{
+//                 tp.top,
+//                 tp.right,
+//                 tp.bottom,
+//                 tp.left,
+//             }) catch {};
+//         }
+//     }
+//
+//     // Alignment
+//     if (style.child_alignment) |hca| {
+//         writer.print("  justify-content: {s};\n", .{alignmentToCSS(hca.x)}) catch {};
+//         writer.print("  align-items: {s};\n", .{alignmentToCSS(hca.y)}) catch {};
+//     }
+//
+//     if (style.child_gap > 0) {
+//         writer.print("  gap: {d}px;\n", .{style.child_gap}) catch {};
+//     }
+//
+//     // Background color
+//     if (style.background) |hb| {
+//         writer.writeAll("  background-color: ") catch {};
+//         colorToCSS(hb, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     // Shadow
+//     if (style.shadow.blur > 0 or style.shadow.spread > 0 or
+//         style.shadow.top > 0 or style.shadow.left > 0)
+//     {
+//         writer.writeAll("  box-shadow: ") catch {};
+//         writer.print("{d}px {d}px {d}px {d}px ", .{
+//             style.shadow.left,
+//             style.shadow.top,
+//             style.shadow.blur,
+//             style.shadow.spread,
+//         }) catch {};
+//
+//         colorToCSS(style.shadow.color, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     // Transform
+//     if (style.transform.type != .none) {
+//         writer.writeAll("  transform: ") catch {};
+//         transformToCSS(style.transform, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     // writer.print("  opacity: {d};\n", .{style.opacity}) catch {};
+//
+//     // Null-terminate the string
+//     const len: usize = @intCast(fbs.getPos() catch 0);
+//     chmrk_css_buffer[len] = 0;
+//     check_mark_style = chmrk_css_buffer[0..len];
+//
+//     // Return a pointer to the CSS string
+//     return check_mark_style.ptr;
+// }
+//
+// export fn getCheckMarkLen() usize {
+//     return check_mark_style.len;
+// }
+// export fn hasEctClasses(node_ptr: ?*UINode) usize {
+//     if (node_ptr == null) return 0;
+//     const style = node_ptr.?.style;
+//     if (style.child_styles) |_| {
+//         return 1;
+//     }
+//     return 0;
+// }
+//
+// export fn addEctClasses(node_ptr: ?*UINode) void {
+//     if (node_ptr == null) return;
+//     const node_style = node_ptr.?.style;
+//     // const ptr = node_ptr.?;
+//     // Create a default Hover style
+//
+//     for (node_style.child_styles.?) |style| {
+//         // Use a fixed buffer with a fbs to build the CSS string
+//         var fbs = std.io.fixedBufferStream(&css_buffer);
+//         var writer = fbs.writer();
+//
+//         // Write position properties
+//         writer.print(".{s} ", .{style.style_id}) catch {};
+//         writer.writeAll("{\n") catch {};
+//         // Write position properties
+//         if (style.position) |p| {
+//             writer.print("  position: {s};\n", .{positionTypeToCSS(p.type)}) catch {};
+//             writer.writeAll("  left: ") catch {};
+//             posTypeToCSS(p.left, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//
+//             writer.writeAll("  right: ") catch {};
+//             posTypeToCSS(p.right, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//
+//             writer.writeAll("  top: ") catch {};
+//             posTypeToCSS(p.top, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//
+//             writer.writeAll("  bottom: ") catch {};
+//             posTypeToCSS(p.bottom, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//         // // Write display and flex properties
+//         // if (ptr.type == .FlexBox or ptr.type == .List or style.display != null) {
+//         //     writer.writeAll("  display: flex;\n") catch {};
+//         //     writer.print("  flex-direction: {s};\n", .{directionToCSS(style.direction)}) catch {};
+//         // }
+//
+//         // Write width and height
+//         if (style.display) |d| {
+//             writer.writeAll("  display: ") catch {};
+//             flexTypeToCSS(d, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         // Write width and height
+//         if (style.width) |hw| {
+//             if (hw.type != .none) {
+//                 writer.writeAll("  width: ") catch {};
+//                 sizingTypeToCSS(hw, writer) catch {};
+//                 writer.writeAll(";\n") catch {};
+//             }
+//         }
+//
+//         if (style.height) |hh| {
+//             if (hh.type != .none) {
+//                 writer.writeAll("  height: ") catch {};
+//                 sizingTypeToCSS(hh, writer) catch {};
+//                 writer.writeAll(";\n") catch {};
+//             }
+//         }
+//
+//         // Border properties
+//         if (style.border_thickness) |hbt| {
+//             if (hbt.top > 0 or
+//                 hbt.right > 0 or
+//                 hbt.bottom > 0 or
+//                 hbt.left > 0)
+//             {
+//                 writer.print("  border-width: {d}px {d}px {d}px {d}px;\n", .{
+//                     hbt.top,
+//                     hbt.right,
+//                     hbt.bottom,
+//                     hbt.left,
+//                 }) catch {};
+//
+//                 writer.writeAll("  border-style: solid;\n") catch {};
+//
+//                 if (style.border_color) |bc| {
+//                     writer.writeAll("  border-color: ") catch {};
+//                     colorToCSS(bc, writer) catch {};
+//                     writer.writeAll(";\n") catch {};
+//                 }
+//             }
+//         }
+//
+//         // Border radius
+//         if (style.border_radius) |hbr| {
+//             if (hbr.top_left > 0 or
+//                 hbr.top_right > 0 or
+//                 hbr.bottom_right > 0 or
+//                 hbr.bottom_left > 0)
+//             {
+//                 writer.print("  border-radius: {d}px {d}px {d}px {d}px;\n", .{
+//                     hbr.top_left,
+//                     hbr.top_right,
+//                     hbr.bottom_right,
+//                     hbr.bottom_left,
+//                 }) catch {};
+//             }
+//         }
+//
+//         // Text color
+//         if (style.text_color) |tc| {
+//             writer.writeAll("  color: ") catch {};
+//             colorToCSS(tc, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         // Padding
+//         if (style.padding) |tp| {
+//             if (tp.top > 0 or
+//                 tp.right > 0 or
+//                 tp.bottom > 0 or
+//                 tp.left > 0)
+//             {
+//                 writer.print("  padding: {d}px {d}px {d}px {d}px;\n", .{
+//                     tp.top,
+//                     tp.right,
+//                     tp.bottom,
+//                     tp.left,
+//                 }) catch {};
+//             }
+//         }
+//
+//         if (style.margin) |m| {
+//             writer.print("  margin: {d}px {d}px {d}px {d}px;\n", .{
+//                 m.top,
+//                 m.right,
+//                 m.bottom,
+//                 m.left,
+//             }) catch {};
+//         }
+//
+//         // Alignment
+//         if (style.child_alignment) |ca| {
+//             writer.print("  justify-content: {s};\n", .{alignmentToCSS(ca.x)}) catch {};
+//             writer.print("  align-items: {s};\n", .{alignmentToCSS(ca.y)}) catch {};
+//         }
+//
+//         if (style.child_gap > 0) {
+//             writer.print("  gap: {d}px;\n", .{style.child_gap}) catch {};
+//         }
+//
+//         // Background color
+//         if (style.background) |b| {
+//             writer.writeAll("  background-color: ") catch {};
+//             colorToCSS(b, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         // Shadow
+//         if (style.shadow.blur > 0 or style.shadow.spread > 0 or
+//             style.shadow.top > 0 or style.shadow.left > 0)
+//         {
+//             writer.writeAll("  box-shadow: ") catch {};
+//             writer.print("{d}px {d}px {d}px {d}px ", .{
+//                 style.shadow.left,
+//                 style.shadow.top,
+//                 style.shadow.blur,
+//                 style.shadow.spread,
+//             }) catch {};
+//
+//             colorToCSS(style.shadow.color, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         // Text-Deco
+//         if (style.text_decoration) |td| {
+//             writer.writeAll("  text-decoration: ") catch {};
+//             textDecoToCSS(td, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         if (style.white_space) |ws| {
+//             writer.writeAll("  white-space: ") catch {};
+//             whiteSpaceToCSS(ws, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//         if (style.flex_wrap) |fw| {
+//             writer.writeAll("  flex-wrap: ") catch {};
+//             flexWrapToCSS(fw, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         if (style.animation) |an| {
+//             writer.writeAll("  animation: ") catch {};
+//             animationToCSS(an, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//             writer.print("  animation-delay: {any}s", .{an.delay}) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         if (style.z_index) |zi| {
+//             writer.print("  z-index: {d}", .{zi}) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         if (style.blur) |bl| {
+//             writer.print("  backdrop-filter: blur({d}px)", .{bl}) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         if (style.overflow) |ovf| {
+//             switch (ovf) {
+//                 .scroll => writer.writeAll("  overflow: scroll;\n") catch {},
+//                 .hidden => writer.writeAll("  overflow: hidden;\n") catch {},
+//             }
+//         }
+//
+//         if (style.overflow_x) |ovf| {
+//             switch (ovf) {
+//                 .scroll => writer.writeAll("  overflow-x: scroll;\n") catch {},
+//                 .hidden => writer.writeAll("  overflow-x: hidden;\n") catch {},
+//             }
+//         }
+//
+//         if (style.overflow_y) |ovf| {
+//             switch (ovf) {
+//                 .scroll => writer.writeAll("  overflow-y: scroll;\n") catch {},
+//                 .hidden => writer.writeAll("  overflow-y: hidden;\n") catch {},
+//             }
+//         }
+//
+//         if (style.list_style) |ls| {
+//             writer.writeAll("  list-style: ") catch {};
+//             listStyleToCSS(ls, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         if (style.outline) |ol| {
+//             writer.writeAll("  outline: ") catch {};
+//             outlineStyleToCSS(ol, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         writer.print("  opacity: {d};\n", .{style.opacity}) catch {};
+//
+//         if (style.transition) |tr| {
+//             writer.writeAll("  transition: ") catch {};
+//             transitionStyleToCSS(tr, writer);
+//             writer.writeAll(";\n") catch {};
+//         }
+//
+//         if (!style.show_scrollbar) {
+//             writer.writeAll("  scrollbar-width: none;\n") catch {};
+//             show_scrollbar = false;
+//         }
+//
+//         // Close CSS block
+//         writer.writeAll("}\n") catch {};
+//
+//         // Null-terminate the string
+//         const len: usize = @intCast(fbs.getPos() catch 0);
+//         css_buffer[len] = 0;
+//         style_style = css_buffer[0..len];
+//         Fabric.createClass(style_style.ptr, style_style.len);
+//     }
+// }
+//
+// pub export fn nextMotion() bool {
+//     if (Fabric.motions.items.len == 0) return false;
+//     return true;
+// }
+//
+// var key_frames_buffer: [4096]u8 = undefined;
+// var key_frame_style: []const u8 = "";
+// pub export fn getKeyFrames(_: *Fabric.Animation.Motion) ?[*]const u8 {
+//     const motion = Fabric.motions.pop() orelse return null;
+//     // Create a default Hover style
+//
+//     // Use a fixed buffer with a fbs to build the CSS string
+//     var fbs = std.io.fixedBufferStream(&key_frames_buffer);
+//     var writer = fbs.writer();
+//
+//     writer.print("@keyframes {s} ", .{motion.tag}) catch {};
+//     writer.writeAll("{\n") catch {};
+//     // FROM
+//     writer.writeAll("  from {\n") catch {};
+//     if (motion.from.type != .none) {
+//         writer.writeAll("    transform: ") catch {};
+//     }
+//     switch (motion.from.type) {
+//         .none => {},
+//         .scale => writer.print("scale({d});\n", .{motion.from.scale_size}) catch {},
+//         .scaleY => writer.print("scaleY({d});\n", .{motion.from.scale_size}) catch {},
+//         .scaleX => writer.print("scaleX({d});\n", .{motion.from.scale_size}) catch {},
+//         .translateX => writer.print("translateX({d}px);\n", .{motion.from.dist}) catch {},
+//         .translateY => writer.print("translateY({d}px);\n", .{motion.from.dist}) catch {},
+//     }
+//     if (motion.from.opacity) |from_op| {
+//         writer.print("    opacity: {d};\n", .{from_op}) catch {};
+//     }
+//     if (motion.from.height) |from_h| {
+//         writer.writeAll("    height: ") catch {};
+//         sizingTypeToCSS(from_h, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//     if (motion.from.width) |from_w| {
+//         writer.writeAll("    width: ") catch {};
+//         sizingTypeToCSS(from_w, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     writer.writeAll("  }\n") catch {};
+//
+//     // TO
+//     writer.writeAll("  to {\n") catch {};
+//     if (motion.from.type != .none) {
+//         writer.writeAll("    transform: ") catch {};
+//     }
+//     switch (motion.to.type) {
+//         .none => {},
+//         .scale => writer.print("scale({d});\n", .{motion.to.scale_size}) catch {},
+//         .scaleY => writer.print("scaleY({d});\n", .{motion.to.scale_size}) catch {},
+//         .scaleX => writer.print("scaleX({d});\n", .{motion.to.scale_size}) catch {},
+//         .translateX => writer.print("translateX({d}px);\n", .{motion.to.dist}) catch {},
+//         .translateY => writer.print("translateY({d}px);\n", .{motion.to.dist}) catch {},
+//     }
+//     if (motion.to.opacity) |to_op| {
+//         writer.print("    opacity: {d};\n", .{to_op}) catch {};
+//     }
+//     if (motion.to.height) |to_h| {
+//         writer.writeAll("    height: ") catch {};
+//         sizingTypeToCSS(to_h, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//     if (motion.to.width) |to_w| {
+//         writer.writeAll("    width ") catch {};
+//         sizingTypeToCSS(to_w, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     writer.writeAll("  }\n") catch {};
+//     writer.writeAll("  }\n") catch {};
+//
+//     const len: usize = @intCast(fbs.getPos() catch 0);
+//     key_frames_buffer[len] = 0;
+//     key_frame_style = key_frames_buffer[0..len];
+//
+//     // Return a pointer to the CSS string
+//     return key_frame_style.ptr;
+// }
+// export fn getKeyFramesLen() usize {
+//     return key_frame_style.len;
 // }
 
-// // Function to retrieve the offset of a specific field
-// export fn getFieldOffset(comptime field_name: []const u8) usize {
-//     return @offsetOf(Hover, field_name);
-// }
-//
-// // Function specifically for direction field
-// export fn getDirectionOffset() usize {
-//     return @offsetOf(Hover, "direction");
-// }
-//
-// // Function to get the size of the Direction enum
-// export fn getDirectionSize() usize {
-//     return @sizeOf(Direction);
-// }
-//
-// // Function to get the actual direction value
-// export fn getDirectionValue() u8 {
-//     const style = Hover{};
-//     return @intFromEnum(style.direction);
-// }
+test "generateCss" {
+    var node = UINode{
+        .style = .{
+            .position = .{ .top = .px(100), .right = .px(600) },
+            .display = .Flex,
+            .direction = .row,
+            .child_gap = 0,
+            .font_family = "",
+            .opacity = 1,
+            .background = .{ .a = 255, .r = 0, .g = 0, .b = 0 },
+            .text_decoration = .underline,
+            .white_space = .pre_line,
+            .flex_wrap = .wrap,
+            .border = .{ .thickness = .all(1), .color = .hex("#DFDFDF"), .radius = .all(8) },
+            .cursor = .pointer,
+            .padding = .horizontal(16),
+        },
+    };
+
+    _ = getStyle(&node) orelse return error.StyleNull;
+    const len = getStyleLen();
+    std.debug.print("{s}\n", .{css_buffer[0..len]});
+}

@@ -32,7 +32,12 @@ const HeaderSize = enum(u32) {
     Small = 1,
 };
 
-pub inline fn Icon(icon_name: []const u8, style: Style) void {
+const IconOptions = struct {
+    icon_name: []const u8,
+    style: ?*const Style = null,
+};
+
+pub inline fn Icon(options: IconOptions) void {
     const local = struct {
         fn CloseElement() void {
             _ = Fabric.current_ctx.close();
@@ -45,9 +50,9 @@ pub inline fn Icon(icon_name: []const u8, style: Style) void {
     };
 
     const elem_decl = ElementDecl{
-        .href = icon_name,
+        .href = options.icon_name,
         .elem_type = .Icon,
-        .style = style,
+        .style = options.style,
         .dynamic = .pure,
     };
 
@@ -183,34 +188,27 @@ pub inline fn Draggable(element: *Element, style: Style) fn (void) void {
     return local.CloseElement;
 }
 
-pub inline fn AllocText(fmt: []const u8, args: anytype, style: Style) void {
+const AllocTextOptions = struct {
+    style: ?*const Style = null,
+};
+
+pub inline fn AllocText(fmt: []const u8, args: anytype, options: AllocTextOptions) void {
     const text = std.fmt.allocPrint(Fabric.allocator_global, fmt, args) catch |err| {
         println("Error Could not format argument alloc Error details: {any}\n", .{err});
         return;
     };
-    const local = struct {
-        fn CloseElement() void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            // CloseElement();
-            return;
-        }
-    };
-
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = options.style,
         .dynamic = .pure,
         .elem_type = .AllocText,
         .text = text,
     };
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
+    _ = LifeCycle.open(elem_decl) orelse {
+        Fabric.println("Could not open AllocText Element\n", .{});
+        unreachable;
     };
-    _ = local.ConfigureElement(elem_decl);
-    _ = local.CloseElement();
+    _ = LifeCycle.configure(elem_decl);
+    _ = LifeCycle.close({});
     return;
 }
 
@@ -362,7 +360,11 @@ pub inline fn DialogBtn(dialog_type: DialogType, func: *const fn () void, style:
     return local.CloseElement;
 }
 
-pub inline fn CtxButton(func: anytype, args: anytype, style: Style) fn (void) void {
+const CtxButtonOptions = struct {
+    style: ?*const Style = null,
+};
+
+pub inline fn CtxButton(func: anytype, args: anytype, options: CtxButtonOptions) fn (void) void {
     const local = struct {
         fn CloseElement(_: void) void {
             _ = Fabric.current_ctx.close();
@@ -375,7 +377,7 @@ pub inline fn CtxButton(func: anytype, args: anytype, style: Style) fn (void) vo
     };
 
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = options.style,
         .dynamic = .pure,
         .elem_type = .CtxButton,
     };
@@ -490,49 +492,35 @@ pub inline fn SelectItem(style: Style) fn (void) void {
     _ = local.ConfigureElement(elem_decl);
     return local.CloseElement;
 }
+const ListOptions = struct {
+    style: ?*const Style = null,
+};
 
-pub inline fn List(style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
+pub inline fn List(options: ListOptions) fn (void) void {
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = options.style,
         .dynamic = .pure,
         .elem_type = .List,
     };
-    _ = Fabric.current_ctx.open(elem_decl) catch {};
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
+    _ = LifeCycle.open(elem_decl);
+    _ = LifeCycle.configure(elem_decl);
+    return LifeCycle.close;
 }
 
-pub inline fn ListItem(style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
+const ListItemOptions = struct {
+    style: ?*const Style = null,
+};
 
+pub inline fn ListItem(options: ListItemOptions) fn (void) void {
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = options.style,
         .dynamic = .pure,
         .elem_type = .ListItem,
     };
-    _ = Fabric.current_ctx.open(elem_decl) catch {};
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
+
+    _ = LifeCycle.open(elem_decl);
+    LifeCycle.configure(elem_decl);
+    return LifeCycle.close;
 }
 
 pub inline fn Circle(style: Style) fn (void) void {

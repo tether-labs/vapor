@@ -113,9 +113,10 @@ fn transformToCSS(transform: Transform, writer: anytype) !void {
 // Export this function to be called from JavaScript to get the CSS representation
 var hover_style: []const u8 = "";
 var global_len: usize = 0;
-pub export fn getHoverStyle(node_ptr: ?*UINode) [*]const u8 {
+pub export fn getHoverStyle(node_ptr: ?*UINode) ?[*]const u8 {
     if (node_ptr == null) return hover_style.ptr;
-    const hover = node_ptr.?.style.hover.?;
+    const style = node_ptr.?.style orelse return null;
+    const hover = style.hover.?;
     // Create a default Hover style
     // const hover = Hover{};
 
@@ -314,7 +315,7 @@ export fn getHoverLen() usize {
 
 export fn getHoverEctClasses(node_ptr: ?*UINode) void {
     if (node_ptr == null) return;
-    const node_style = node_ptr.?.style;
+    const node_style = node_ptr.?.style orelse return;
     const ptr = node_ptr.?;
     // Create a default Hover style
 

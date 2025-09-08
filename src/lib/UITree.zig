@@ -1,11 +1,8 @@
 const std = @import("std");
 const Fabric = @import("Fabric.zig");
-const print = std.debug.print;
-const wrapText = @import("Fabric.zig").wrapText;
-const stdout = @import("Fabric.zig").stdout;
-const helpers = @import("helpers.zig");
-const println = @import("Fabric.zig").println;
-const createElement = @import("Fabric.zig").createElement;
+const println = std.debug.print;
+// const wrapText = @import("Fabric.zig").wrapText;
+// const println = @import("Fabric.zig").println;
 const KeyGenerator = @import("Key.zig").KeyGenerator;
 
 const types = @import("types.zig");
@@ -32,9 +29,9 @@ root_stack_ptr: ?*Item = null,
 memory_pool: std.heap.MemoryPool(Item),
 render_cmd_memory_pool: std.heap.MemoryPool(RenderCommand),
 tree_memory_pool: std.heap.MemoryPool(CommandsTree),
-text_elements: std.ArrayList(*UINode),
-percents: std.ArrayList(*UINode),
-shrinkable: std.ArrayList(*UINode),
+// text_elements: std.ArrayList(*UINode),
+// percents: std.ArrayList(*UINode),
+// shrinkable: std.ArrayList(*UINode),
 current_padding_top: f32 = 0,
 current_padding_left: f32 = 0,
 current_offset: f32 = 0,
@@ -52,20 +49,20 @@ pub const UINode = struct {
     dirty: bool = false,
     parent: ?*UINode = null,
     type: EType = EType.FlexBox,
-    style: Style = undefined,
+    style: ?*const Style = null,
     children: std.ArrayList(*UINode) = undefined,
-    calculated_x: f32 = 0,
-    calculated_y: f32 = 0,
-    calculated_width: f32 = 0,
-    calculated_height: f32 = 0,
-    min_width: f32 = 0,
-    min_height: f32 = 0,
+    // calculated_x: f32 = 0,
+    // calculated_y: f32 = 0,
+    // calculated_width: f32 = 0,
+    // calculated_height: f32 = 0,
+    // min_width: f32 = 0,
+    // min_height: f32 = 0,
     text: []const u8 = "",
     uuid: []const u8 = "",
     href: []const u8 = "",
     show: bool = true,
     hooks: HooksIds = .{},
-    input_params: ?InputParams = null,
+    input_params: ?*const InputParams = null,
     event_type: ?types.EventType = null,
     dynamic: types.StateType = .pure,
     aria_label: ?[]const u8 = null,
@@ -97,10 +94,10 @@ pub fn initLayout(ui_ctx: *UIContext, allocator: *std.mem.Allocator, width: f32,
         .memory_pool = std.heap.MemoryPool(Item).init(allocator.*),
         .render_cmd_memory_pool = std.heap.MemoryPool(RenderCommand).init(allocator.*),
         .tree_memory_pool = std.heap.MemoryPool(CommandsTree).init(allocator.*),
-        .text_elements = std.ArrayList(*UINode).init(allocator.*),
-        .percents = std.ArrayList(*UINode).init(allocator.*),
+        // .text_elements = std.ArrayList(*UINode).init(allocator.*),
+        // .percents = std.ArrayList(*UINode).init(allocator.*),
         .uuids = std.StringHashMap(*UINode).init(allocator.*),
-        .shrinkable = std.ArrayList(*UINode).init(allocator.*),
+        // .shrinkable = std.ArrayList(*UINode).init(allocator.*),
         .sw = width,
         .sh = height,
     };
@@ -108,18 +105,18 @@ pub fn initLayout(ui_ctx: *UIContext, allocator: *std.mem.Allocator, width: f32,
     // Either change the init function to return a pointer directly
     const node_ptr = try UINode.init(null, EType.Block, allocator);
     node_ptr.uuid = "fabric_root_id";
-    node_ptr.min_width = width;
-    node_ptr.min_height = height;
-    node_ptr.calculated_width = width;
-    node_ptr.calculated_height = height;
+    // node_ptr.min_width = width;
+    // node_ptr.min_height = height;
+    // node_ptr.calculated_width = width;
+    // node_ptr.calculated_height = height;
     node_ptr.dirty = false;
     ui_ctx.root = node_ptr;
-    ui_ctx.root.?.style.width.type = .percent;
-    ui_ctx.root.?.style.height.type = .percent;
-    ui_ctx.root.?.style.width.size.minmax.min = 1;
-    ui_ctx.root.?.style.height.size.minmax.min = 1;
-    ui_ctx.root.?.style.width.size.minmax.max = 1;
-    ui_ctx.root.?.style.height.size.minmax.max = 1;
+    // ui_ctx.root.?.style.?.width.type = .percent;
+    // ui_ctx.root.?.style.?.height.type = .percent;
+    // ui_ctx.root.?.style.?.width.size.minmax.min = 1;
+    // ui_ctx.root.?.style.?.height.size.minmax.min = 1;
+    // ui_ctx.root.?.style.?.width.size.minmax.max = 1;
+    // ui_ctx.root.?.style.?.height.size.minmax.max = 1;
 
     const item: *Item = try ui_ctx.allocator.create(Item);
     item.* = .{
@@ -262,21 +259,25 @@ pub fn open(ui_ctx: *UIContext, elem_decl: ElemDecl) !*UINode {
     try current_open.addChild(node);
     try ui_ctx.stackRegister(node);
 
-    node.uuid = elem_decl.style.id orelse "";
+    if (elem_decl.style) |style| {
+        node.uuid = style.id orelse "";
+    } else {
+        node.uuid = "";
+    }
     setUUID(current_open, node);
-   return node;
+    return node;
 }
 
 fn reset(_: *UIContext, ui_node: *UINode) void {
     const style = ui_node.style;
-    ui_node.calculated_width = style.width.size.minmax.max;
-    ui_node.calculated_height = style.height.size.minmax.max;
-    ui_node.min_width = style.width.size.minmax.min;
-    ui_node.min_height = style.height.size.minmax.min;
-    if (style.position != null) {
-        ui_node.calculated_x = style.position.?.x;
-        ui_node.calculated_y = style.position.?.y;
-    }
+    // ui_node.calculated_width = style.width.size.minmax.max;
+    // ui_node.calculated_height = style.height.size.minmax.max;
+    // ui_node.min_width = style.width.size.minmax.min;
+    // ui_node.min_height = style.height.size.minmax.min;
+    // if (style.position != null) {
+    //     ui_node.calculated_x = style.position.?.x;
+    //     ui_node.calculated_y = style.position.?.y;
+    // }
     ui_node.style = style;
     ui_node.type = ui_node.type;
     ui_node.style = style;
@@ -286,8 +287,8 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
     const stack = ui_ctx.stack orelse unreachable;
     const current_open = stack.ptr orelse unreachable;
     const style = elem_decl.style;
-    if (style.id != null) {
-        current_open.uuid = style.id.?;
+    if (style != null and style.?.id != null) {
+        current_open.uuid = style.?.id.?;
     }
 
     if (elem_decl.elem_type == .Svg) {
@@ -299,20 +300,23 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
         current_open.text = elem_decl.text;
     }
 
-    current_open.calculated_width = style.width.size.minmax.max;
-    current_open.calculated_height = style.height.size.minmax.max;
-    current_open.min_width = style.width.size.minmax.min;
-    current_open.min_height = style.height.size.minmax.min;
-    if (style.position != null) {
-        current_open.calculated_x = style.position.?.x;
-        current_open.calculated_y = style.position.?.y;
-    }
+    // current_open.calculated_width = style.width.size.minmax.max;
+    // current_open.calculated_height = style.height.size.minmax.max;
+    // current_open.min_width = style.width.size.minmax.min;
+    // current_open.min_height = style.height.size.minmax.min;
+    // if (style.position != null) {
+    //     current_open.calculated_x = style.position.?.x;
+    //     current_open.calculated_y = style.position.?.y;
+    // }
     current_open.href = elem_decl.href;
 
     current_open.type = elem_decl.elem_type;
     // We need to think about this, ie do we want to have dfeaults set so they are always used or for users to explictily pass a default to use
-    current_open.style = Style.override(style);
-    current_open.hooks = elem_decl.hooks;
+    // current_open.style = Style.override(style);
+    current_open.style = style;
+    if (current_open.type == .Hooks) {
+        current_open.hooks = elem_decl.hooks;
+    }
     current_open.dynamic = elem_decl.dynamic;
     current_open.aria_label = elem_decl.aria_label;
 
@@ -405,23 +409,23 @@ pub fn close(ui_ctx: *UIContext) void {
     ui_ctx.stackPop();
 }
 
-pub fn wrapTextElements(ui_ctx: *UIContext) void {
-    for (ui_ctx.text_elements.items) |text| {
-        const line_height = text.style.line_height;
-        const letter_spacing = text.style.letter_spacing;
-        const font_size = text.style.font_size;
-        const width = text.calculated_width;
-        const elem_text = text.text;
-        var text_buffer: [4096]u8 = undefined;
-        @memcpy(text_buffer[0..elem_text.len], elem_text);
-        const text_height = wrapText(elem_text, width, font_size, letter_spacing, line_height, &text_buffer);
-        text.style.height.size.minmax.min = text_height;
-        text.style.height.size.minmax.max = text_height;
-        text.calculated_height = text_height;
-        text.min_height = text_height;
-        // @memcpy(text.new_text[0..elem_text.len], text_buffer[0..elem_text.len]);
-    }
-}
+// pub fn wrapTextElements(ui_ctx: *UIContext) void {
+//     for (ui_ctx.text_elements.items) |text| {
+//         const line_height = text.style.line_height;
+//         const letter_spacing = text.style.letter_spacing;
+//         const font_size = text.style.font_size;
+//         const width = text.calculated_width;
+//         const elem_text = text.text;
+//         var text_buffer: [4096]u8 = undefined;
+//         @memcpy(text_buffer[0..elem_text.len], elem_text);
+//         const text_height = wrapText(elem_text, width, font_size, letter_spacing, line_height, &text_buffer);
+//         text.style.height.size.minmax.min = text_height;
+//         text.style.height.size.minmax.max = text_height;
+//         text.calculated_height = text_height;
+//         text.min_height = text_height;
+//         // @memcpy(text.new_text[0..elem_text.len], text_buffer[0..elem_text.len]);
+//     }
+// }
 
 pub fn fitHeights(ui_ctx: *UIContext) void {
     while (ui_ctx.stack) |stack| {
@@ -487,38 +491,32 @@ pub fn endLayoutWidths(ui_ctx: *UIContext) void {
 
 pub fn endLayout(ui_ctx: *UIContext) void {
     const root = ui_ctx.root.?;
-    var width: f32 = 0;
-    var height: f32 = 0;
-    for (root.children.items) |child| {
-        if (root.style.direction == .row) {
-            width += child.calculated_width;
-            height = @max(child.calculated_height, height);
-        } else {
-            height += child.calculated_height;
-            width = @max(child.calculated_width, width);
-        }
-    }
-    root.calculated_width = width;
-    root.calculated_height = height;
+    // var width: f32 = 0;
+    // var height: f32 = 0;
+    // for (root.children.items) |child| {
+    //     if (root.style.direction == .row) {
+    //         width += child.calculated_width;
+    //         height = @max(child.calculated_height, height);
+    //     } else {
+    //         height += child.calculated_height;
+    //         width = @max(child.calculated_width, width);
+    //     }
+    // }
+    // root.calculated_width = width;
+    // root.calculated_height = height;
 
     const render_cmd: *RenderCommand = ui_ctx.allocator.create(RenderCommand) catch unreachable;
     render_cmd.* = .{
         .elem_type = root.type,
-        .bounding_box = .{
-            .x = root.calculated_x,
-            .y = root.calculated_y,
-            .width = root.calculated_width,
-            .height = root.calculated_height,
-        },
         .href = "",
         .style = root.style,
         .hooks = root.hooks,
         .node_ptr = root,
         .id = root.uuid,
     };
-    render_cmd.style.direction = .column;
-    render_cmd.style.width.type = .percent;
-    render_cmd.style.height.type = .percent;
+    // render_cmd.style.?.direction = .column;
+    // render_cmd.style.?.width.type = .percent;
+    // render_cmd.style.?.height.type = .percent;
     root.dirty = false;
     render_cmd.show = false;
     // render_cmd.style.height.size.percent.min = 1;
@@ -561,124 +559,118 @@ pub fn createStack(ui_ctx: *UIContext, parent: *UINode) void {
 // This calcualtes the positions;
 var depth: usize = 0;
 pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent: *CommandsTree) void {
-    var local_offset: f32 = ui_ctx.current_offset;
+    // var local_offset: f32 = ui_ctx.current_offset;
     if (parent_op) |parent| {
         if (parent.children.items.len > 0) {
             ui_tree_parent.children = std.ArrayList(*CommandsTree).init(ui_ctx.allocator.*);
-            var padding_left: f32 = 0;
-            var padding_right: f32 = 0;
-            var padding_top: f32 = 0;
-            var padding_bottom: f32 = 0;
-
-            if (parent.style.padding) |padding| {
-                padding_left = @floatFromInt(padding.left);
-                padding_right = @floatFromInt(padding.right);
-                padding_top = @floatFromInt(padding.top);
-                padding_bottom = @floatFromInt(padding.bottom);
-            }
-
-            var center_x_offset: f32 = 0.0;
-            var center_y_offset: f32 = 0.0;
-            const effective_width: f32 = parent.calculated_width - padding_left - padding_right;
-            const effective_height: f32 = parent.calculated_height - padding_bottom - padding_top;
-            var accumalated_child_width: f32 = 0.0;
-            var accumalated_child_height: f32 = 0.0;
-            for (parent.children.items) |child| {
-                var margin_left: f32 = 0;
-                var margin_right: f32 = 0;
-                var margin_top: f32 = 0;
-                var margin_bottom: f32 = 0;
-
-                if (parent.style.margin) |margin| {
-                    margin_left = @floatFromInt(margin.left);
-                    margin_right = @floatFromInt(margin.right);
-                    margin_top = @floatFromInt(margin.top);
-                    margin_bottom = @floatFromInt(margin.bottom);
-                }
-
-                accumalated_child_width += child.calculated_width + margin_left + margin_right;
-                accumalated_child_height += child.calculated_height + margin_top + margin_bottom;
-            }
-            if (parent.style.child_alignment.x == .center or parent.style.child_alignment.y == .center) {
-                if (parent.style.child_alignment.x == .center) {
-                    if (parent.style.direction == .row) {
-                        center_x_offset = (effective_width - accumalated_child_width) / 2;
-                    }
-                }
-                if (parent.style.child_alignment.y == .center) {
-                    center_y_offset = (effective_height - accumalated_child_height) / 2;
-                }
-            } else if (parent.style.child_alignment.x == .end) {
-                for (parent.children.items) |child| {
-                    accumalated_child_width += child.calculated_width;
-                }
-                center_x_offset = effective_width - accumalated_child_width;
-            }
+            // var padding_left: f32 = 0;
+            // var padding_right: f32 = 0;
+            // var padding_top: f32 = 0;
+            // var padding_bottom: f32 = 0;
+            //
+            // if (parent.style.padding) |padding| {
+            //     padding_left = @floatFromInt(padding.left);
+            //     padding_right = @floatFromInt(padding.right);
+            //     padding_top = @floatFromInt(padding.top);
+            //     padding_bottom = @floatFromInt(padding.bottom);
+            // }
+            //
+            // var center_x_offset: f32 = 0.0;
+            // var center_y_offset: f32 = 0.0;
+            // const effective_width: f32 = parent.calculated_width - padding_left - padding_right;
+            // const effective_height: f32 = parent.calculated_height - padding_bottom - padding_top;
+            // var accumalated_child_width: f32 = 0.0;
+            // var accumalated_child_height: f32 = 0.0;
+            // for (parent.children.items) |child| {
+            //     var margin_left: f32 = 0;
+            //     var margin_right: f32 = 0;
+            //     var margin_top: f32 = 0;
+            //     var margin_bottom: f32 = 0;
+            //
+            //     if (parent.style.margin) |margin| {
+            //         margin_left = @floatFromInt(margin.left);
+            //         margin_right = @floatFromInt(margin.right);
+            //         margin_top = @floatFromInt(margin.top);
+            //         margin_bottom = @floatFromInt(margin.bottom);
+            //     }
+            //
+            //     accumalated_child_width += child.calculated_width + margin_left + margin_right;
+            //     accumalated_child_height += child.calculated_height + margin_top + margin_bottom;
+            // }
+            // if (parent.style.child_alignment.x == .center or parent.style.child_alignment.y == .center) {
+            //     if (parent.style.child_alignment.x == .center) {
+            //         if (parent.style.direction == .row) {
+            //             center_x_offset = (effective_width - accumalated_child_width) / 2;
+            //         }
+            //     }
+            //     if (parent.style.child_alignment.y == .center) {
+            //         center_y_offset = (effective_height - accumalated_child_height) / 2;
+            //     }
+            // } else if (parent.style.child_alignment.x == .end) {
+            //     for (parent.children.items) |child| {
+            //         accumalated_child_width += child.calculated_width;
+            //     }
+            //     center_x_offset = effective_width - accumalated_child_width;
+            // }
 
             depth += 1;
             // const nbr_children: f32 = @floatFromInt(parent.children.items.len);
-            for (parent.children.items, 0..) |child, i| {
-                if (parent.style.child_alignment.y == .bottom) {
-                    center_y_offset = effective_height - child.calculated_height;
-                }
-
-                if (parent.style.direction == .column) {
-                    center_x_offset = (effective_width - child.calculated_width) / 2;
-                }
-
-                if (parent.style.direction == .row) {
-                    center_y_offset = (effective_height - child.calculated_height) / 2;
-                    if (parent.style.child_alignment.x == .between) {
-                        // const first_elem_width = parent.children.items[0].calculated_width;
-                        // const last_elem_width = parent.children.items[parent.children.items.len - 1].calculated_width;
-                        // const space = effective_width - first_elem_width - last_elem_width;
-                        const gap = (effective_width - accumalated_child_width) / @as(f32, @floatFromInt(parent.children.items.len - 1));
-                        center_x_offset = gap * @as(f32, @floatFromInt(i));
-                    }
-                }
-
-                if (parent.style.child_alignment.x == .start) {
-                    center_x_offset = 0;
-                }
-                if (parent.style.child_alignment.y == .top) {
-                    center_y_offset = 0;
-                }
-
-                var margin_left: f32 = 0;
-                var margin_right: f32 = 0;
-                var margin_top: f32 = 0;
-                var margin_bottom: f32 = 0;
-
-                if (parent.style.margin) |margin| {
-                    margin_left = @floatFromInt(margin.left);
-                    margin_right = @floatFromInt(margin.right);
-                    margin_top = @floatFromInt(margin.top);
-                    margin_bottom = @floatFromInt(margin.bottom);
-                }
-
-                child.calculated_x += padding_left + parent.calculated_x + center_x_offset + margin_left;
-                child.calculated_y += padding_top + parent.calculated_y + center_y_offset + margin_top;
-
-                if (parent.style.direction == .row) {
-                    child.calculated_x += local_offset;
-                } else {
-                    child.calculated_y += local_offset;
-                }
-
+            for (parent.children.items) |child| {
+                // if (parent.style.child_alignment.y == .bottom) {
+                //     center_y_offset = effective_height - child.calculated_height;
+                // }
+                //
+                // if (parent.style.direction == .column) {
+                //     center_x_offset = (effective_width - child.calculated_width) / 2;
+                // }
+                //
+                // if (parent.style.direction == .row) {
+                //     center_y_offset = (effective_height - child.calculated_height) / 2;
+                //     if (parent.style.child_alignment.x == .between) {
+                //         // const first_elem_width = parent.children.items[0].calculated_width;
+                //         // const last_elem_width = parent.children.items[parent.children.items.len - 1].calculated_width;
+                //         // const space = effective_width - first_elem_width - last_elem_width;
+                //         const gap = (effective_width - accumalated_child_width) / @as(f32, @floatFromInt(parent.children.items.len - 1));
+                //         center_x_offset = gap * @as(f32, @floatFromInt(i));
+                //     }
+                // }
+                //
+                // if (parent.style.child_alignment.x == .start) {
+                //     center_x_offset = 0;
+                // }
+                // if (parent.style.child_alignment.y == .top) {
+                //     center_y_offset = 0;
+                // }
+                //
+                // var margin_left: f32 = 0;
+                // var margin_right: f32 = 0;
+                // var margin_top: f32 = 0;
+                // var margin_bottom: f32 = 0;
+                //
+                // if (parent.style.margin) |margin| {
+                //     margin_left = @floatFromInt(margin.left);
+                //     margin_right = @floatFromInt(margin.right);
+                //     margin_top = @floatFromInt(margin.top);
+                //     margin_bottom = @floatFromInt(margin.bottom);
+                // }
+                //
+                // child.calculated_x += padding_left + parent.calculated_x + center_x_offset + margin_left;
+                // child.calculated_y += padding_top + parent.calculated_y + center_y_offset + margin_top;
+                //
+                // if (parent.style.direction == .row) {
+                //     child.calculated_x += local_offset;
+                // } else {
+                //     child.calculated_y += local_offset;
+                // }
+                //
                 const render_cmd: *RenderCommand = ui_ctx.allocator.create(RenderCommand) catch unreachable;
-                if (child.style.position != null and child.style.position.?.type == .absolute) {
-                    child.calculated_x = child.style.position.?.x;
-                    child.calculated_y = child.style.position.?.y;
-                }
+                // if (child.style.position != null and child.style.position.?.type == .absolute) {
+                //     child.calculated_x = child.style.position.?.x;
+                //     child.calculated_y = child.style.position.?.y;
+                // }
 
                 render_cmd.* = .{
                     .elem_type = child.type,
-                    .bounding_box = .{
-                        .x = child.calculated_x,
-                        .y = child.calculated_y,
-                        .width = child.calculated_width,
-                        .height = child.calculated_height,
-                    },
                     .text = child.text,
                     .href = child.href,
                     .style = child.style,
@@ -688,16 +680,17 @@ pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent:
                     .node_ptr = child,
                 };
 
-                if (child.style.hover) |_| {
-                    render_cmd.hover = true;
+                if (child.style) |style| {
+                    if (style.hover) |_| {
+                        render_cmd.hover = true;
+                    }
+                    if (style.focus) |_| {
+                        render_cmd.focus = true;
+                    }
+                    if (style.focus_within) |_| {
+                        render_cmd.focus_within = true;
+                    }
                 }
-                if (child.style.focus) |_| {
-                    render_cmd.focus = true;
-                }
-                if (child.style.focus_within) |_| {
-                    render_cmd.focus_within = true;
-                }
-
                 const tree: *CommandsTree = ui_ctx.allocator.create(CommandsTree) catch unreachable;
                 tree.* = .{
                     .node = render_cmd,
@@ -707,19 +700,19 @@ pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent:
                 //     println("Show command {any}\n", .{child.type});
                 ui_tree_parent.children.append(tree) catch unreachable;
                 if (child.dynamic == .animation) {
-                    const class_name = child.style.child_styles.?[0].style_id;
+                    const class_name = child.style.?.child_styles.?[0].style_id;
                     Fabric.addToClassesList(child.uuid, class_name);
                 }
                 // }
 
-                if (child.style.position != null and child.style.position.?.type == .absolute) {
-                    const child_gap: f32 = @floatFromInt(parent.style.child_gap);
-                    if (parent.style.direction == .row) {
-                        local_offset += child.calculated_width + child_gap + margin_right;
-                    } else {
-                        local_offset += child.calculated_height + child_gap + margin_bottom;
-                    }
-                }
+                // if (child.style.position != null and child.style.position.?.type == .absolute) {
+                //     const child_gap: f32 = @floatFromInt(parent.style.child_gap);
+                //     if (parent.style.direction == .row) {
+                //         local_offset += child.calculated_width + child_gap + margin_right;
+                //     } else {
+                //         local_offset += child.calculated_height + child_gap + margin_bottom;
+                //     }
+                // }
             }
             // ui_ctx.current_offset = local_offset;
             // if (parent.show) {
@@ -845,12 +838,6 @@ pub fn traverseCmdsChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_par
                 const render_cmd = ui_tree_parent.children.items[i].node;
 
                 render_cmd.show = child.show;
-                render_cmd.bounding_box = .{
-                    .x = child.calculated_x,
-                    .y = child.calculated_y,
-                    .width = child.calculated_width,
-                    .height = child.calculated_height,
-                };
                 // const render_cmd: *RenderCommand = ui_ctx.render_cmd_memory_pool.create() catch unreachable;
                 // render_cmd.* = .{
                 //     .elem_type = child.type,
@@ -895,12 +882,6 @@ pub fn traverseCmdsChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_par
         } else {
             const render_cmd = ui_tree_parent.node;
             render_cmd.show = parent.show;
-            render_cmd.bounding_box = .{
-                .x = parent.calculated_x,
-                .y = parent.calculated_y,
-                .width = parent.calculated_width,
-                .height = parent.calculated_height,
-            };
         }
     }
 }
@@ -918,8 +899,8 @@ pub fn resetAll(ui_ctx: *UIContext, parent_op: ?*UINode) void {
         if (parent.parent == null) {
             // is root
             ui_ctx.reset(parent);
-            parent.calculated_width = ui_ctx.sw;
-            parent.calculated_height = ui_ctx.sh;
+            // parent.calculated_width = ui_ctx.sw;
+            // parent.calculated_height = ui_ctx.sh;
         } else {
             ui_ctx.reset(parent);
         }

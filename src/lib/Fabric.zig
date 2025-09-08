@@ -151,7 +151,11 @@ pub extern fn getAttributeWasmNumber(ptr: [*]const u8, len: u32, attribute_ptr: 
 extern fn getWindowInformationWasm() [*:0]u8;
 
 pub fn getWindowPath() []const u8 {
-    return std.mem.span(getWindowInformationWasm());
+    if (isWasi) {
+        return std.mem.span(getWindowInformationWasm());
+    } else {
+        return "";
+    }
 }
 
 pub fn setLocalStorageString(key: []const u8, value: []const u8) void {
@@ -293,11 +297,10 @@ pub var ctx_registry: std.StringHashMap(*Node) = undefined;
 pub var time_out_ctx_registry: std.AutoHashMap(usize, *Node) = undefined;
 pub var callback_registry: std.StringHashMap(*Node) = undefined;
 pub var fetch_registry: std.AutoHashMap(u32, *Kit.FetchNode) = undefined;
-pub var signal_registry: std.AutoHashMap(u32, *const fn (*Signal(type)) void) = undefined;
 pub var events_callbacks: std.AutoHashMap(u32, *const fn (*Event) void) = undefined;
 pub var events_inst_callbacks: std.AutoHashMap(u32, *EvtInstNode) = undefined;
 pub var hooks_inst_callbacks: std.AutoHashMap(u32, *HookInstNode) = undefined;
-pub var mounted_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
+pub var mounted_funcs: std.StringHashMap(*const fn () void) = undefined;
 pub var mounted_ctx_funcs: std.AutoHashMap(u32, *Node) = undefined;
 pub var created_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var updated_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
@@ -354,7 +357,7 @@ pub fn init(target: *Fabric, config: FabricConfig) void {
     events_callbacks = std.AutoHashMap(u32, *const fn (*Event) void).init(config.allocator.*);
     events_inst_callbacks = std.AutoHashMap(u32, *EvtInstNode).init(config.allocator.*);
     hooks_inst_callbacks = std.AutoHashMap(u32, *HookInstNode).init(config.allocator.*);
-    mounted_funcs = std.AutoHashMap(u32, *const fn () void).init(config.allocator.*);
+    mounted_funcs = std.StringHashMap(*const fn () void).init(config.allocator.*);
     mounted_ctx_funcs = std.AutoHashMap(u32, *Node).init(config.allocator.*);
     destroy_funcs = std.AutoHashMap(u32, *const fn () void).init(config.allocator.*);
     updated_funcs = std.AutoHashMap(u32, *const fn () void).init(config.allocator.*);
@@ -521,8 +524,10 @@ extern fn requestRerenderWasm() void;
 /// since Fabric is built with zig and wasm, checking all props of 10000s of nodes and ui components is cheap
 /// feel free to abuse force, its essentially a global signal
 pub fn cycle() void {
-    Fabric.global_rerender = true;
-    requestRerenderWasm();
+    if (isWasi) {
+        Fabric.global_rerender = true;
+        requestRerenderWasm();
+    }
 }
 
 /// Force rerender forces the entire dom tree to check props of all dynamic and pure components and rerender the ui
@@ -531,7 +536,7 @@ pub fn cycle() void {
 pub fn cycleGrain() void {
     Fabric.grain_rerender = true;
     Fabric.println("Grain rerender", .{});
-    // requestRerenderWasm();
+    requestRerenderWasm();
 }
 
 /// Force rerender forces the entire dom tree to check props and rerender the entire ui
@@ -574,7 +579,7 @@ pub export fn rerenderLayout() void {
     // growing element breadth first insert when inserting nodes into the tree and onto the stack
     current_ctx.resetAllUiNode();
     current_ctx.createStack(current_ctx.root.?);
-    current_ctx.traverseCmds();
+    // current_ctx.traverseCmds();
 }
 
 const LayoutFn = *const fn (*const fn () void) void;
@@ -599,7 +604,7 @@ const NestedCall = struct {
 var render_page: *const fn () void = undefined;
 var route_segments: [][]const u8 = undefined;
 fn callNestedLayouts() void {
-    const local_allocator = std.heap.wasm_allocator;
+    const local_allocator = std.heap.page_allocator;
     if (route_segments.len == 0) {
         render_page();
         return;
@@ -631,6 +636,7 @@ var clean_up_ctx: *UIContext = undefined;
 pub fn renderCycle(route: []const u8) void {
     key_depth_map.clearRetainingCapacity();
     Fabric.registry.clearRetainingCapacity();
+    // Fabric.mounted_funcs.clearRetainingCapacity();
 
     var ctx_itr = ctx_registry.iterator();
     while (ctx_itr.next()) |entry| {
@@ -684,22 +690,8 @@ pub fn renderCycle(route: []const u8) void {
 
     current_path = "";
     callNestedLayouts();
-    // var layout_page: ?*const fn (*const fn () void) void = null;
-    // while (layout_itr.next()) |entry| {
-    //     const path = entry.key_ptr.*;
-    //     if (std.ascii.startsWithIgnoreCase(route, path)) {
-    //         layout_page = entry.value_ptr.*;
-    //     }
-    // }
-    //
-    // // Render the page with the new context
-    // if (layout_page) |lp| {
-    //     @call(.auto, lp, .{render_page});
-    // } else {
-    //     @call(.auto, render_page, .{});
-    // }
     endPage(new_ctx);
-
+    // iterateChildren(new_ctx.root.?);
     // Reconcile between old and new
     Reconciler.reconcile(old_ctx, new_ctx, route);
 
@@ -717,7 +709,7 @@ pub fn renderCycle(route: []const u8) void {
 }
 
 fn renderErrorPage(route: []const u8) void {
-    const local_allocator = std.heap.wasm_allocator;
+    const local_allocator = std.heap.page_allocator;
     // Get the old context for current route
     const error_specific_route = std.fmt.allocPrint(local_allocator, "{s}/error", .{route}) catch return;
     defer local_allocator.free(error_specific_route);
@@ -772,7 +764,7 @@ export fn cleanUp() void {
     clean_up_ctx = undefined;
 }
 
-pub fn createPage(style: Style, path: []const u8, page: fn () void, page_deinit: ?fn () void) !void {
+pub fn createPage(style: ?*const Style, path: []const u8, page: fn () void, page_deinit: ?fn () void) !void {
     const path_ctx: *UIContext = try allocator_global.create(UIContext);
     // Initial render
     UIContext.initLayout(path_ctx, &allocator_global, browser_width, browser_height) catch |err| {
@@ -804,11 +796,11 @@ pub fn endLayout(_: *Fabric) void {
     // then close function does breadth first post order
     // since we are going back up the tree
     // growing element breadth first insert when inserting nodes into the tree and onto the stack
-    current_ctx.growElementsWidths();
-    current_ctx.fitHeights();
-    current_ctx.growElementsHeights();
+    // current_ctx.growElementsWidths();
+    // current_ctx.fitHeights();
+    // current_ctx.growElementsHeights();
     current_ctx.endLayout();
-    current_ctx.traverse();
+    // current_ctx.traverse();
 }
 
 pub fn end(fabric: *Fabric) !void {
@@ -874,7 +866,7 @@ pub inline fn DynamicPage(src: std.builtin.SourceLocation, page: fn () void, pag
 
 // Okay so we need to change the node in the tree depending on the page route
 // for example we add the commads tree to the router tree
-pub inline fn Page(src: std.builtin.SourceLocation, page: fn () void, page_deinit: ?fn () void, style: Style) void {
+pub inline fn Page(src: std.builtin.SourceLocation, page: fn () void, page_deinit: ?fn () void, style: ?*const Style) void {
     const allocator = std.heap.page_allocator;
     const full_route = src.file;
     var itr = std.mem.tokenizeScalar(u8, full_route[7..], '/');
@@ -981,22 +973,11 @@ pub inline fn Remember(src: std.builtin.SourceLocation) fn (void) void {
     return local.CloseElement;
 }
 
-pub inline fn Layout(src: std.builtin.SourceLocation, style: Style) fn (void) void {
+pub inline fn Layout(src: std.builtin.SourceLocation, style: *const Style) fn (void) void {
     const allocator = allocator_global;
     const full_route = src.file;
     var itr = std.mem.tokenizeScalar(u8, full_route[7..], '/');
     var buf = std.ArrayList(u8).init(allocator);
-
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
 
     blk: while (itr.next()) |sub| {
         if (itr.peek() == null) {
@@ -1030,17 +1011,21 @@ pub inline fn Layout(src: std.builtin.SourceLocation, style: Style) fn (void) vo
         unreachable;
     };
 
-    var elem_decl = ElementDecl{
-        .style = style,
+    // Create a mutable copy of the style struct
+    var mutable_style = style.*;
+
+    // Now you can safely modify the local, mutable copy
+    mutable_style.id = id;
+
+    const elem_decl = ElementDecl{
+        .style = &mutable_style,
         .dynamic = .static,
         .elem_type = .Layout,
     };
-    elem_decl.style.id = id;
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-    };
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
+
+    _ = LifeCycle.open(elem_decl);
+    LifeCycle.configure(elem_decl);
+    return LifeCycle.close;
 }
 
 pub fn registerLayout(path: []const u8, layout: fn (*const fn () void) void) void {
@@ -1468,11 +1453,8 @@ export fn markAllNonLayoutNodesDirtyRemoveList() usize {
 }
 
 fn iterateChildren(node: *UINode) void {
-    if (node.dirty) {
-        println("{any}\n", .{node.dirty});
-    } else {
-        println("Layout: node {any}\n", .{node.dirty});
-    }
+    Fabric.println("Iterate {s} {any}\n", .{ node.text, node.style.?.font_size });
+
     for (node.children.items) |child| {
         iterateChildren(child);
     }
@@ -1545,7 +1527,6 @@ pub fn findNodeByUUID(ui_node: *UINode, uuid: []const u8) ?*UINode {
 // Export function to get a pointer to the memory layout information
 var layout_info = struct {
     render_command_size: u32,
-    bounding_box_offset: u32,
     elem_type_offset: u32,
     text_ptr_offset: u32,
     text_len_offset: u32,
@@ -1573,7 +1554,6 @@ var layout_info = struct {
     p__focus_within_size: u32,
 }{
     .render_command_size = @sizeOf(RenderCommand),
-    .bounding_box_offset = @offsetOf(RenderCommand, "bounding_box"),
     .elem_type_offset = @offsetOf(RenderCommand, "elem_type"),
     .text_ptr_offset = @offsetOf(RenderCommand, "text"),
     .text_len_offset = @offsetOf(RenderCommand, "text") + @sizeOf(usize),
@@ -1717,9 +1697,9 @@ pub fn printlnSrcErr(
 ) void {
     const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
     const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%c{s}:{d}%c]\n[Fabric] [ERROR] {s}", .{ src.file, src.line, buf[0..] }) catch return;
-    const style_1 = "color: #FF3029;";
-    const style_2 = "";
-    _ = consoleLogColored(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
+    // const style_1 = "color: #FF3029;";
+    // const style_2 = "";
+    // _ = consoleLogColored(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
     allocator_global.free(buf_with_src);
     allocator_global.free(buf);
 }
@@ -1735,9 +1715,10 @@ pub fn printlnWithColor(
     const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
     const color_buf = std.fmt.allocPrint(allocator_global, "color: {s};", .{color}) catch return;
     const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%c{s}%c] {s}", .{ title, buf[0..] }) catch return;
-    const style_2 = "";
-    _ = consoleLogColored(buf_with_src.ptr, buf_with_src.len, color_buf[0..].ptr, color_buf.len, style_2[0..].ptr, style_2.len);
+    // const style_2 = "";
+    // _ = consoleLogColored(buf_with_src.ptr, buf_with_src.len, color_buf[0..].ptr, color_buf.len, style_2[0..].ptr, style_2.len);
     allocator_global.free(buf_with_src);
+    allocator_global.free(color_buf);
     allocator_global.free(buf);
 }
 
@@ -1747,9 +1728,9 @@ pub fn printlnAllocation(
 ) void {
     const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
     const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%cALLOC%c] {s}", .{buf[0..]}) catch return;
-    const style_1 = "color: #744EFF;";
-    const style_2 = "";
-    _ = consoleLogColored(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
+    // const style_1 = "color: #744EFF;";
+    // const style_2 = "";
+    // _ = consoleLogColored(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
     allocator_global.free(buf_with_src);
     allocator_global.free(buf);
 }
@@ -1761,9 +1742,9 @@ pub fn printlnSrc(
 ) void {
     const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
     const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%c{s}:{d}%c]\n[Fabric] [MSG] {s}", .{ src.file, src.line, buf[0..] }) catch return;
-    const style_1 = "color: #3CE98A;";
-    const style_2 = "";
-    _ = consoleLogColored(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
+    // const style_1 = "color: #3CE98A;";
+    // const style_2 = "";
+    // _ = consoleLogColored(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
     allocator_global.free(buf_with_src);
     allocator_global.free(buf);
 }
@@ -1778,7 +1759,7 @@ pub fn println(
 }
 
 extern fn consoleLog(ptr: [*]const u8, len: usize) i32;
-extern fn consoleLogColored(ptr: [*]const u8, len: usize, style_ptr_1: [*]const u8, style_len_1: u32, style_ptr_2: [*]const u8, style_len_2: u32) i32;
+extern fn consoleLogColored(ptr: [*]const u8, len: usize, style_ptr_1: [*]const u8, style_len_1: usize, style_ptr_2: [*]const u8, style_len_2: usize) i32;
 
 export fn grainRerender() bool {
     return grain_rerender;
@@ -1924,16 +1905,20 @@ pub fn addToRemoveClassesList(id: []const u8, style_id: []const u8) void {
 }
 
 pub export fn pendingClassesToAdd() void {
-    for (classes_to_add.items) |clta| {
-        addClass(clta.element_id.ptr, clta.element_id.len, clta.style_id.ptr, clta.style_id.len);
+    if (isWasi) {
+        for (classes_to_add.items) |clta| {
+            addClass(clta.element_id.ptr, clta.element_id.len, clta.style_id.ptr, clta.style_id.len);
+        }
+        classes_to_add.clearAndFree();
     }
-    classes_to_add.clearAndFree();
 }
 pub export fn pendingClassesToRemove() void {
-    for (classes_to_remove.items) |cltr| {
-        removeClass(cltr.element_id.ptr, cltr.element_id.len, cltr.style_id.ptr, cltr.style_id.len);
+    if (isWasi) {
+        for (classes_to_remove.items) |cltr| {
+            removeClass(cltr.element_id.ptr, cltr.element_id.len, cltr.style_id.ptr, cltr.style_id.len);
+        }
+        classes_to_remove.clearAndFree();
     }
-    classes_to_remove.clearAndFree();
 }
 
 pub extern fn addClass(

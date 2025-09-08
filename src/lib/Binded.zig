@@ -10,30 +10,45 @@ const InputDetails = types.InputDetails;
 const InputParams = types.InputParams;
 const ElementDecl = types.ElementDeclaration;
 
-pub inline fn Center(element: *Element, style: Style) fn (void) void {
-    var elem_decl = ElementDecl{
-        .style = style,
+const CenterOptions = struct {
+    element: *Element,
+    style: ?*const Style = null,
+};
+
+pub inline fn Center(options: CenterOptions) fn (void) void {
+
+    // Create a mutable copy of the style struct
+    var mutable_style = options.style.*;
+
+    // Now you can safely modify the local, mutable copy
+    mutable_style.child_alignment.x = .center;
+    mutable_style.child_alignment.y = .center;
+
+    const elem_decl = ElementDecl{
+        .style = &mutable_style, // Pass the mutable pointer to ElementDecl
         .dynamic = .static,
         .elem_type = .FlexBox,
     };
-    elem_decl.style.child_alignment.x = .center;
-    elem_decl.style.child_alignment.y = .center;
-
     const ui_node = LifeCycle.open(elem_decl);
     LifeCycle.configure(elem_decl);
-    element._node_ptr = ui_node;
+    options.element._node_ptr = ui_node;
     return LifeCycle.close;
 }
 
-pub inline fn Box(element: *Element, style: Style) fn (void) void {
+const BoxOptions = struct {
+    element: *Element,
+    style: ?*const Style = null,
+};
+
+pub inline fn Box(options: BoxOptions) fn (void) void {
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = options.style,
         .dynamic = .dynamic,
         .elem_type = .FlexBox,
     };
     const ui_node = LifeCycle.open(elem_decl) orelse unreachable;
     _ = LifeCycle.configure(elem_decl);
-    element._node_ptr = ui_node;
+    options.element._node_ptr = ui_node;
     return LifeCycle.close;
 }
 
@@ -131,32 +146,25 @@ pub inline fn InputV2(element: *Element, params: InputParams, style: Style) void
     return;
 }
 
-pub inline fn Input(element: *Element, params: InputParams, style: Style) void {
-    const local = struct {
-        fn CloseElement() void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-        }
-    };
+const InputOptions = struct {
+    element: *Element,
+    params: *const InputParams,
+    style: ?*const Style = null,
+};
 
+pub inline fn Input(options: InputOptions) void {
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = options.style,
         .dynamic = .dynamic,
         .elem_type = .Input,
-        .input_params = params,
+        .input_params = options.params,
     };
-    element.element_type = .Input;
+    options.element.element_type = .Input;
 
-    const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-        unreachable;
-    };
-    local.ConfigureElement(elem_decl);
-    element._node_ptr = ui_node;
-    local.CloseElement();
+    const ui_node = LifeCycle.open(elem_decl) orelse unreachable;
+    _ = LifeCycle.configure(elem_decl);
+    options.element._node_ptr = ui_node;
+    LifeCycle.close({});
     return;
 }
 

@@ -42,11 +42,3 @@ const Range = struct {
         return .{ .ptr = self, .vtable = VTable.init(Self) };
     }
 };
-
-test "impl" {
-    var range: Range = Range{ .end = 5 };
-    var itr: Iterator = range.iterator();
-    while (itr.next()) |v| {
-        std.log.debug("{d}\n", .{v});
-    }
-}

@@ -106,17 +106,28 @@ pub inline fn CtxHooks(hooks: Fabric.HooksCtxFuncs, func: anytype, args: anytype
     return LifeCycle.close;
 }
 
-pub inline fn Hooks(hooks: Fabric.HooksFuncs, style: Style) fn (void) void {
+const HooksOptions = struct {
+    hooks: Fabric.HooksFuncs,
+    style: ?*const Style = null,
+};
+
+pub inline fn Hooks(options: HooksOptions) fn (void) void {
     var elem_decl = ElementDecl{
-        .elem_type = .Hooks,
         .dynamic = .static,
-        .style = style,
+        .style = options.style,
+        .elem_type = .Hooks,
     };
 
+    const hooks = options.hooks;
+    const ui_node = LifeCycle.open(elem_decl) orelse unreachable;
     if (hooks.mounted) |f| {
-        const id = Fabric.mounted_funcs.count();
-        elem_decl.hooks.mounted_id += id + 1;
-        Fabric.mounted_funcs.put(elem_decl.hooks.mounted_id, f) catch |err| {
+        elem_decl.hooks.mounted_id = 1;
+        const uuid_alloc = Fabric.allocator_global.alloc(u8, ui_node.uuid.len) catch |err| {
+            println("Allocator ran out of space {any}\n", .{err});
+            unreachable;
+        };
+        @memcpy(uuid_alloc, ui_node.uuid);
+        Fabric.mounted_funcs.put(uuid_alloc, f) catch |err| {
             println("Mount Function Registry {any}\n", .{err});
         };
     }
@@ -142,7 +153,6 @@ pub inline fn Hooks(hooks: Fabric.HooksFuncs, style: Style) fn (void) void {
         };
     }
 
-    _ = LifeCycle.open(elem_decl);
     LifeCycle.configure(elem_decl);
     return LifeCycle.close;
 }
@@ -159,43 +169,40 @@ pub inline fn TextArea(text: []const u8, style: Style) void {
     LifeCycle.close({});
 }
 
-pub inline fn Text(text: []const u8, style: Style) void {
+const TextOptions = struct {
+    text: []const u8,
+    style: ?*const Style = null,
+};
+pub inline fn Text(options: TextOptions) void {
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = options.style,
         .dynamic = .static,
         .elem_type = .Text,
-        .text = text,
+        .text = options.text,
     };
     _ = LifeCycle.open(elem_decl);
     LifeCycle.configure(elem_decl);
     LifeCycle.close({});
 }
 
-pub inline fn Svg(svg: []const u8, style: Style) void {
-    const local = struct {
-        fn CloseElement() void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return;
-        }
-    };
+const SvgOptions = struct {
+    svg: []const u8,
+    style: ?*const Style = null,
+};
 
+pub inline fn Svg(options: SvgOptions) void {
     const elem_decl = ElementDecl{
-        .svg = svg,
-        .style = style,
+        .svg = options.svg,
+        .style = options.style,
         .dynamic = .static,
         .elem_type = .Svg,
     };
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-        return;
+    _ = LifeCycle.open(elem_decl) orelse {
+        unreachable;
     };
 
-    _ = local.ConfigureElement(elem_decl);
-    _ = local.CloseElement();
+    LifeCycle.configure(elem_decl);
+    LifeCycle.close({});
 }
 
 export fn ctxButtonCallback(id_ptr: [*:0]u8) void {
@@ -217,8 +224,21 @@ export fn buttonCallback(id_ptr: [*:0]u8) void {
     const func = Fabric.registry.get(id) orelse return;
     @call(.auto, func, .{});
 }
-export fn hooksMountedCallback(id: u32) void {
-    const func = Fabric.mounted_funcs.get(id).?;
+
+export fn hooksRemoveMountedKey(id_ptr: [*:0]u8) void {
+    const id = std.mem.span(id_ptr);
+    defer Fabric.allocator_global.free(id);
+    const hook = Fabric.mounted_funcs.fetchRemove(id) orelse return;
+    Fabric.allocator_global.free(hook.key);
+}
+
+export fn hooksMountedCallback(id_ptr: [*:0]u8) void {
+    const id = std.mem.span(id_ptr);
+    defer Fabric.allocator_global.free(id);
+    const func = Fabric.mounted_funcs.get(id) orelse {
+        println("Mounted Function {s} not found\n", .{id});
+        return;
+    };
     @call(.auto, func, .{});
 }
 export fn hooksCreatedCallback(id: u32) void {
@@ -298,29 +318,18 @@ pub inline fn SubmitCtxButton(style: Style) fn (void) void {
     return local.CloseElement;
 }
 
-pub inline fn CtxButton(func: anytype, args: anytype, style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
+const CtxButtonOptions = struct {
+    style: ?*const Style = null,
+};
 
+pub inline fn CtxButton(func: anytype, args: anytype, options: CtxButtonOptions) fn (void) void {
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = options.style,
         .dynamic = .static,
         .elem_type = .CtxButton,
     };
 
-    const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-        unreachable;
-    };
-
+    const ui_node = LifeCycle.open(elem_decl) orelse unreachable;
     const Args = @TypeOf(args);
     const Closure = struct {
         arguments: Args,
@@ -354,8 +363,8 @@ pub inline fn CtxButton(func: anytype, args: anytype, style: Style) fn (void) vo
         println("Button Function Registry {any}\n", .{err});
     };
 
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
+    _ = LifeCycle.configure(elem_decl);
+    return LifeCycle.close;
 }
 
 fn callsiteId() u64 {
@@ -380,21 +389,25 @@ const _local = struct {
     }
 };
 
-pub inline fn Button(
-    btnProps: BtnProps,
-    style: Style,
-) fn (void) void {
+const ButtonOptions = struct {
+    onPress: ?*const fn () void = null,
+    onRelease: ?*const fn () void = null,
+    aria_label: ?[]const u8 = null,
+    style: *const Style = &.{},
+};
+
+pub inline fn Button(options: ButtonOptions) fn (void) void {
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = options.style,
         .dynamic = .static,
         .elem_type = .Button,
-        .aria_label = btnProps.aria_label,
+        .aria_label = options.aria_label,
     };
     const ui_node = LifeCycle.open(elem_decl) orelse {
         unreachable;
     };
 
-    if (btnProps.onPress) |onPress| {
+    if (options.onPress) |onPress| {
         Fabric.registry.put(ui_node.uuid, onPress) catch |err| {
             println("Button Function Registry {any}\n", .{err});
         };
@@ -448,48 +461,35 @@ pub inline fn SelectItem(style: Style) fn (void) void {
     return local.CloseElement;
 }
 
-pub inline fn List(style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
+const ListOptions = struct {
+    style: ?*const Style = null,
+};
 
+pub inline fn List(options: ListOptions) fn (void) void {
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = options.style,
         .dynamic = .static,
         .elem_type = .List,
     };
-    _ = Fabric.current_ctx.open(elem_decl) catch {};
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
+    _ = LifeCycle.open(elem_decl);
+    _ = LifeCycle.configure(elem_decl);
+    return LifeCycle.close;
 }
 
-pub inline fn ListItem(style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
+const ListItemOptions = struct {
+    style: ?*const Style = null,
+};
 
+pub inline fn ListItem(options: ListItemOptions) fn (void) void {
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = options.style,
         .dynamic = .static,
         .elem_type = .ListItem,
     };
-    _ = Fabric.current_ctx.open(elem_decl) catch {};
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
+
+    _ = LifeCycle.open(elem_decl);
+    LifeCycle.configure(elem_decl);
+    return LifeCycle.close;
 }
 
 pub inline fn Circle(style: Style) fn (void) void {
@@ -643,37 +643,55 @@ pub inline fn Form(style: Style) fn (void) void {
     return local.CloseElement;
 }
 
-pub inline fn Center(style: Style) fn (void) void {
-    var elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .static,
-        .elem_type = .FlexBox,
-    };
-    elem_decl.style.child_alignment.x = .center;
-    elem_decl.style.child_alignment.y = .center;
+const CenterOptions = struct {
+    style: *const Style = &.{},
+};
 
-    _ = LifeCycle.open(elem_decl);
-    LifeCycle.configure(elem_decl);
-    return LifeCycle.close;
-}
+pub inline fn Center(options: CenterOptions) fn (void) void {
 
-pub inline fn Column(style: Style) fn (void) void {
-    var elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .static,
-        .elem_type = .FlexBox,
-    };
-    elem_decl.style.direction = .column;
+    // Create a mutable copy of the style struct
+    var mutable_style = options.style.*;
 
-    _ = LifeCycle.open(elem_decl);
-    LifeCycle.configure(elem_decl);
-    return LifeCycle.close;
-}
+    // Now you can safely modify the local, mutable copy
+    mutable_style.child_alignment.x = .center;
+    mutable_style.child_alignment.y = .center;
 
-pub inline fn Box(style: Style) fn (void) void {
     const elem_decl = ElementDecl{
-        .style = style,
+        .style = &mutable_style, // Pass the mutable pointer to ElementDecl
         .dynamic = .static,
+        .elem_type = .FlexBox,
+    };
+    _ = LifeCycle.open(elem_decl);
+    LifeCycle.configure(elem_decl);
+    return LifeCycle.close;
+}
+
+const ColumnOptions = struct {
+    style: *const Style = &.{},
+};
+
+pub inline fn Column(options: ColumnOptions) fn (void) void {
+    var mutable_style = options.style.*;
+    mutable_style.direction = .column;
+
+    const elem_decl = ElementDecl{
+        .style = &mutable_style,
+        .dynamic = .static,
+        .elem_type = .FlexBox,
+    };
+
+    _ = LifeCycle.open(elem_decl);
+    LifeCycle.configure(elem_decl);
+    return LifeCycle.close;
+}
+
+const BoxOptions = struct {
+    style: ?*const Style = null,
+};
+pub inline fn Box(options: BoxOptions) fn (void) void {
+    const elem_decl = ElementDecl{
+        .dynamic = .static,
+        .style = options.style,
         .elem_type = .FlexBox,
     };
 
@@ -705,11 +723,16 @@ pub inline fn EmbedIcon(link: []const u8) fn (void) void {
     return LifeCycle.close;
 }
 
-pub inline fn Icon(icon_name: []const u8, style: Style) void {
+const IconOptions = struct {
+    icon_name: []const u8,
+    style: ?*const Style = null,
+};
+
+pub inline fn Icon(options: IconOptions) void {
     const elem_decl = ElementDecl{
-        .href = icon_name,
+        .href = options.icon_name,
         .elem_type = .Icon,
-        .style = style,
+        .style = options.style,
         .dynamic = .static,
     };
     _ = LifeCycle.open(elem_decl);
@@ -717,11 +740,16 @@ pub inline fn Icon(icon_name: []const u8, style: Style) void {
     LifeCycle.close({});
 }
 
-pub inline fn Image(link: []const u8, style: Style) void {
+const ImageOptions = struct {
+    src: []const u8,
+    style: *const Style = &.{},
+};
+
+pub inline fn Image(options: ImageOptions) void {
     const elem_decl = ElementDecl{
-        .href = link,
+        .href = options.src,
         .elem_type = .Image,
-        .style = style,
+        .style = options.style,
     };
     _ = LifeCycle.open(elem_decl);
     LifeCycle.configure(elem_decl);
@@ -751,7 +779,7 @@ pub inline fn EmbedLink(link: []const u8) fn (void) void {
     return local.CloseElement;
 }
 
-pub inline fn RedirectLink(link_props: LinkProps, style: Style) fn (void) void {
+pub inline fn RedirectLink(options: LinkOptions) fn (void) void {
     const local = struct {
         fn CloseElement(_: void) void {
             _ = Fabric.current_ctx.close();
@@ -764,11 +792,11 @@ pub inline fn RedirectLink(link_props: LinkProps, style: Style) fn (void) void {
     };
 
     const elem_decl = ElementDecl{
-        .href = link_props.url,
+        .href = options.url,
         .elem_type = .RedirectLink,
-        .style = style,
+        .style = options.style,
         .dynamic = .static,
-        .aria_label = link_props.aria_label,
+        .aria_label = options.aria_label,
     };
     _ = Fabric.current_ctx.open(elem_decl) catch |err| {
         println("{any}\n", .{err});
@@ -777,12 +805,13 @@ pub inline fn RedirectLink(link_props: LinkProps, style: Style) fn (void) void {
     return local.CloseElement;
 }
 
-const LinkProps = struct {
+const LinkOptions = struct {
     url: []const u8,
     aria_label: ?[]const u8 = null,
+    style: ?*const Style = &.{},
 };
 
-pub inline fn Link(link_props: LinkProps, style: Style) fn (void) void {
+pub inline fn Link(options: LinkOptions) fn (void) void {
     const local = struct {
         fn CloseElement(_: void) void {
             _ = Fabric.current_ctx.close();
@@ -795,11 +824,11 @@ pub inline fn Link(link_props: LinkProps, style: Style) fn (void) void {
     };
 
     const elem_decl = ElementDecl{
-        .href = link_props.url,
+        .href = options.url,
         .elem_type = .Link,
-        .style = style,
+        .style = options.style,
         .dynamic = .static,
-        .aria_label = link_props.aria_label,
+        .aria_label = options.aria_label,
     };
     _ = Fabric.current_ctx.open(elem_decl) catch |err| {
         println("{any}\n", .{err});

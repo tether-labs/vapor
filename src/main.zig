@@ -3,5 +3,5 @@
 //! is to delete this file and start with root.zig instead.
 
 pub const ElementType = @import("root").ElementType;
+// Global buffer to store the CSS string for returning to JavaScript
 pub fn main() !void {}
-

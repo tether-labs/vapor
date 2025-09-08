@@ -113,9 +113,10 @@ fn transformToCSS(transform: Transform, writer: anytype) !void {
 // Export this function to be called from JavaScript to get the CSS representation
 var focus_style: []const u8 = "";
 var global_len: usize = 0;
-pub export fn getFocusWithinStyle(node_ptr: ?*UINode) [*]const u8 {
+pub export fn getFocusWithinStyle(node_ptr: ?*UINode) ?[*]const u8 {
     if (node_ptr == null) return focus_style.ptr;
-    const focus = node_ptr.?.style.focus_within.?;
+    const style = node_ptr.?.style orelse return null;
+    const focus = style.focus_within.?;
     // Create a default Focus style
     // const focus = Focus{};
 
@@ -314,7 +315,7 @@ export fn getFocusWithinLen() usize {
 
 export fn getFocusWithinEctClasses(node_ptr: ?*UINode) void {
     if (node_ptr == null) return;
-    const node_style = node_ptr.?.style;
+    const node_style = node_ptr.?.style orelse return;
     const ptr = node_ptr.?;
     // Create a default Focus style
 
