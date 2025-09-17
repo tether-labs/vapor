@@ -16,6 +16,10 @@ pub export fn getAriaLabelLen() usize {
     return current_label_len;
 }
 
+pub fn isDesktop() bool {
+    return !isMobile();
+}
+
 pub fn isMobile() bool {
     if (Fabric.browser_width < 786) {
         return true;

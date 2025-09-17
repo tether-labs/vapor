@@ -76,14 +76,9 @@ fn sizingTypeToCSS(sizing: Sizing, writer: anytype) !void {
 fn flexTypeToCSS(flex_type: FlexType, writer: anytype) !void {
     switch (flex_type) {
         .Flex, .Center => try writer.writeAll("flex"),
-        .InlineFlex => try writer.writeAll("inline-flex"),
-        .InlineBlock => try writer.writeAll("inline-block"),
-        .Inherit => try writer.writeAll("inherit"),
-        .Initial => try writer.writeAll("initial"),
-        .Revert => try writer.writeAll("revert"),
-        .Unset => try writer.writeAll("unset"),
+        .Stack => try writer.writeAll("block"),
+        .Flow => try writer.writeAll("inline-block"),
         .None => try writer.writeAll("none"),
-        .Inline => try writer.writeAll("inline"),
     }
 }
 

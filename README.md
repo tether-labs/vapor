@@ -1,10 +1,15 @@
 # Fabric 🚧 Under heavy development 🚧
 
-A modern, lightweight web framework for building WebAssembly applications with Zig. Fabric enables developers to create fast, efficient web applications by compiling Zig code directly to WebAssembly, bringing systems programming performance to the browser.
+Fabric is a modern, lightweight framework for building fast, memory-efficient applications with Zig. Fabric 
+can be combined with any renderer to generate various application types, including web, native, and even mobile apps.
+
+A modern, lightweight web framework for building WebAssembly applications with Zig. 
+Fabric enables developers to create fast, efficient web applications by compiling Zig code directly to WebAssembly, 
+bringing systems programming performance to the browser.
 
 ## ✨ Features
 
-- **WebAssembly First**: Built specifically for WebAssembly compilation with optimal performance
+- **WebAssembly Support**: Compile Fabric to a 60kb WebAssembly binary uncompressed
 - **Zig Native**: Leverages Zig's safety, performance, and compile-time guarantees
 - **Component System**: Modular architecture for building reusable UI components
 - **Theme Support**: Built-in theming system for consistent styling
@@ -45,11 +50,11 @@ curl -sSL https://raw.githubusercontent.com/vic-Rokx/fabric-cli/main/install.sh 
 After installation, you can run:
 
 ```bash
-fabric --help
+metal fabric --help
 ```
 
 ```bash
-fabric create myapp
+metal fabric create myapp
 ```
 
 ## 📖 Tutorial 
@@ -150,7 +155,7 @@ Fabric supports various build configurations:
 
 Fabric is designed for optimal WebAssembly performance:
 
-- **Small Bundle Size**: Base wasm is 150kb 
+- **Small Bundle Size**: Base wasm is 40kb 
 - **Fast Startup**: Quick initialization times
 - **Efficient Memory**: Careful memory management for WASM constraints
 - **Zero-Cost Abstractions**: Zig's compile-time optimizations

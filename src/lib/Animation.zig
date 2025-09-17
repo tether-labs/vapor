@@ -1,5 +1,6 @@
 const std = @import("std");
 const Fabric = @import("Fabric.zig");
+const TimingFunction = @import("types.zig").TimingFunction;
 
 pub const TransformType = enum {
     none,
@@ -19,18 +20,11 @@ pub const Transform = struct {
     width: ?Fabric.Types.Sizing = null,
 };
 
-const AnimDir = enum {
+pub const AnimDir = enum {
     normal,
     reverse,
     forwards,
     pingpong,
-};
-const TimingFunction = enum {
-    ease_in,
-    ease,
-    linear,
-    ease_out,
-    ease_in_out,
 };
 
 const Iteration = struct {
@@ -200,8 +194,6 @@ pub const FoldInOut = struct {
         });
     }
 };
-
-
 
 const TransitionType = enum {
     custom,

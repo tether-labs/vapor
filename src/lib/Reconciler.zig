@@ -2,7 +2,7 @@ const std = @import("std");
 const UIContext = @import("UITree.zig");
 const Fabric = @import("Fabric.zig");
 const Style = @import("types.zig").Style;
-const Background = @import("types.zig").Background;
+const Color = @import("types.zig").Color;
 const UINode = @import("UITree.zig").UINode;
 const Self = @This();
 
@@ -26,57 +26,42 @@ pub fn nodesEqual(old_node: *UINode, new_node: *UINode) bool {
     if (!compareOptionalSlice(a.style_id, b.style_id)) return false;
     if (!std.mem.eql(u8, old_node.href, new_node.href)) return false;
 
-    if (a.hover != null and b.hover != null) {
-        const hovera = a.hover.?;
-        const hoverb = b.hover.?;
-        if (hovera.background != null) {
-            if (!compareRgba(hovera.background.?, hoverb.background.?)) return false;
-        }
-    }
+    // if (a.hover != null and b.hover != null) {
+    //     const hovera = a.hover.?;
+    //     const hoverb = b.hover.?;
+    //     if (hovera.background != null) {
+    //         if (!compareRgba(hovera.background.?, hoverb.background.?)) return false;
+    //     }
+    // }
 
-    if (a.display != b.display) return false;
+    // if (a.layout != b.layout) return false;
     if (a.position != null and b.position != null) {
-        if (a.position.?.x != b.position.?.x) return false;
-        if (a.position.?.y != b.position.?.y) return false;
         if (a.position.?.type != b.position.?.type) return false;
-        if (a.position.?.top.value != b.position.?.top.value) return false;
-        if (a.position.?.bottom.value != b.position.?.bottom.value) return false;
-        if (a.position.?.left.value != b.position.?.left.value) return false;
-        if (a.position.?.right.value != b.position.?.right.value) return false;
+        if (a.position.?.top != null and b.position.?.top != null) {
+            if (a.position.?.top.?.value != b.position.?.top.?.value) return false;
+        }
+        if (a.position.?.bottom != null and b.position.?.bottom != null) {
+            if (a.position.?.bottom.?.value != b.position.?.bottom.?.value) return false;
+        }
+        if (a.position.?.left != null and b.position.?.left != null) {
+            if (a.position.?.left.?.value != b.position.?.left.?.value) return false;
+        }
+        if (a.position.?.right != null and b.position.?.right != null) {
+            if (a.position.?.right.?.value != b.position.?.right.?.value) return false;
+        }
     }
 
     if (a.direction != b.direction) return false;
 
-    if (a.background != null and b.background != null) {
-        if (!compareRgba(a.background.?, b.background.?)) return false;
+    if (a.size) |a_size| {
+        if (b.size) |b_size| {
+            if (a_size.width.size.minmax.min != b_size.width.size.minmax.min) return false;
+            if (a_size.width.size.minmax.max != b_size.width.size.minmax.max) return false;
+            if (a_size.height.size.minmax.min != b_size.height.size.minmax.min) return false;
+            if (a_size.height.size.minmax.max != b_size.height.size.minmax.max) return false;
+        }
     }
 
-    if (a.width.size.minmax.min != b.width.size.minmax.min) return false;
-    if (a.width.size.minmax.max != b.width.size.minmax.max) return false;
-    if (a.height.size.minmax.min != b.height.size.minmax.min) return false;
-    if (a.height.size.minmax.max != b.height.size.minmax.max) return false;
-    if (a.font_size != b.font_size) return false;
-    if (a.letter_spacing != b.letter_spacing) return false;
-    if (a.line_height != b.line_height) return false;
-    if (a.font_weight != b.font_weight) return false;
-    if (a.border_radius != null and b.border_radius != null) {
-        if (a.border_radius.?.top_left != b.border_radius.?.top_left) return false;
-        if (a.border_radius.?.top_right != b.border_radius.?.top_right) return false;
-        if (a.border_radius.?.bottom_left != b.border_radius.?.bottom_left) return false;
-        if (a.border_radius.?.bottom_right != b.border_radius.?.bottom_right) return false;
-    }
-    if (a.border_thickness != null and b.border_thickness != null) {
-        if (a.border_thickness.?.top != b.border_thickness.?.top) return false;
-        if (a.border_thickness.?.left != b.border_thickness.?.left) return false;
-        if (a.border_thickness.?.right != b.border_thickness.?.right) return false;
-        if (a.border_thickness.?.bottom != b.border_thickness.?.bottom) return false;
-    }
-    if (a.border_color != null and b.border_color != null) {
-        if (!compareRgba(a.border_color.?, b.border_color.?)) return false;
-    }
-    if (a.text_color != null and b.text_color != null) {
-        if (!compareRgba(a.text_color.?, b.text_color.?)) return false;
-    }
     if (a.padding != null and b.padding != null) {
         if (a.padding.?.top != b.padding.?.top) return false;
         if (a.padding.?.left != b.padding.?.left) return false;
@@ -89,15 +74,50 @@ pub fn nodesEqual(old_node: *UINode, new_node: *UINode) bool {
         if (a.margin.?.bottom != b.margin.?.bottom) return false;
         if (a.margin.?.right != b.margin.?.right) return false;
     }
+
+    if (a.visual != null and b.visual != null) {
+        const a_visual = a.visual.?;
+        const b_visual = b.visual.?;
+        if (a_visual.background != null and b_visual.background != null) {
+            if (!compareRgba(a_visual.background.?, b_visual.background.?)) return false;
+        }
+
+        if (a_visual.font_size != b_visual.font_size) return false;
+        if (a_visual.letter_spacing != b_visual.letter_spacing) return false;
+        if (a_visual.line_height != b_visual.line_height) return false;
+        if (a_visual.font_weight != b_visual.font_weight) return false;
+        if (a_visual.border_radius != null and b_visual.border_radius != null) {
+            if (a_visual.border_radius.?.top_left != b_visual.border_radius.?.top_left) return false;
+            if (a_visual.border_radius.?.top_right != b_visual.border_radius.?.top_right) return false;
+            if (a_visual.border_radius.?.bottom_left != b_visual.border_radius.?.bottom_left) return false;
+            if (a_visual.border_radius.?.bottom_right != b_visual.border_radius.?.bottom_right) return false;
+        }
+        if (a_visual.border_thickness != null and b_visual.border_thickness != null) {
+            if (a_visual.border_thickness.?.top != b_visual.border_thickness.?.top) return false;
+            if (a_visual.border_thickness.?.left != b_visual.border_thickness.?.left) return false;
+            if (a_visual.border_thickness.?.right != b_visual.border_thickness.?.right) return false;
+            if (a_visual.border_thickness.?.bottom != b_visual.border_thickness.?.bottom) return false;
+        }
+        if (a_visual.border_color != null and b_visual.border_color != null) {
+            if (!compareRgba(a_visual.border_color.?, b_visual.border_color.?)) return false;
+        }
+        if (a_visual.text_color != null and b_visual.text_color != null) {
+            if (!compareRgba(a_visual.text_color.?, b_visual.text_color.?)) return false;
+        }
+
+        if (a_visual.opacity != b_visual.opacity) return false;
+    }
+
     // if (a.overflow != b.overflow) return false;
 
     if (a.overflow_x != b.overflow_x) return false;
     if (a.overflow_y != b.overflow_y) return false;
-    if (a.child_alignment.x != b.child_alignment.x) return false;
-    if (a.child_alignment.y != b.child_alignment.y) return false;
+    if (a.layout != null and b.layout != null) {
+        if (a.layout.?.y != b.layout.?.y) return false;
+        if (a.layout.?.x != b.layout.?.x) return false;
+    }
     if (a.child_gap != b.child_gap) return false;
     if (!compareOptionalSlice(a.dialog_id, b.dialog_id)) return false;
-    if (a.opacity != b.opacity) return false;
 
     // // Compare non-optional slice fields
     // if (!std.mem.eql(u8, a.font_family_file, b.font_family_file)) return false;
@@ -133,7 +153,7 @@ fn compareFloat32Slice(
     }
 }
 
-fn compareRgba(a: Background, b: Background) bool {
+fn compareRgba(a: Color, b: Color) bool {
     if (a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a) {
         return true;
     } else {

@@ -49,7 +49,7 @@ pub const UINode = struct {
     dirty: bool = false,
     parent: ?*UINode = null,
     type: EType = EType.FlexBox,
-    style: ?*const Style = null,
+    style: ?Style = null,
     children: std.ArrayList(*UINode) = undefined,
     // calculated_x: f32 = 0,
     // calculated_y: f32 = 0,
@@ -66,6 +66,7 @@ pub const UINode = struct {
     event_type: ?types.EventType = null,
     dynamic: types.StateType = .pure,
     aria_label: ?[]const u8 = null,
+    class: ?[]const u8 = null,
 
     pub fn init(parent: ?*UINode, etype: EType, allocator: *std.mem.Allocator) !*UINode {
         const node = try allocator.create(UINode);
@@ -260,6 +261,7 @@ pub fn open(ui_ctx: *UIContext, elem_decl: ElemDecl) !*UINode {
     try ui_ctx.stackRegister(node);
 
     if (elem_decl.style) |style| {
+        node.class = style.style_id;
         node.uuid = style.id orelse "";
     } else {
         node.uuid = "";
@@ -313,7 +315,9 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
     current_open.type = elem_decl.elem_type;
     // We need to think about this, ie do we want to have dfeaults set so they are always used or for users to explictily pass a default to use
     // current_open.style = Style.override(style);
-    current_open.style = style;
+    if (style) |s| {
+        current_open.style = s.*;
+    }
     if (current_open.type == .Hooks) {
         current_open.hooks = elem_decl.hooks;
     }
@@ -681,14 +685,19 @@ pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent:
                 };
 
                 if (child.style) |style| {
-                    if (style.hover) |_| {
-                        render_cmd.hover = true;
+                    if (style.interactive) |interactive| {
+                        if (interactive.hover) |_| {
+                            render_cmd.hover = true;
+                        }
+                        if (interactive.focus) |_| {
+                            render_cmd.focus = true;
+                        }
+                        if (interactive.focus_within) |_| {
+                            render_cmd.focus_within = true;
+                        }
                     }
-                    if (style.focus) |_| {
-                        render_cmd.focus = true;
-                    }
-                    if (style.focus_within) |_| {
-                        render_cmd.focus_within = true;
+                    if (child.class) |id| {
+                        render_cmd.class = id;
                     }
                 }
                 const tree: *CommandsTree = ui_ctx.allocator.create(CommandsTree) catch unreachable;
@@ -891,6 +900,7 @@ pub fn traverseCmds(ui_ctx: *UIContext) void {
 }
 
 pub fn traverse(ui_ctx: *UIContext) void {
+    Fabric.println("Traversing\n", .{});
     ui_ctx.traverseChildren(ui_ctx.root, ui_ctx.ui_tree.?);
 }
 

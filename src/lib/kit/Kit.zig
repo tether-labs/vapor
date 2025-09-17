@@ -397,12 +397,13 @@ pub const Response = struct {
     body: []const u8,
 };
 
-export fn resumeCallback(id: u32, resp_ptr: [*:0]u8) void {
-    const resp = std.mem.span(resp_ptr);
-    const parsed_value = std.json.parseFromSlice(Response, Fabric.allocator_global, resp, .{}) catch return;
-    const json_resp: Response = parsed_value.value;
-    const node = Fabric.fetch_registry.get(id) orelse return;
-    @call(.auto, node.data.runFn, .{ &node.data, json_resp });
+export fn resumeCallback(_: u32, resp_ptr: [*:0]u8) void {
+    _ = std.mem.span(resp_ptr);
+    // this std.json.parseFromSlice is extermely memory costly 43kb alone
+    // const parsed_value = std.json.parseFromSlice(Response, Fabric.allocator_global, resp, .{}) catch return;
+    // const json_resp: Response = parsed_value.value;
+    // const node = Fabric.fetch_registry.get(id) orelse return;
+    // @call(.auto, node.data.runFn, .{ &node.data, json_resp });
 }
 
 pub const HttpReqOffset = struct {

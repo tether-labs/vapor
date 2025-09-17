@@ -1,15 +1,6 @@
 // Transition.zig
 const std = @import("std");
-
-pub const TimingFunction = enum {
-    linear,
-    ease,
-    ease_in,
-    ease_out,
-    ease_in_out,
-    bounce,
-    elastic,
-};
+const TimingFunction = @import("types.zig").TimingFunction;
 
 pub const TransitionProperty = enum {
     opacity,
@@ -47,6 +38,12 @@ pub const Transition = struct {
 
     pub fn none() Transition {
         return Transition{};
+    }
+
+    pub fn transform() Transition {
+        return .{
+            .properties = &.{.transform},
+        };
     }
 
     // Creator methods for built-in transitions

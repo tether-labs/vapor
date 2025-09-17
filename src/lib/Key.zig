@@ -56,7 +56,7 @@ pub const KeyGenerator = struct {
         }
 
         // Hash important prop values if available
-        if (props != null and @hasField(@TypeOf(props.?.*), "uuid")) {
+        if (props != null and @hasField(@TypeOf(props.?), "uuid")) {
             if (@TypeOf(props.uuid) == []const u8) {
                 hasher.update(props.key);
             } else {

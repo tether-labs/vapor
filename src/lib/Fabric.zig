@@ -15,10 +15,10 @@ const Reconciler = @import("Reconciler.zig");
 const ColorTheme = @import("constants/Color.zig");
 const TrackingAllocator = @import("TrackingAllocator.zig");
 pub const KeyStone = @import("keystone/KeyStone.zig");
-const getHoverStyle = @import("convertHover.zig").getHoverStyle;
-const getFocusStyle = @import("convertFocus.zig").getFocusStyle;
-const getFocusWithinStyle = @import("convertFocusWithin.zig").getFocusWithinStyle;
-const getStyle = @import("convertStyle.zig").getStyle;
+const getVisualStyle = @import("convertStyleCustomWriter.zig").getVisualStyle;
+// const getFocusStyle = @import("convertFocus.zig").getFocusStyle;
+// const getFocusWithinStyle = @import("convertFocusWithin.zig").getFocusWithinStyle;
+const getStyle = @import("convertStyleCustomWriter.zig").getStyle;
 const generateInputHTML = @import("grabInputDetails.zig").generateInputHTML;
 const grabInputDetails = @import("grabInputDetails.zig");
 const utils = @import("utils.zig");
@@ -34,18 +34,11 @@ pub const stdout = std.io.getStdOut().writer();
 
 const EventType = types.EventType;
 const Active = types.Active;
-const BoundingBox = types.BoundingBox;
-const InputDetails = types.InputDetails;
-const Dimensions = types.Dimensions;
-const InputParams = types.InputParams;
 pub const ElementDecl = types.ElementDeclaration;
-pub const StateType = types.StateType;
 const RenderCommand = types.RenderCommand;
 pub const ElementType = types.ElementType;
 const Hover = types.Hover;
 const Focus = types.Focus;
-const Transform = types.Transform;
-const TransformType = types.TransformType;
 pub var current_ctx: *UIContext = undefined;
 pub var ctx_map: std.StringHashMap(*UIContext) = undefined;
 pub var page_map: std.StringHashMap(*const fn () void) = undefined;
@@ -60,12 +53,7 @@ pub var router: Router = undefined;
 var serious_error: bool = false;
 
 const Fabric = @This();
-pub const Dynamic = @import("Dynamic.zig");
 pub const Kit = @import("kit/Kit.zig");
-pub const Static = @import("Static.zig");
-pub const Binded = @import("Binded.zig");
-pub const Pure = @import("Pure.zig");
-pub const Forge = @import("Forge.zig");
 // pub const Chart = @import("components/charts/Chart.zig");
 pub const Style = types.Style;
 pub const Signal = Rune.Signal;
@@ -382,18 +370,18 @@ pub fn init(target: *Fabric, config: FabricConfig) void {
         continuations[i] = null;
     }
 
-    Animation.FadeInOut.init();
+    // Animation.FadeInOut.init();
     key_depth_map = std.StringHashMap(usize).init(allocator_global);
     // TrackingAllocator.printBytes();
 
-    _ = getStyle(null);
-    _ = getHoverStyle(null);
-    _ = getFocusStyle(null);
-    _ = getFocusWithinStyle(null);
-    _ = createInput(null);
-    _ = getInputType(null);
-    _ = getInputSize(null);
-    _ = getAriaLabel(null);
+    _ = getStyle(null); // 16kb
+    _ = getVisualStyle(null, 0); // 20kb
+    // _ = getFocusStyle(null); // 20kb
+    // _ = getFocusWithinStyle(null); // 20kb
+    _ = createInput(null); // 20kb
+    _ = getInputType(null); // 5kb
+    _ = getInputSize(null); // 5kb
+    _ = getAriaLabel(null); // < 1kb
 }
 
 pub fn deinit(_: *Fabric) void {
@@ -406,78 +394,78 @@ pub fn deinit(_: *Fabric) void {
     //     node.data.deinitFn(node);
     // }
     // then we deinit the router
-    router.deinit();
-    // then we deinit the button registry
-    registry.deinit();
-
-    // deinit all the mount functions
-    mounted_funcs.deinit();
-    mounted_ctx_funcs.deinit();
-    destroy_funcs.deinit();
-    updated_funcs.deinit();
-    created_funcs.deinit();
-
-    // dideint the button ctx_registry
-    var ctx_itr = ctx_registry.iterator();
-    while (ctx_itr.next()) |entry| {
-        const node = entry.value_ptr.*;
-        node.data.deinitFn(node);
-    }
-    ctx_registry.deinit();
-
-    var callback_itr = callback_registry.iterator();
-    while (callback_itr.next()) |entry| {
-        const node = entry.value_ptr.*;
-        node.data.deinitFn(node);
-    }
-    callback_registry.deinit();
-
-    // dideint the button ctx_registry
-    var fetch_itr = fetch_registry.iterator();
-    while (fetch_itr.next()) |entry| {
-        const node = entry.value_ptr.*;
-        node.data.deinitFn(node);
-    }
-    fetch_registry.deinit();
-
-    var evt_inst_itr = events_inst_callbacks.iterator();
-    while (evt_inst_itr.next()) |entry| {
-        const node = entry.value_ptr.*;
-        node.data.deinit(node);
-    }
-    events_inst_callbacks.deinit();
-
-    var hooks_inst_itr = hooks_inst_callbacks.iterator();
-    while (hooks_inst_itr.next()) |entry| {
-        const node = entry.value_ptr.*;
-        node.data.deinit(node);
-    }
-    hooks_inst_callbacks.deinit();
-
-    // we deinit the pages
-    page_map.deinit();
-    layout_map.deinit();
-
-    // then we call all the component deinit functions for all the signals attached
-    var deinit_itr = page_deinit_map.iterator();
-    while (deinit_itr.next()) |entry| {
-        const de = entry.value_ptr.*;
-        @call(.auto, de, .{});
-    }
-    page_deinit_map.deinit();
-
-    Fabric.motions.deinit();
-    component_subscribers.deinit();
-    // grain_subs.deinit();
-
-    // then we iterate trhough the context maps
-    var itr = ctx_map.iterator();
-    while (itr.next()) |item| {
-        // the ctx map recusrivley calls the deinit and destroy method for all ui nodes
-        item.value_ptr.*.deinit();
-        allocator_global.destroy(item.value_ptr.*);
-    }
-    ctx_map.deinit();
+    // router.deinit();
+    // // then we deinit the button registry
+    // registry.deinit();
+    //
+    // // deinit all the mount functions
+    // mounted_funcs.deinit();
+    // mounted_ctx_funcs.deinit();
+    // destroy_funcs.deinit();
+    // updated_funcs.deinit();
+    // created_funcs.deinit();
+    //
+    // // dideint the button ctx_registry
+    // var ctx_itr = ctx_registry.iterator();
+    // while (ctx_itr.next()) |entry| {
+    //     const node = entry.value_ptr.*;
+    //     node.data.deinitFn(node);
+    // }
+    // ctx_registry.deinit();
+    //
+    // var callback_itr = callback_registry.iterator();
+    // while (callback_itr.next()) |entry| {
+    //     const node = entry.value_ptr.*;
+    //     node.data.deinitFn(node);
+    // }
+    // callback_registry.deinit();
+    //
+    // // dideint the button ctx_registry
+    // var fetch_itr = fetch_registry.iterator();
+    // while (fetch_itr.next()) |entry| {
+    //     const node = entry.value_ptr.*;
+    //     node.data.deinitFn(node);
+    // }
+    // fetch_registry.deinit();
+    //
+    // var evt_inst_itr = events_inst_callbacks.iterator();
+    // while (evt_inst_itr.next()) |entry| {
+    //     const node = entry.value_ptr.*;
+    //     node.data.deinit(node);
+    // }
+    // events_inst_callbacks.deinit();
+    //
+    // var hooks_inst_itr = hooks_inst_callbacks.iterator();
+    // while (hooks_inst_itr.next()) |entry| {
+    //     const node = entry.value_ptr.*;
+    //     node.data.deinit(node);
+    // }
+    // hooks_inst_callbacks.deinit();
+    //
+    // // we deinit the pages
+    // page_map.deinit();
+    // layout_map.deinit();
+    //
+    // // then we call all the component deinit functions for all the signals attached
+    // var deinit_itr = page_deinit_map.iterator();
+    // while (deinit_itr.next()) |entry| {
+    //     const de = entry.value_ptr.*;
+    //     @call(.auto, de, .{});
+    // }
+    // page_deinit_map.deinit();
+    //
+    // Fabric.motions.deinit();
+    // component_subscribers.deinit();
+    // // grain_subs.deinit();
+    //
+    // // then we iterate trhough the context maps
+    // var itr = ctx_map.iterator();
+    // while (itr.next()) |item| {
+    //     // the ctx map recusrivley calls the deinit and destroy method for all ui nodes
+    //     item.value_ptr.*.deinit();
+    //     allocator_global.destroy(item.value_ptr.*);
+    // }
+    // ctx_map.deinit();
 }
 
 /// The LifeCycle struct
@@ -633,7 +621,8 @@ fn callNestedLayouts() void {
 }
 
 var clean_up_ctx: *UIContext = undefined;
-pub fn renderCycle(route: []const u8) void {
+pub fn renderCycle(route_ptr: [*:0]u8) void {
+    const route = std.mem.span(route_ptr);
     key_depth_map.clearRetainingCapacity();
     Fabric.registry.clearRetainingCapacity();
     // Fabric.mounted_funcs.clearRetainingCapacity();
@@ -773,7 +762,9 @@ pub fn createPage(style: ?*const Style, path: []const u8, page: fn () void, page
     };
 
     current_ctx = path_ctx;
-    path_ctx.stack.?.ptr.?.style = style;
+    if (style) |s| {
+        path_ctx.stack.?.ptr.?.style = s.*;
+    }
     router.addRoute(path, path_ctx, page) catch |err| {
         println("Could not put route {any}\n", .{err});
     };
@@ -1453,7 +1444,7 @@ export fn markAllNonLayoutNodesDirtyRemoveList() usize {
 }
 
 fn iterateChildren(node: *UINode) void {
-    Fabric.println("Iterate {s} {any}\n", .{ node.text, node.style.?.font_size });
+    Fabric.println("Iterate {s}\n", .{node.text});
 
     for (node.children.items) |child| {
         iterateChildren(child);
@@ -1495,15 +1486,12 @@ fn createUUIDS(node: *UINode) void {
 
 /// Calling route renderCycle will mark eveything as dirty
 export fn callRouteRenderCycle(ptr: [*:0]u8) void {
-    const route: []const u8 = std.mem.span(ptr);
-    renderCycle(route);
+    renderCycle(ptr);
     markChildrenDirty(current_ctx.root.?);
     return;
 }
 export fn setRouteRenderTree(ptr: [*:0]u8) void {
-    const route: []const u8 = std.mem.span(ptr);
-    defer allocator_global.free(route);
-    renderCycle(route);
+    renderCycle(ptr);
     return;
 }
 
@@ -1525,60 +1513,61 @@ pub fn findNodeByUUID(ui_node: *UINode, uuid: []const u8) ?*UINode {
 
 // Export memory layout information for JavaScript to correctly read the struct
 // Export function to get a pointer to the memory layout information
-var layout_info = struct {
+// Corrected layout information
+var layout_info = packed struct {
     render_command_size: u32,
+
+    // Offsets within RenderCommand
     elem_type_offset: u32,
     text_ptr_offset: u32,
-    text_len_offset: u32,
     href_ptr_offset: u32,
-    href_len_offset: u32,
-    style_offset: u32,
-    style_size: u32,
-    p__btn_id_offset: u32,
-    p__dialog_id_offset: u32,
-    p__dialog_len_offset: u32,
     id_ptr_offset: u32,
-    id_len_offset: u32,
-    show: u32,
-    hooks: u32,
+    show_offset: u32,
+    hooks_offset: u32,
     node_ptr_offset: u32,
-    p__hover_offset: u32,
-    p__hover_size: u32,
-    exit_animation: u32,
-    exit_animation_len: u32,
-    classname: u32,
-    classname_len: u32,
-    p__focus_offset: u32,
-    p__focus_size: u32,
-    p__focus_within_offset: u32,
-    p__focus_within_size: u32,
+    classname_ptr_offset: u32,
+
+    // Offsets for fields inside the nested 'style' struct
+    style_btn_id_offset: u32,
+    style_dialog_id_offset: u32,
+    style_exit_animation_ptr_offset: u32,
+
+    // Offsets for fields inside the nested 'hover' struct
+    hover_size: u32,
+    hover_offset: u32,
+
+    // Offsets for fields inside the nested 'focus' struct
+    focus_size: u32,
+    focus_offset: u32,
+
+    // Offsets for fields inside the nested 'focus_within' struct
+    focus_within_size: u32,
+    focus_within_offset: u32,
 }{
     .render_command_size = @sizeOf(RenderCommand),
+
+    // --- Direct fields of RenderCommand ---
     .elem_type_offset = @offsetOf(RenderCommand, "elem_type"),
     .text_ptr_offset = @offsetOf(RenderCommand, "text"),
-    .text_len_offset = @offsetOf(RenderCommand, "text") + @sizeOf(usize),
     .href_ptr_offset = @offsetOf(RenderCommand, "href"),
-    .href_len_offset = @offsetOf(RenderCommand, "href") + @sizeOf(usize),
-    .style_offset = @offsetOf(RenderCommand, "style"),
-    .style_size = @sizeOf(Style),
-    .p__btn_id_offset = @offsetOf(Style, "btn_id"),
-    .p__dialog_id_offset = @offsetOf(Style, "dialog_id"),
-    .p__dialog_len_offset = @offsetOf(Style, "dialog_id") + @sizeOf(usize),
     .id_ptr_offset = @offsetOf(RenderCommand, "id"),
-    .id_len_offset = @offsetOf(RenderCommand, "id") + @sizeOf(usize),
-    .show = @offsetOf(RenderCommand, "show"),
-    .hooks = @offsetOf(RenderCommand, "hooks"),
+    .show_offset = @offsetOf(RenderCommand, "show"),
+    .hooks_offset = @offsetOf(RenderCommand, "hooks"),
     .node_ptr_offset = @offsetOf(RenderCommand, "node_ptr"),
-    .p__hover_offset = @offsetOf(RenderCommand, "hover"),
-    .p__hover_size = @sizeOf(Hover),
-    .exit_animation = @offsetOf(Style, "exit_animation"),
-    .exit_animation_len = @offsetOf(Style, "exit_animation") + @sizeOf(usize),
-    .classname = @offsetOf(Style, "style_id"),
-    .classname_len = @offsetOf(Style, "style_id") + @sizeOf(usize),
-    .p__focus_offset = @offsetOf(RenderCommand, "focus"),
-    .p__focus_size = @sizeOf(Focus),
-    .p__focus_within_offset = @offsetOf(RenderCommand, "focus_within"),
-    .p__focus_within_size = @sizeOf(Focus),
+    .classname_ptr_offset = @offsetOf(RenderCommand, "class"),
+
+    // --- Absolute offsets for fields within the nested 'style' struct ---
+    .style_btn_id_offset = @offsetOf(RenderCommand, "style") + @offsetOf(Style, "btn_id"),
+    .style_dialog_id_offset = @offsetOf(RenderCommand, "style") + @offsetOf(Style, "dialog_id"),
+    .style_exit_animation_ptr_offset = @offsetOf(RenderCommand, "style") + @offsetOf(Style, "exit_animation"),
+
+    // --- Nested struct sizes and offsets ---
+    .hover_offset = @offsetOf(RenderCommand, "hover"),
+    .hover_size = @sizeOf(Hover),
+    .focus_offset = @offsetOf(RenderCommand, "focus"),
+    .focus_size = @sizeOf(Focus),
+    .focus_within_offset = @offsetOf(RenderCommand, "focus_within"),
+    .focus_within_size = @sizeOf(Focus),
 };
 pub export fn allocateLayoutInfo() *u8 {
     const info_ptr: *u8 = @ptrCast(&layout_info);

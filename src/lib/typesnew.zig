@@ -282,6 +282,13 @@ pub const Pos = struct {
     }
 };
 
+pub const Dimensions = struct {
+    width: Sizing = .{},
+    height: Sizing = .{},
+    pub const grow = Dimensions{ .height = .grow, .width = .grow };
+    pub const fid = Dimensions{ .height = .fit, .width = .fit };
+};
+
 pub const Color = struct {
     r: u8 = 0,
     g: u8 = 0,
@@ -754,15 +761,10 @@ pub const Transform = struct {
     percent: f32 = 0,
     type: TransformType = .none,
     opacity: ?u32 = null,
-
-    pub fn scale() Transform {
-        return .{ .scale_size = 1.05, .type = .scale };
-    }
 };
 
 pub const Focus = struct {
     position: ?Position = null,
-    display: ?FlexType = null,
     direction: ?Direction = null,
     width: ?Sizing = null,
     height: ?Sizing = null,
@@ -960,17 +962,11 @@ pub const Outline = enum(u8) {
 };
 
 pub const FlexType = enum(u8) {
-    Flex = 0, // "flex"
-    Center = 1,
-    Stack = 2, // "inline-flex"
-    Flow = 3, // "inherit"
-    // Initial = 3, // "initial"
-    // Revert = 4, // "revert"
-    // Unset = 5, // "unset"
-    // InlineBlock = 7, // "inline-block"
-    // Inline = 8, // "inline-flex"
-    None = 4, // "centers the child content"
-    CenterStack = 5, // "centers the child content"
+    center = 0,
+    center_stack = 1,
+    stack = 2, // "inline-flex"
+    flow = 3, // "inherit"
+    none = 4, // "centers the child content"
 };
 
 // Enum definition for flex-wrap property
@@ -1105,9 +1101,11 @@ pub const TransformOrigin = enum(u8) {
 };
 
 pub const Layout = struct {
+    flex_type: FlexType = .flow,
     x: Alignment = .start,
     y: Alignment = .start,
     pub const center = Layout{ .x = .center, .y = .center };
+    pub const center_stack = Layout{ .x = .center, .y = .center, .flex_type = .center_stack };
     pub const top_center = Layout{ .x = .center, .y = .start };
     pub const left_center = Layout{ .x = .start, .y = .center };
     pub const right_center = Layout{ .x = .end, .y = .center };
@@ -1229,41 +1227,9 @@ pub const Visual = struct {
         };
     }
 
-    pub fn font_swc(size: i32, weight: usize, color: Color) Visual {
-        return .{
-            .font_size = size,
-            .font_weight = weight,
-            .text_color = color,
-        };
-    }
-
     // Background shortcuts
     pub fn bg(color: Color) Visual {
         return .{ .background = color };
-    }
-
-    pub fn pill(color: Color) Visual {
-        return .{ .border = .pill(color) };
-    }
-
-    pub fn when(condition: bool, visual_true: Visual, visual_false: Visual) Visual {
-        if (condition) {
-            return visual_true;
-        } else {
-            return visual_false;
-        }
-    }
-};
-
-pub const Interactive = struct {
-    hover: ?Visual = null,
-    focus: ?Visual = null,
-    focus_within: ?Visual = null,
-
-    pub fn hover_scale() Interactive {
-        return .{
-            .hover = .{ .transform = .scale() },
-        };
     }
 };
 
@@ -1289,6 +1255,9 @@ pub const Style = struct {
 
     /// CSS class-like identifier for grouping styles
     style_id: ?[]const u8 = null,
+
+    /// How the children elements are positioned out
+    layout: ?Layout = null,
 
     /// Positioning method (static, relative, absolute, fixed)
     position: ?Position = null,
@@ -1322,7 +1291,7 @@ pub const Style = struct {
 
     /// Alignment configuration for child elements
     /// x: horizontal alignment, y: vertical alignment
-    layout: ?Layout = null,
+    // child_alignment: ?Layout = null,
 
     /// Gap between child elements in pixels
     child_gap: u32 = 0,
@@ -1369,23 +1338,19 @@ pub const Style = struct {
     /// Cursor type when hovering over element
     cursor: ?Cursor = null,
 
-    /// Interactive
-    interactive: ?Interactive = null,
+    /// Hover state styling
+    hover: ?Visual = null,
 
-    // /// Hover state styling
-    // hover: ?Visual = null,
-    //
-    // /// Focus state styling
-    // focus: ?Visual = null,
-    //
-    // /// Focus Within state styling
-    // focus_within: ?Visual = null,
+    /// Focus state styling
+    focus: ?Visual = null,
+
+    /// Focus Within state styling
+    focus_within: ?Visual = null,
 
     /// Button identifier for click handling
     btn_id: u32 = 0,
 
-    /// Dialog identifier for modal/popup elements
-    dialog_id: ?[]const u8 = null,
+    dialog_id: u32 = 0,
 
     /// Array of child-specific style overrides
     child_styles: ?[]const ChildStyle = null,
@@ -1494,19 +1459,6 @@ pub const Style = struct {
             }
         }
         return result;
-    }
-
-    pub fn extend(self: *Style, target: Style) void {
-        inline for (@typeInfo(Style).@"struct".fields) |field| {
-            const target_value = @field(target, field.name);
-            const field_value = @field(self, field.name);
-            const default_value = @field(default, field.name);
-
-            // Only override if the field is not the default value
-            if (!std.meta.eql(field_value, target_value) and !std.meta.eql(target_value, default_value)) {
-                @field(self, field.name) = target_value;
-            }
-        }
     }
 
     /// Creates a new style by merging the provided overrides with the current default style.

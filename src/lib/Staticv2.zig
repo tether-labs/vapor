@@ -698,6 +698,74 @@ const FlexType = enum(u8) {
     None = 4, // "centers the child content"
 };
 
+pub const ChainClose = struct {
+    const Self = @This();
+    elem_type: Fabric.ElementType,
+    _flex_type: FlexType = .Flex,
+    text: []const u8 = "",
+    href: []const u8 = "",
+    svg: []const u8 = "",
+    aria_label: ?[]const u8 = null,
+
+    pub fn Text(text: []const u8) Self {
+        return Self{ .elem_type = .Text, .text = text };
+    }
+
+    pub fn Icon(name: []const u8) Self {
+        return Self{ .elem_type = .Icon, .href = name };
+    }
+
+    pub fn Image(options: struct { src: []const u8 }) Self {
+        return Self{ .elem_type = .Image, .href = options.src };
+    }
+
+    pub fn Svg(options: struct { svg: []const u8 }) Self {
+        return Self{ .elem_type = .Svg, .svg = options.svg };
+    }
+
+    pub inline fn style(self: *const Self, style_ptr: *const Fabric.Style) void {
+        var mutable_style: Style = undefined;
+        var elem_decl = Fabric.ElementDecl{
+            .dynamic = .static,
+            .elem_type = self.elem_type,
+            .text = self.text,
+            .style = style_ptr,
+            .href = self.href,
+            .svg = self.svg,
+            .aria_label = self.aria_label,
+        };
+
+        if (self._flex_type == .Center) {
+            // Create a mutable copy of the style struct
+            mutable_style = style_ptr.*;
+
+            mutable_style.layout = .center;
+            elem_decl.style = &mutable_style;
+        } else if (self._flex_type == .Stack) {
+            mutable_style = style_ptr.*;
+            mutable_style.direction = .column;
+            elem_decl.style = &mutable_style;
+        }
+
+        _ = Fabric.LifeCycle.open(elem_decl);
+        Fabric.LifeCycle.configure(elem_decl);
+        return Fabric.LifeCycle.close({});
+    }
+
+    pub inline fn plain(self: *const Self) void {
+        const elem_decl = Fabric.ElementDecl{
+            .dynamic = .static,
+            .elem_type = self.elem_type,
+            .text = self.text,
+        };
+        _ = Fabric.LifeCycle.open(elem_decl);
+        Fabric.LifeCycle.configure(elem_decl);
+        Fabric.LifeCycle.close({});
+    }
+};
+
+
+
 pub const Chain = struct {
     const Self = @This();
     elem_type: Fabric.ElementType,
@@ -731,6 +799,7 @@ pub const Chain = struct {
     }
 
     pub inline fn style(self: *const Self, style_ptr: *const Fabric.Style) fn (void) void {
+        var mutable_style: Style = undefined;
         var elem_decl = Fabric.ElementDecl{
             .dynamic = .static,
             .elem_type = self.elem_type,
@@ -743,14 +812,12 @@ pub const Chain = struct {
 
         if (self._flex_type == .Center) {
             // Create a mutable copy of the style struct
-            var mutable_style = style_ptr.*;
+            mutable_style = style_ptr.*;
 
-            // Now you can safely modify the local, mutable copy
             mutable_style.layout = .center;
-            // mutable_style.layout.y = .center;
             elem_decl.style = &mutable_style;
         } else if (self._flex_type == .Stack) {
-            var mutable_style = style_ptr.*;
+            mutable_style = style_ptr.*;
             mutable_style.direction = .column;
             elem_decl.style = &mutable_style;
         }
