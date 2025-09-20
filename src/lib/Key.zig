@@ -22,6 +22,26 @@ pub const KeyGenerator = struct {
         call_counter = count;
     }
 
+    pub fn generateCommonStyleKey(ids: []const []const u8, allocator: *std.mem.Allocator) []const u8 {
+        var hasher = std.hash.Wyhash.init(0);
+
+        // Hash all the IDs in order
+        for (ids) |id| {
+            hasher.update(id);
+        }
+
+        // Generate the final hash
+        const hash = hasher.final();
+
+        // Convert to UUID-like string (128-bit represented as hex)
+        const result = std.fmt.allocPrint(allocator.*, "common-{x:0>16}", .{hash}) catch |err| {
+            std.log.err("Could not allocate common style key: {any}", .{err});
+            return "fallback-common-key";
+        };
+
+        return result;
+    }
+
     pub fn generateKey(
         elem_type: ElementType,
         parent_key: []const u8,

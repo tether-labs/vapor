@@ -19,6 +19,8 @@ const getVisualStyle = @import("convertStyleCustomWriter.zig").getVisualStyle;
 // const getFocusStyle = @import("convertFocus.zig").getFocusStyle;
 // const getFocusWithinStyle = @import("convertFocusWithin.zig").getFocusWithinStyle;
 const getStyle = @import("convertStyleCustomWriter.zig").getStyle;
+const StyleCompiler = @import("convertStyleCustomWriter.zig");
+const generateStyle = @import("convertStyleCustomWriter.zig").generateStyle;
 const generateInputHTML = @import("grabInputDetails.zig").generateInputHTML;
 const grabInputDetails = @import("grabInputDetails.zig");
 const utils = @import("utils.zig");
@@ -45,6 +47,7 @@ pub var page_map: std.StringHashMap(*const fn () void) = undefined;
 pub var layout_map: std.StringHashMap(*const fn (*const fn () void) void) = undefined;
 pub var page_deinit_map: std.StringHashMap(*const fn () void) = undefined;
 pub var global_rerender: bool = false;
+pub var has_dirty: bool = false;
 pub var rerender_everything: bool = false;
 pub var grain_rerender: bool = false;
 pub var grain_element_uuid: []const u8 = "";
@@ -305,7 +308,6 @@ pub var component_subscribers: std.ArrayList(*Rune.ComponentNode) = undefined;
 pub var motions: std.ArrayList(Animation.Motion) = undefined;
 // Define a type for continuation functions
 var callback_count: u32 = 0;
-var current_route: []const u8 = "/root";
 const ContinuationFn = *const fn () void;
 
 // Global array to store continuations
@@ -362,6 +364,15 @@ pub fn init(target: *Fabric, config: FabricConfig) void {
     page_map = std.StringHashMap(*const fn () void).init(config.allocator.*);
     layout_map = std.StringHashMap(*const fn (*const fn () void) void).init(config.allocator.*);
     page_deinit_map = std.StringHashMap(*const fn () void).init(config.allocator.*);
+    UIContext.nodes = config.allocator.alloc(*UINode, 256) catch unreachable;
+    UIContext.seen_nodes = config.allocator.alloc(bool, 256) catch unreachable;
+    UIContext.common_nodes = config.allocator.alloc(usize, 256) catch unreachable;
+    UIContext.common_size_nodes = config.allocator.alloc(usize, 256) catch unreachable;
+    UIContext.common_uuids = config.allocator.alloc([]const u8, 256) catch unreachable;
+    UIContext.common_size_uuids = config.allocator.alloc([]const u8, 256) catch unreachable;
+    UIContext.base_styles = config.allocator.alloc(Style, 256) catch unreachable;
+    @memset(UIContext.seen_nodes, false);
+    @memset(UIContext.common_nodes, 0);
 
     const theme = ColorTheme{};
     Theme = theme;
@@ -621,8 +632,10 @@ fn callNestedLayouts() void {
 }
 
 var clean_up_ctx: *UIContext = undefined;
+var current_route: []const u8 = "/root";
 pub fn renderCycle(route_ptr: [*:0]u8) void {
     const route = std.mem.span(route_ptr);
+    current_route = route;
     key_depth_map.clearRetainingCapacity();
     Fabric.registry.clearRetainingCapacity();
     // Fabric.mounted_funcs.clearRetainingCapacity();
@@ -680,7 +693,6 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     current_path = "";
     callNestedLayouts();
     endPage(new_ctx);
-    // iterateChildren(new_ctx.root.?);
     // Reconcile between old and new
     Reconciler.reconcile(old_ctx, new_ctx, route);
 
@@ -778,6 +790,7 @@ pub fn createPage(style: ?*const Style, path: []const u8, page: fn () void, page
 
 pub fn endPage(path_ctx: *UIContext) void {
     path_ctx.endLayout();
+    // UIContext.reconcileStyles(path_ctx.root.?);
     path_ctx.traverse();
 }
 
@@ -1762,9 +1775,14 @@ export fn shouldRerender() bool {
     return global_rerender;
 }
 
+export fn hasDirty() bool {
+    return has_dirty;
+}
+
 export fn resetRerender() void {
     global_rerender = false;
     rerender_everything = false;
+    has_dirty = false;
 }
 
 export fn setRerenderTrue() void {
@@ -1884,13 +1902,40 @@ pub fn addToClassesList(id: []const u8, style_id: []const u8) void {
         return;
     };
 }
-//
+
 pub fn addToRemoveClassesList(id: []const u8, style_id: []const u8) void {
     const cltr = Class{ .element_id = id, .style_id = style_id };
     classes_to_remove.append(cltr) catch |err| {
         println("Could not add to class_list: {any}\n", .{err});
         return;
     };
+}
+
+const writer_t = *std.io.FixedBufferStream([]u8).Writer;
+// Global buffer to store the CSS string for returning to JavaScript
+var common_style_buffer: [4096]u8 = undefined;
+var common_style: []const u8 = "";
+pub export fn getBaseStyles() ?[*]const u8 {
+    var fbs = std.io.fixedBufferStream(&common_style_buffer);
+    var writer = fbs.writer();
+    const base_styles = UIContext.base_styles[0..UIContext.base_style_count];
+    for (base_styles) |style| {
+        generateStyle(null, &style);
+        writer.writeByte('.') catch return null;
+        writer.writeAll(style.style_id.?) catch return null;
+        writer.writeAll(" {\n") catch return null;
+        writer.writeAll(StyleCompiler.style_style) catch return null;
+        writer.writeAll("}\n") catch return null;
+    }
+
+    const len: usize = @intCast(fbs.getPos() catch 0);
+    common_style_buffer[len] = 0;
+    common_style = common_style_buffer[0..len];
+    return common_style.ptr;
+}
+
+pub export fn getBaseStylesLen() usize {
+    return common_style.len;
 }
 
 pub export fn pendingClassesToAdd() void {
@@ -1948,6 +1993,10 @@ pub extern fn callClickWASM(
     id_len: usize,
 ) void;
 
+/// name: name of the interval
+/// cb: callback function
+/// args: arguments to pass to the callback function
+/// delay: delay in ms
 pub fn loopInterval(name: []const u8, cb: anytype, args: anytype, delay: u32) void {
     const Args = @TypeOf(args);
     const Closure = struct {

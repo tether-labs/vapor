@@ -72,6 +72,7 @@ pub const ElementType = enum(u8) {
     TextGradient,
     Gradient,
     Virtualize,
+    ButtonCycle,
 };
 
 pub fn switchColorTheme() void {
@@ -142,6 +143,7 @@ pub const SizingConstraint = union(enum) {
 pub const Size = struct {
     width: Sizing = .{},
     height: Sizing = .{},
+    pub const full = Size{ .width = .percent(100), .height = .percent(100) };
     pub fn square_px(size: f32) Size {
         return .{
             .width = .px(size),
@@ -154,28 +156,33 @@ pub const Size = struct {
             .height = .percent(size),
         };
     }
+    /// Creates a height sizing
     pub fn h(size: Sizing) Size {
         return .{
             .height = size,
         };
     }
+    /// Creates a width sizing
     pub fn w(size: Sizing) Size {
         return .{
             .width = size,
         };
     }
+    /// Creates a height and width sizing
     pub fn hw(height: Sizing, width: Sizing) Size {
         return .{
             .width = width,
             .height = height,
         };
     }
+    /// Creates a height and width sizing with pixel values
     pub fn hw_px(height: f32, width: f32) Size {
         return .{
             .width = .px(width),
             .height = .px(height),
         };
     }
+    /// Creates a height and width sizing with percent values
     pub fn hw_percent(height: f32, width: f32) Size {
         return .{
             .width = .percent(width),
@@ -206,6 +213,13 @@ pub const Sizing = struct {
     }
 
     pub fn percent(size: f32) Sizing {
+        return .{ .type = .percent, .size = .{ .minmax = .{
+            .min = size,
+            .max = size,
+        } } };
+    }
+
+    pub fn @"%"(size: f32) Sizing {
         return .{ .type = .percent, .size = .{ .minmax = .{
             .min = size,
             .max = size,
@@ -473,6 +487,12 @@ pub const Margin = struct {
             .bottom = bottom,
         };
     }
+    pub fn br(bottom: u32, right: u32) Margin {
+        return Margin{
+            .bottom = bottom,
+            .right = right,
+        };
+    }
     pub fn lr(left: u32, right: u32) Margin {
         return Margin{
             .left = left,
@@ -504,6 +524,34 @@ pub const Margin = struct {
 pub const Overflow = enum(u8) {
     scroll = 0,
     hidden = 1,
+};
+
+pub const Scroll = struct {
+    x: ?Overflow = null,
+    y: ?Overflow = null,
+
+    pub fn none() Scroll {
+        return .{ .x = .hidden, .y = .hidden };
+    }
+
+    pub fn none_x() Scroll {
+        return .{ .x = .hidden };
+    }
+
+    pub fn none_y() Scroll {
+        return .{ .y = .hidden };
+    }
+    pub fn scroll() Scroll {
+        return .{ .x = .scroll, .y = .scroll };
+    }
+
+    pub fn scroll_x() Scroll {
+        return .{ .x = .scroll };
+    }
+
+    pub fn scroll_y() Scroll {
+        return .{ .y = .scroll };
+    }
 };
 
 pub const BorderRadius = struct {
@@ -607,6 +655,15 @@ pub const Border = struct {
         };
     }
 
+    pub fn tb(thickness: f32) Border {
+        return Border{
+            .top = thickness,
+            .bottom = thickness,
+            .left = 0,
+            .right = 0,
+        };
+    }
+
     pub fn b(thickness: f32) Border {
         return Border{
             .top = 0,
@@ -686,6 +743,14 @@ pub const Position = struct {
     bottom: ?Pos = null,
     type: PositionType = .relative,
 
+    pub const nav = Position{
+        .left = .px(0),
+        .right = .px(0),
+        .type = .fixed,
+        .top = .px(0),
+    };
+
+    /// Creates a top bottom left right position
     pub fn tblr(top: Pos, bottom: Pos, left: Pos, right: Pos, pos_type: PositionType) Position {
         return .{
             .top = top,
@@ -695,6 +760,7 @@ pub const Position = struct {
             .type = pos_type,
         };
     }
+    /// Creates a top bottom position
     pub fn tb(top: Pos, bottom: Pos, pos_type: PositionType) Position {
         return .{
             .top = top,
@@ -702,6 +768,7 @@ pub const Position = struct {
             .type = pos_type,
         };
     }
+    /// Creates a left right position
     pub fn lr(left: Pos, right: Pos, pos_type: PositionType) Position {
         return .{
             .left = left,
@@ -709,6 +776,7 @@ pub const Position = struct {
             .type = pos_type,
         };
     }
+    /// Creates a bottom right position
     pub fn br(bottom: Pos, right: Pos, pos_type: PositionType) Position {
         return .{
             .bottom = bottom,
@@ -716,6 +784,7 @@ pub const Position = struct {
             .type = pos_type,
         };
     }
+    /// Creates a top left position
     pub fn tl(top: Pos, left: Pos, pos_type: PositionType) Position {
         return .{
             .top = top,
@@ -723,6 +792,7 @@ pub const Position = struct {
             .type = pos_type,
         };
     }
+    /// Creates a bottom left position
     pub fn bl(bottom: Pos, left: Pos, pos_type: PositionType) Position {
         return .{
             .bottom = bottom,
@@ -730,6 +800,7 @@ pub const Position = struct {
             .type = pos_type,
         };
     }
+    /// Creates a top right position
     pub fn tr(top: Pos, right: Pos, pos_type: PositionType) Position {
         return .{
             .top = top,
@@ -746,17 +817,41 @@ pub const TransformType = enum {
     scale,
     scaleY,
     scaleX,
+    rotate,
+    rotateX,
+    rotateY,
+    rotateXYZ,
 };
 
 pub const Transform = struct {
     scale_size: f32 = 1,
     dist: f32 = 0,
     percent: f32 = 0,
+    deg: f32 = 0,
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
     type: TransformType = .none,
     opacity: ?u32 = null,
 
     pub fn scale() Transform {
         return .{ .scale_size = 1.05, .type = .scale };
+    }
+
+    pub fn rotate(deg: f32) Transform {
+        return .{ .deg = deg, .type = .rotate };
+    }
+
+    pub fn rotateX(deg: f32) Transform {
+        return .{ .deg = deg, .type = .rotateX };
+    }
+
+    pub fn rotateY(deg: f32) Transform {
+        return .{ .deg = deg, .type = .rotateY };
+    }
+
+    pub fn rotateXYZ(x: f32, y: f32, z: f32) Transform {
+        return .{ .x = x, .y = y, .z = z, .type = .rotateXYZ };
     }
 };
 
@@ -1107,6 +1202,7 @@ pub const TransformOrigin = enum(u8) {
 pub const Layout = struct {
     x: Alignment = .start,
     y: Alignment = .start,
+    pub const flex = Layout{};
     pub const center = Layout{ .x = .center, .y = .center };
     pub const top_center = Layout{ .x = .center, .y = .start };
     pub const left_center = Layout{ .x = .start, .y = .center };
@@ -1166,6 +1262,10 @@ const BorderGrouped = struct {
     // Side-specific shortcuts
     pub fn bottom(color: Color) BorderGrouped {
         return .{ .thickness = .b(1), .color = color };
+    }
+
+    pub fn tb(color: Color) BorderGrouped {
+        return .{ .thickness = .tb(1), .color = color };
     }
 
     pub fn top(color: Color) BorderGrouped {
@@ -1229,6 +1329,13 @@ pub const Visual = struct {
         };
     }
 
+    pub fn font_sc(size: i32, color: Color) Visual {
+        return .{
+            .font_size = size,
+            .text_color = color,
+        };
+    }
+
     pub fn font_swc(size: i32, weight: usize, color: Color) Visual {
         return .{
             .font_size = size,
@@ -1252,6 +1359,13 @@ pub const Visual = struct {
         } else {
             return visual_false;
         }
+    }
+
+    pub fn button(background: Color, border: BorderGrouped) Visual {
+        return .{
+            .background = background,
+            .border = border,
+        };
     }
 };
 
@@ -1308,14 +1422,8 @@ pub const Style = struct {
     /// Style Props
     visual: ?Visual = null,
 
-    /// Content overflow behavior (visible, hidden, scroll, auto)
-    overflow: ?Overflow = null,
-
     /// Horizontal overflow behavior
-    overflow_x: ?Overflow = null,
-
-    /// Vertical overflow behavior
-    overflow_y: ?Overflow = null,
+    scroll: ?Scroll = null,
 
     /// Text decoration (underline, strikethrough, etc.)
     text_decoration: ?TextDecoration = null,

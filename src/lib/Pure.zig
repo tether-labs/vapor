@@ -9,6 +9,9 @@ const Transition = @import("Transition.zig").Transition;
 const TransitionState = @import("Transition.zig").TransitionState;
 const Element = @import("Element.zig").Element;
 const LifeCycle = Fabric.LifeCycle;
+const Static = @import("Static.zig");
+const Binded = @import("Binded.zig");
+const Types = @import("types.zig");
 
 const Style = types.Style;
 const EventType = types.EventType;
@@ -192,13 +195,13 @@ const AllocTextOptions = struct {
     style: ?*const Style = null,
 };
 
-pub inline fn AllocText(fmt: []const u8, args: anytype, options: AllocTextOptions) void {
+pub inline fn AllocText(fmt: []const u8, args: anytype, style: *const Style) void {
     const text = std.fmt.allocPrint(Fabric.allocator_global, fmt, args) catch |err| {
         println("Error Could not format argument alloc Error details: {any}\n", .{err});
         return;
     };
     const elem_decl = ElementDecl{
-        .style = options.style,
+        .style = style,
         .dynamic = .pure,
         .elem_type = .AllocText,
         .text = text,
@@ -211,6 +214,378 @@ pub inline fn AllocText(fmt: []const u8, args: anytype, options: AllocTextOption
     _ = LifeCycle.close({});
     return;
 }
+
+const FlexType = enum(u8) {
+    Flex = 0, // "flex"
+    Center = 1,
+    Stack = 2, // "inline-flex"
+    Flow = 3, // "inherit"
+    // Initial = 3, // "initial"
+    // Revert = 4, // "revert"
+    // Unset = 5, // "unset"
+    // InlineBlock = 7, // "inline-block"
+    // Inline = 8, // "inline-flex"
+    None = 4, // "centers the child content"
+};
+
+const ButtonOptions = struct {
+    on_press: ?*const fn () void = null,
+    onRelease: ?*const fn () void = null,
+    aria_label: ?[]const u8 = null,
+};
+
+pub fn VirtualList(comptime T: type) type {
+    return struct {
+        var total_height: f32 = 0;
+        var list_height: f32 = 0;
+        var total_items: f32 = 0;
+        var scroll_top_max: f32 = 0;
+        var total_window_items: usize = 0;
+        const VirtualListOptions = struct {
+            data: []const T,
+            render: *const fn (T, usize) void,
+            buffer_size: usize = 10,
+            item_height: Types.Sizing,
+            item_width: Types.Sizing,
+        };
+        const ScrollDirection = enum {
+            up,
+            down,
+            none,
+        };
+        const Self = @This();
+        data: []const T,
+        render: *const fn (T, usize) void,
+        buffer_size: f32 = 10,
+        item_height: f32,
+        item_width: f32,
+        _internal_slice: []T,
+        list_element: Element = undefined,
+        inner_container: Element = undefined,
+        window_element: Element = undefined,
+        current_scroll: f32 = 0, // the current scroll of the list
+        current_item_index: usize = 0, // the current item index
+
+        // Add these fields to your struct
+        prev_scroll_top: f32 = 0,
+        prev_item_index: f32 = 0,
+        up_threshold: f32 = 0,
+        down_threshold: f32 = 0,
+
+        pub fn init(options: VirtualListOptions) Self {
+
+
+            const calculated_item_height = options.item_height.size.minmax.min;
+            const calculated_item_width = options.item_width.size.minmax.min;
+
+            var item_height: f32 = 0;
+            var item_width: f32 = 0;
+            switch (options.item_height.type) {
+                .fit => item_height = calculated_item_height,
+                .min_max_vp => item_height = calculated_item_height,
+                .grow => item_height = calculated_item_height,
+                .percent => item_height = calculated_item_height * Fabric.browser_height / 100,
+                .fixed => item_height = options.item_height.size.minmax.min,
+                .elastic => item_height = calculated_item_height,
+                .elastic_percent => item_height = calculated_item_height,
+                .clamp_px => item_height = calculated_item_height,
+                .clamp_percent => item_height = calculated_item_height,
+                .none => {},
+            }
+            switch (options.item_width.type) {
+                .fit => item_width = calculated_item_width,
+                .min_max_vp => item_width = calculated_item_width,
+                .grow => item_width = calculated_item_width,
+                .percent => item_width = calculated_item_width * Fabric.browser_width / 100,
+                .fixed => item_width = options.item_width.size.minmax.min,
+                .elastic => item_width = calculated_item_width,
+                .elastic_percent => item_width = calculated_item_width,
+                .clamp_px => item_width = calculated_item_width,
+                .clamp_percent => item_width = calculated_item_width,
+                .none => {},
+            }
+
+            total_height = @as(f32, @floatFromInt(options.data.len)) * item_height;
+            total_items = @as(f32, @floatFromInt(options.data.len));
+            scroll_top_max = total_height - Fabric.browser_height;
+
+            const number_of_items_fit = @as(usize, @intFromFloat(@floor(Fabric.browser_height / item_height)));
+            const min_buffer: usize = 20;
+            const max_buffer: usize = 100;
+
+            // Use larger buffer for smaller visible counts, smaller buffer for larger visible counts
+            const buffer_size = if (number_of_items_fit <= 5)
+                @min(number_of_items_fit * 5, max_buffer)
+            else if (number_of_items_fit <= 20)
+                @min(number_of_items_fit * 3, max_buffer)
+            else
+                @min(number_of_items_fit * 2, max_buffer);
+
+            total_window_items = @max(min_buffer, @min(buffer_size, options.data.len));
+            Fabric.println("total_window_items {d}", .{total_window_items});
+
+            list_height = @as(f32, @floatFromInt(total_window_items)) * item_height;
+
+            var internal_slice: []T = Fabric.allocator_global.alloc(T, total_window_items) catch unreachable;
+            for (0..total_window_items) |i| {
+                internal_slice[i] = options.data[i];
+            }
+
+            return Self{
+                .data = options.data,
+                .render = options.render,
+                .buffer_size = @as(f32, @floatFromInt(options.buffer_size)),
+                .item_height = item_height,
+                .item_width = item_width,
+                ._internal_slice = internal_slice,
+                .list_element = Element{},
+                .inner_container = Element{},
+                .window_element = Element{},
+                .current_scroll = 0,
+                .current_item_index = 0,
+            };
+        }
+
+        fn mount(self: *Self) void {
+            Fabric.println("Mount {s}\n", .{self.inner_container._get_id().?});
+            _ = self.inner_container.addInstListener(.scroll, self, trackScroll);
+        }
+
+        fn rerender_list(self: *Self, current_index: f32, direction: ScrollDirection) void {
+            const start_index: usize = @max(0, @as(usize, @intFromFloat(@max(0, current_index - self.buffer_size))));
+            // Add 1 to include the end_index item, but cap at data length
+            const end_index: usize = @min(self.data.len, @as(usize, @intFromFloat(@min(total_items, current_index + self.buffer_size + 1))));
+
+            if (start_index >= self.data.len) return;
+
+            // Optional: Add momentum-based preloading
+            const preload_extra = switch (direction) {
+                .down => @min(5, self.data.len - end_index), // Preload 5 more items when scrolling down
+                .up => 0, // Less preloading when scrolling up
+                .none => 0,
+            };
+
+            const final_end = @min(self.data.len, end_index + preload_extra);
+
+            for (start_index..final_end, 0..) |data_index, i| {
+                self._internal_slice[i] = self.data[data_index];
+            }
+
+            // for (start_index..end_index, 0..) |data_index, i| {
+            //     self._internal_slice[i] = self.data[data_index];
+            // }
+
+            const translation = Fabric.fmtln("translateY({d}px)", .{start_index * @as(usize, @intFromFloat(self.item_height))});
+            self.window_element.mutateStyle("transform", .{ .string = translation });
+            Fabric.cycle();
+        }
+
+        pub fn trackScroll(self: *Self, _: *Fabric.Event) void {
+            const scroll_top: f32 = @floatFromInt(self.inner_container.getAttributeNumber("scrollTop"));
+            const current_item_index = @floor(@divExact(scroll_top, self.item_height));
+
+            // Determine scroll direction
+            const direction: ScrollDirection = if (scroll_top > self.prev_scroll_top) .down else if (scroll_top < self.prev_scroll_top) .up else .none;
+
+            // Check if we need to rerender based on direction and thresholds
+            const should_rerender = switch (direction) {
+                .down => scroll_top > self.down_threshold and !self.isAtEnd(current_item_index),
+                .up => scroll_top < self.up_threshold and !self.isAtStart(current_item_index),
+                .none => false,
+            };
+            if (should_rerender) {
+                self.rerender_list(current_item_index, direction);
+
+                // Update thresholds based on direction
+                switch (direction) {
+                    .down => {
+                        self.down_threshold = scroll_top + (5 * self.item_height); // Next rerender point
+                        self.up_threshold = scroll_top - (5 * self.item_height); // Reverse direction threshold
+                    },
+                    .up => {
+                        self.up_threshold = scroll_top - (5 * self.item_height); // Next rerender point
+                        self.down_threshold = scroll_top + (5 * self.item_height); // Reverse direction threshold
+                    },
+                    .none => {},
+                }
+            }
+
+            // Store current state for next comparison
+            self.prev_scroll_top = scroll_top;
+            self.prev_item_index = current_item_index;
+        }
+
+        fn isAtEnd(self: *Self, current_item_index: f32) bool {
+            return current_item_index + self.buffer_size - 1 >= @as(f32, @floatFromInt(self.data.len));
+        }
+
+        fn isAtStart(_: *Self, current_item_index: f32) bool {
+            return current_item_index <= 0;
+        }
+
+        pub fn generate(self: *Self) void {
+            Static.CtxHooks(.mounted, mount, .{self}, &.{
+                .size = .{ .width = .percent(100) },
+            })({
+                Binded.List(.{
+                    .element = &self.inner_container,
+                    .style = &.{
+                        .size = .{
+                            .height = .px(Fabric.browser_height),
+                            .width = .percent(100),
+                        },
+                        .direction = .column,
+                        .scroll = .scroll_y(),
+                        .padding = .all(0),
+                        .list_style = .none,
+                        .show_scrollbar = false,
+                    },
+                })({
+                    Binded.Box(.{
+                        .element = &self.list_element,
+                        .style = &.{
+                            .size = .{
+                                .height = .px(total_height),
+                                .width = .percent(100),
+                            },
+                            .direction = .column,
+                        },
+                    })({
+                        Binded.List(.{
+                            .element = &self.window_element,
+                            .style = &.{
+                                .position = .{
+                                    .type = .absolute,
+                                    .top = .px(0),
+                                },
+                                .list_style = .none,
+                                .size = .{
+                                    .height = .px(list_height),
+                                    .width = .percent(100),
+                                },
+                                .direction = .column,
+                                .scroll = .none(),
+                                .padding = .all(0),
+                            },
+                        })({
+                            for (self._internal_slice, 0..) |item, i| {
+                                Static.ListItem(.{ .style = &.{
+                                    .size = .{
+                                        .height = .px(self.item_height),
+                                        .width = .percent(self.item_width),
+                                    },
+                                } })({
+                                    @call(.auto, self.render, .{ item, i });
+                                });
+                            }
+                        });
+                    });
+                });
+            });
+        }
+    };
+}
+
+pub const Chain = struct {
+    const Self = @This();
+    elem_type: Fabric.ElementType,
+    _flex_type: FlexType = .Flex,
+    text: []const u8 = "",
+    href: []const u8 = "",
+    svg: []const u8 = "",
+    aria_label: ?[]const u8 = null,
+    options: ?ButtonOptions = null,
+
+    pub fn Text(text: []const u8) Self {
+        return Self{ .elem_type = .Text, .text = text };
+    }
+
+    pub inline fn AllocText(fmt: []const u8, args: anytype) Self {
+        const text = std.fmt.allocPrint(Fabric.allocator_global, fmt, args) catch |err| {
+            println("Error Could not format argument alloc Error details: {any}\n", .{err});
+            unreachable;
+        };
+
+        return Self{ .elem_type = .AllocText, .text = text };
+    }
+
+    pub fn Icon(name: []const u8) Self {
+        return Self{ .elem_type = .Icon, .href = name };
+    }
+
+    pub fn Button(options: ButtonOptions) Self {
+        return Self{ .elem_type = .Button, .aria_label = options.aria_label, .options = options };
+    }
+
+    pub fn ButtonCycle(options: ButtonOptions) Self {
+        return Self{ .elem_type = .ButtonCycle, .aria_label = options.aria_label, .options = options };
+    }
+
+    pub const Box = Self{ .elem_type = .FlexBox };
+    pub const Center = Self{ .elem_type = .FlexBox, ._flex_type = .Center };
+    pub const Stack = Self{ .elem_type = .FlexBox, ._flex_type = .Stack };
+
+    pub fn Link(options: struct { url: []const u8, aria_label: ?[]const u8 }) Self {
+        return Self{ .elem_type = .Link, .href = options.url, .aria_label = options.aria_label };
+    }
+
+    pub fn Image(options: struct { src: []const u8 }) Self {
+        return Self{ .elem_type = .Image, .href = options.src };
+    }
+
+    pub fn Svg(options: struct { svg: []const u8 }) Self {
+        return Self{ .elem_type = .Svg, .svg = options.svg };
+    }
+
+    pub inline fn style(self: *const Self, style_ptr: *const Fabric.Style) fn (void) void {
+        var elem_decl = Fabric.ElementDecl{
+            .dynamic = .pure,
+            .elem_type = self.elem_type,
+            .text = self.text,
+            .style = style_ptr,
+            .href = self.href,
+            .svg = self.svg,
+            .aria_label = self.aria_label,
+        };
+
+        if (self._flex_type == .Center) {
+            // Create a mutable copy of the style struct
+            var mutable_style = style_ptr.*;
+
+            // Now you can safely modify the local, mutable copy
+            mutable_style.layout = .center;
+            elem_decl.style = &mutable_style;
+        } else if (self._flex_type == .Stack) {
+            var mutable_style = style_ptr.*;
+            mutable_style.direction = .column;
+            elem_decl.style = &mutable_style;
+        }
+
+        const ui_node = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+
+        if (self.elem_type == .Button or self.elem_type == .ButtonCycle) {
+            if (self.options.?.on_press) |on_press| {
+                Fabric.registry.put(ui_node.uuid, on_press) catch |err| {
+                    println("Button Function Registry {any}\n", .{err});
+                };
+            }
+        }
+
+        Fabric.LifeCycle.configure(elem_decl);
+        return Fabric.LifeCycle.close;
+    }
+
+    pub inline fn plain(self: *const Self) void {
+        const elem_decl = Fabric.ElementDecl{
+            .dynamic = .static,
+            .elem_type = self.elem_type,
+            .text = self.text,
+        };
+        _ = Fabric.LifeCycle.open(elem_decl);
+        Fabric.LifeCycle.configure(elem_decl);
+        Fabric.LifeCycle.close({});
+    }
+};
 
 pub inline fn Text(text: []const u8, style: Style) void {
     const local = struct {

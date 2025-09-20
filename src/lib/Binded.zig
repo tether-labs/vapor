@@ -35,6 +35,23 @@ pub inline fn Center(options: CenterOptions) fn (void) void {
     return LifeCycle.close;
 }
 
+const ListOptions = struct {
+    element: *Element,
+    style: ?*const Style = null,
+};
+
+pub inline fn List(options: ListOptions) fn (void) void {
+    const elem_decl = ElementDecl{
+        .style = options.style,
+        .dynamic = .static,
+        .elem_type = .List,
+    };
+    const ui_node = LifeCycle.open(elem_decl) orelse unreachable;
+    _ = LifeCycle.configure(elem_decl);
+    options.element._node_ptr = ui_node;
+    return LifeCycle.close;
+}
+
 const BoxOptions = struct {
     element: *Element,
     style: ?*const Style = null,

@@ -145,6 +145,32 @@ fn writePropValue(prop: []const u8, value: PropValue, writer: writer_t) void {
                     writer.writeF32(transform.dist) catch {};
                     writer.writeByte(')') catch {};
                 },
+                .rotate => {
+                    writer.write("rotate(") catch {};
+                    writer.writeF32(transform.deg) catch {};
+                    writer.write("deg)") catch {};
+                },
+                .rotateX => {
+                    writer.write("rotateX(") catch {};
+                    writer.writeF32(transform.deg) catch {};
+                    writer.write("deg)") catch {};
+                },
+                .rotateY => {
+                    writer.write("rotateY(") catch {};
+                    writer.writeF32(transform.deg) catch {};
+                    writer.write("deg)") catch {};
+                },
+                .rotateXYZ => {
+                    writer.write("rotateX(") catch {};
+                    writer.writeF32(transform.x) catch {};
+                    writer.write("deg) ") catch {};
+                    writer.write("rotateY(") catch {};
+                    writer.writeF32(transform.y) catch {};
+                    writer.write("deg) ") catch {};
+                    writer.write("rotateZ(") catch {};
+                    writer.writeF32(transform.z) catch {};
+                    writer.write("deg)") catch {};
+                },
                 .none => {},
             }
         },
@@ -230,7 +256,7 @@ const box_sizing_map = [_][]const u8{ "content-box", "border-box", "padding-box"
 const list_style_map = [_][]const u8{ "none", "disc", "circle", "square", "decimal", "decimal-leading-zero", "lower-roman", "upper-roman", "lower-alpha", "upper-alpha", "lower-greek", "armenian", "georgian", "inherit", "initial", "revert", "unset" };
 const flex_wrap_map = [_][]const u8{ "nowrap", "wrap", "wrap-reverse", "inherit", "initial", "revert", "unset" };
 const white_space_map = [_][]const u8{ "normal", "nowrap", "pre", "pre-wrap", "pre-line", "break-spaces", "inherit", "initial", "revert", "unset" };
-const flex_type_map = [_][]const u8{ "flex", "flex", "block", "inline-block", "none" };
+const flex_type_map = [_][]const u8{ "inline-flex", "inline-flex", "block", "inline-block", "none" };
 const timing_function_map = [_][]const u8{ "ease", "linear", "ease-in", "ease-out", "ease-in-out", "bounce", "elastic" };
 const animation_direction_map = [_][]const u8{ "normal ", "reverse ", "forwards ", "alternate " };
 
@@ -585,15 +611,14 @@ fn flexTypeToCSS(flex_type: FlexType, writer: anytype) !void {
     // }
 }
 
-fn checkVisual(ptr: *UINode, visual: *const Types.Visual, writer: writer_t) void {
+fn checkVisual(ptr: ?*UINode, visual: *const Types.Visual, writer: writer_t, visual_type: u8) void {
     // Color color
     if (visual.background) |background| {
         writePropValue("background-color", .{ .tag = .background, .data = .{ .background = background } }, writer);
         // writePropValue("background-color", background, &writer);
-    } 
-    // else if (ptr.type == .Button or ptr.type == .CtxButton) {
-    //     _ = writer.write("background-color:rgba(0,0,0,0);\n") catch {};
-    // }
+    } else if (ptr != null and ptr.?.type == .Button or ptr.?.type == .CtxButton) {
+        _ = writer.write("background-color:rgba(0,0,0,0);\n") catch {};
+    }
 
     // Write font properties
     if (visual.font_size) |fs| {
@@ -641,8 +666,10 @@ fn checkVisual(ptr: *UINode, visual: *const Types.Visual, writer: writer_t) void
             // writePropValue("border-color", border_color, writer);
         }
         writer.write("border-style:solid;\n") catch {};
-    } else if (ptr.type == .Button or ptr.type == .CtxButton) {
-        _ = writer.write("border-width:0px;\n") catch {};
+    } else if (visual_type != 0) {
+        if (ptr != null and ptr.?.type == .Button or ptr.?.type == .CtxButton or ptr.?.type == .ButtonCycle) {
+            _ = writer.write("border:none;\n") catch {};
+        }
     }
 
     // Border radius
@@ -653,7 +680,11 @@ fn checkVisual(ptr: *UINode, visual: *const Types.Visual, writer: writer_t) void
 
     // Text color
     if (visual.text_color) |color| {
-        writePropValue("color", .{ .tag = .background, .data = .{ .background = color } }, writer);
+        if (ptr.?.type == .Svg) {
+            writePropValue("fill", .{ .tag = .background, .data = .{ .background = color } }, writer);
+        } else {
+            writePropValue("color", .{ .tag = .background, .data = .{ .background = color } }, writer);
+        }
         // writePropValue("color", color, writer);
     }
 
@@ -671,15 +702,13 @@ fn checkVisual(ptr: *UINode, visual: *const Types.Visual, writer: writer_t) void
 }
 
 // Export this function to be called from JavaScript to get the CSS representation
-var style_style: []const u8 = "";
+pub var style_style: []const u8 = "";
 var global_len: usize = 0;
 var show_scrollbar: bool = true;
 // 61.8kb before this function
 // adds 20kb
-pub export fn getStyle(node_ptr: ?*UINode) ?[*]const u8 {
-    if (node_ptr == null) return style_style.ptr;
-    const style = node_ptr.?.style orelse return null;
-    const ptr = node_ptr.?;
+
+pub fn generateStyle(ptr: ?*UINode, style: *const Types.Style) void {
     // Use a fixed buffer with a fbs to build the CSS string
     var writer: Writer = undefined;
     writer.init(&css_buffer);
@@ -702,7 +731,7 @@ pub export fn getStyle(node_ptr: ?*UINode) ?[*]const u8 {
     }
 
     // Write display and flex properties
-    if (ptr.type == .FlexBox) {
+    if (ptr != null and ptr.?.type == .FlexBox) {
         writePropValue("display", .{ .tag = .flex_type, .data = .{ .flex_type = .Flex } }, &writer);
         // if (style.layout) |layout| {
         //     writePropValue("display", .{ .tag = .flex_type, .data = .{ .flex_type = layout } }, &writer);
@@ -730,7 +759,7 @@ pub export fn getStyle(node_ptr: ?*UINode) ?[*]const u8 {
             }
         }
     } else if (style.layout) |layout| {
-        if (ptr.text.len > 0 and layout.x == .center and layout.y == .center and ptr.type != .Svg) {
+        if (ptr != null and ptr.?.text.len > 0 and layout.x == .center and layout.y == .center and ptr.?.type != .Svg) {
             writePropValue("text-align", .{ .tag = .alignment, .data = .{ .alignment = .center } }, &writer);
             // writePropValue("text-align", "center", &writer);
         } else {
@@ -808,7 +837,7 @@ pub export fn getStyle(node_ptr: ?*UINode) ?[*]const u8 {
     }
 
     if (style.visual) |visual| {
-        checkVisual(ptr, &visual, &writer);
+        checkVisual(ptr, &visual, &writer, 4);
     }
 
     // Alignment
@@ -855,24 +884,22 @@ pub export fn getStyle(node_ptr: ?*UINode) ?[*]const u8 {
         writer.write("px);\n") catch {};
     }
 
-    if (style.overflow) |ovf| {
-        switch (ovf) {
-            .scroll => writer.write("overflow:scroll;\n") catch {},
-            .hidden => writer.write("overflow:hidden;\n") catch {},
+    if (style.scroll) |scroll| {
+        if (scroll.x) |x| {
+            switch (x) {
+                .scroll => writer.write("overflow-x:scroll;\n") catch {},
+                .hidden => writer.write("overflow-x:hidden;\n") catch {},
+            }
         }
-    }
-
-    if (style.overflow_x) |ovf| {
-        switch (ovf) {
-            .scroll => writer.write("overflow-x:scroll;\n") catch {},
-            .hidden => writer.write("overflow-x:hidden;\n") catch {},
+        if (scroll.y) |y| {
+            switch (y) {
+                .scroll => writer.write("overflow-y:scroll;\n") catch {},
+                .hidden => writer.write("overflow-y:hidden;\n") catch {},
+            }
         }
-    }
 
-    if (style.overflow_y) |ovf| {
-        switch (ovf) {
-            .scroll => writer.write("overflow-y:scroll;\n") catch {},
-            .hidden => writer.write("overflow-y:hidden;\n") catch {},
+        if (style.position == null) {
+            writer.write("position:relative;\n") catch {};
         }
     }
 
@@ -905,6 +932,8 @@ pub export fn getStyle(node_ptr: ?*UINode) ?[*]const u8 {
     if (style.cursor) |c| {
         writePropValue("cursor", .{ .tag = .cursor, .data = .{ .cursor = c } }, &writer);
         // writePropValue("cursor", c, &writer);
+    } else if (ptr != null and ptr.?.type == .Button or ptr.?.type == .CtxButton or ptr.?.type == .ButtonCycle) {
+        writePropValue("cursor", .{ .tag = .cursor, .data = .{ .cursor = .pointer } }, &writer);
     }
 
     if (style.appearance) |ap| {
@@ -934,7 +963,12 @@ pub export fn getStyle(node_ptr: ?*UINode) ?[*]const u8 {
     const len: usize = writer.pos;
     css_buffer[len] = 0;
     style_style = css_buffer[0..len];
+}
 
+pub export fn getStyle(node_ptr: ?*UINode) ?[*]const u8 {
+    if (node_ptr == null) return style_style.ptr;
+    const style = node_ptr.?.style orelse return null;
+    generateStyle(node_ptr, &style);
     // Return a pointer to the CSS string
     return style_style.ptr;
 }
@@ -957,13 +991,13 @@ pub export fn getVisualStyle(node_ptr: ?*UINode, visual_type: u8) ?[*]const u8 {
     writer.init(&css_buffer);
     if (visual_type == 0) {
         const visual = interactive.hover.?;
-        checkVisual(ptr, &visual, &writer);
+        checkVisual(ptr, &visual, &writer, 0);
     } else if (visual_type == 1) {
         const visual = interactive.focus.?;
-        checkVisual(ptr, &visual, &writer);
+        checkVisual(ptr, &visual, &writer, 1);
     } else if (visual_type == 2) {
         const visual = interactive.focus_within.?;
-        checkVisual(ptr, &visual, &writer);
+        checkVisual(ptr, &visual, &writer, 2);
     }
     // Null-terminate the string
     const len: usize = writer.pos;
@@ -1003,3 +1037,4 @@ test "generateCss" {
     const len = getStyleLen();
     std.debug.print("{s}\n", .{css_buffer[0..len]});
 }
+

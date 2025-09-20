@@ -40,7 +40,7 @@ pub inline fn Header(text: []const u8, size: HeaderSize, style: Style) void {
     LifeCycle.close({});
 }
 
-pub inline fn CtxHooks(hooks: Fabric.HooksCtxFuncs, func: anytype, args: anytype, style: Style) fn (void) void {
+pub inline fn CtxHooks(hooks: Fabric.HooksCtxFuncs, func: anytype, args: anytype, style: ?*const Style) fn (void) void {
     var elem_decl = ElementDecl{
         .elem_type = .HooksCtx,
         .dynamic = .static,
@@ -76,7 +76,7 @@ pub inline fn CtxHooks(hooks: Fabric.HooksCtxFuncs, func: anytype, args: anytype
         const id = Fabric.mounted_ctx_funcs.count();
         elem_decl.hooks.mounted_id += id + 1;
         Fabric.mounted_ctx_funcs.put(elem_decl.hooks.mounted_id, &closure.run_node) catch |err| {
-            println("Button Function Registry {any}\n", .{err});
+            println("Hooks Function Registry {any}\n", .{err});
         };
     }
     // if (hooks.created) |f| {
@@ -223,6 +223,15 @@ export fn buttonCallback(id_ptr: [*:0]u8) void {
     Fabric.current_depth_node_id = std.mem.Allocator.dupe(Fabric.allocator_global, u8, id) catch return;
     const func = Fabric.registry.get(id) orelse return;
     @call(.auto, func, .{});
+}
+
+export fn buttonCycleCallback(id_ptr: [*:0]u8) void {
+    const id = std.mem.span(id_ptr);
+    defer Fabric.allocator_global.free(id);
+    Fabric.current_depth_node_id = std.mem.Allocator.dupe(Fabric.allocator_global, u8, id) catch return;
+    const func = Fabric.registry.get(id) orelse return;
+    @call(.auto, func, .{});
+    Fabric.cycle();
 }
 
 export fn hooksRemoveMountedKey(id_ptr: [*:0]u8) void {
@@ -373,7 +382,7 @@ fn callsiteId() u64 {
 }
 
 pub const BtnProps = struct {
-    onPress: ?*const fn () void = null,
+    on_press: ?*const fn () void = null,
     onRelease: ?*const fn () void = null,
     aria_label: ?[]const u8 = null,
 };
@@ -390,10 +399,9 @@ const _local = struct {
 };
 
 const ButtonOptions = struct {
-    onPress: ?*const fn () void = null,
+    on_press: ?*const fn () void = null,
     onRelease: ?*const fn () void = null,
     aria_label: ?[]const u8 = null,
-    style: *const Style = &.{},
 };
 
 pub inline fn Button(options: ButtonOptions) fn (void) void {
@@ -407,8 +415,8 @@ pub inline fn Button(options: ButtonOptions) fn (void) void {
         unreachable;
     };
 
-    if (options.onPress) |onPress| {
-        Fabric.registry.put(ui_node.uuid, onPress) catch |err| {
+    if (options.on_press) |on_press| {
+        Fabric.registry.put(ui_node.uuid, on_press) catch |err| {
             println("Button Function Registry {any}\n", .{err});
         };
     }
@@ -706,6 +714,7 @@ pub const Chain = struct {
     href: []const u8 = "",
     svg: []const u8 = "",
     aria_label: ?[]const u8 = null,
+    options: ?ButtonOptions = null,
 
     pub fn Text(text: []const u8) Self {
         return Self{ .elem_type = .Text, .text = text };
@@ -714,6 +723,15 @@ pub const Chain = struct {
     pub fn Icon(name: []const u8) Self {
         return Self{ .elem_type = .Icon, .href = name };
     }
+
+    pub fn Button(options: ButtonOptions) Self {
+        return Self{ .elem_type = .Button, .aria_label = options.aria_label, .options = options };
+    }
+
+    pub fn ButtonCycle(options: ButtonOptions) Self {
+        return Self{ .elem_type = .ButtonCycle, .aria_label = options.aria_label, .options = options };
+    }
+
     pub const Box = Self{ .elem_type = .FlexBox };
     pub const Center = Self{ .elem_type = .FlexBox, ._flex_type = .Center };
     pub const Stack = Self{ .elem_type = .FlexBox, ._flex_type = .Stack };
@@ -747,7 +765,6 @@ pub const Chain = struct {
 
             // Now you can safely modify the local, mutable copy
             mutable_style.layout = .center;
-            // mutable_style.layout.y = .center;
             elem_decl.style = &mutable_style;
         } else if (self._flex_type == .Stack) {
             var mutable_style = style_ptr.*;
@@ -755,7 +772,16 @@ pub const Chain = struct {
             elem_decl.style = &mutable_style;
         }
 
-        _ = Fabric.LifeCycle.open(elem_decl);
+        const ui_node = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+
+        if (self.elem_type == .Button or self.elem_type == .ButtonCycle) {
+            if (self.options.?.on_press) |on_press| {
+                Fabric.registry.put(ui_node.uuid, on_press) catch |err| {
+                    println("Button Function Registry {any}\n", .{err});
+                };
+            }
+        }
+
         Fabric.LifeCycle.configure(elem_decl);
         return Fabric.LifeCycle.close;
     }

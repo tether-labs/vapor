@@ -16,8 +16,8 @@ pub fn reconcile(old_ctx: *UIContext, new_ctx: *UIContext, _: []const u8) void {
 /// Returns true if every field is equal, false otherwise.
 pub fn nodesEqual(old_node: *UINode, new_node: *UINode) bool {
     if (old_node.style == null and new_node.style == null) return true;
-    if (old_node.style == null or new_node.style != null) return false;
-    if (old_node.style != null or new_node.style == null) return false;
+    if (old_node.style == null and new_node.style != null) return false;
+    if (old_node.style != null and new_node.style == null) return false;
     const a = old_node.style.?;
     const b = new_node.style.?;
     // Compare optional string fields
@@ -110,8 +110,8 @@ pub fn nodesEqual(old_node: *UINode, new_node: *UINode) bool {
 
     // if (a.overflow != b.overflow) return false;
 
-    if (a.overflow_x != b.overflow_x) return false;
-    if (a.overflow_y != b.overflow_y) return false;
+    // if (a.overflow_x != b.overflow_x) return false;
+    // if (a.overflow_y != b.overflow_y) return false;
     if (a.layout != null and b.layout != null) {
         if (a.layout.?.y != b.layout.?.y) return false;
         if (a.layout.?.x != b.layout.?.x) return false;
@@ -221,18 +221,23 @@ fn compareOptionalSlice(
 fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
     if (old_node.dirty) {
         new_node.dirty = true;
+        Fabric.has_dirty = true;
     } else if (Fabric.rerender_everything) {
         new_node.dirty = true;
+        Fabric.has_dirty = true;
     } else if (!std.mem.eql(u8, old_node.uuid, new_node.uuid)) {
         // Fabric.printlnSrc("Dirty node: {any} {s}", .{ new_node.type, new_node.uuid }, @src());
         new_node.dirty = true;
+        Fabric.has_dirty = true;
     } else {
         if (old_node.dynamic == .dynamic) {
             if (old_node.dirty) {
                 new_node.dirty = true;
+                Fabric.has_dirty = true;
             } else {
                 if (!nodesEqual(old_node, new_node)) {
                     new_node.dirty = true;
+                    Fabric.has_dirty = true;
                 } else {
                     new_node.dirty = false;
                 }
@@ -241,6 +246,7 @@ fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
             // Static
             if (!nodesEqual(old_node, new_node)) {
                 new_node.dirty = true;
+                Fabric.has_dirty = true;
             } else {
                 new_node.dirty = false;
             }

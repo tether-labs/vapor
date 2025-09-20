@@ -317,8 +317,10 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
     // current_open.style = Style.override(style);
     if (style) |s| {
         current_open.style = s.*;
+        nodes[node_count] = current_open;
+        node_count += 1;
     }
-    if (current_open.type == .Hooks) {
+    if (current_open.type == .Hooks or current_open.type == .HooksCtx) {
         current_open.hooks = elem_decl.hooks;
     }
     current_open.dynamic = elem_decl.dynamic;
@@ -900,9 +902,103 @@ pub fn traverseCmds(ui_ctx: *UIContext) void {
 }
 
 pub fn traverse(ui_ctx: *UIContext) void {
-    Fabric.println("Traversing\n", .{});
     ui_ctx.traverseChildren(ui_ctx.root, ui_ctx.ui_tree.?);
 }
+
+pub var nodes: []*UINode = undefined;
+var target_uuid: []const u8 = "";
+var node_count: usize = 0;
+var seen_count: usize = 0;
+
+pub var common_nodes: []usize = undefined;
+pub var common_size_nodes: []usize = undefined;
+pub var seen_nodes: []bool = undefined;
+
+pub var common_uuids: [][]const u8 = undefined;
+pub var common_size_uuids: [][]const u8 = undefined;
+
+var common_count: usize = 0;
+var common_size_count: usize = 0;
+
+var target_node_index: usize = 0;
+pub var base_styles: []Style = undefined;
+pub var base_style_count: usize = 0;
+var common_size_style: ?Style = null;
+
+pub fn reconcileStyles(node: *UINode) void {
+    deduplicateStyles(node);
+    seen_nodes[seen_count] = true;
+    seen_count += 1;
+    target_node_index += 1;
+    if (common_size_style) |size_style| {
+        const common = KeyGenerator.generateCommonStyleKey(common_size_uuids[0..common_size_count], &Fabric.allocator_global);
+        base_styles[base_style_count] = Style{ .style_id = common, .size = size_style.size };
+        base_style_count += 1;
+        for (common_size_nodes[0..common_size_count]) |index| {
+            const c_node = nodes[index - 1];
+            c_node.style.?.size = null;
+            c_node.class = std.fmt.allocPrint(Fabric.allocator_global, "{s} {s}", .{ c_node.uuid, common }) catch return;
+        }
+    }
+
+    if (common_count > 1) {
+        const common = KeyGenerator.generateCommonStyleKey(common_uuids[0..common_count], &Fabric.allocator_global);
+        for (common_nodes[0..common_count]) |index| {
+            const c_node = nodes[index - 1];
+            c_node.class = common;
+        }
+    }
+
+    for (node.children.items) |child| {
+        reconcileStyles(child);
+    }
+}
+pub fn deduplicateStyles(target_node: *UINode) void {
+    common_size_style = null;
+    common_count = 0;
+    common_size_count = 0;
+
+    common_nodes[common_count] = target_node_index;
+    common_uuids[common_count] = target_node.uuid;
+
+    common_size_nodes[common_size_count] = target_node_index;
+    common_size_uuids[common_size_count] = target_node.uuid;
+
+    common_count += 1;
+    common_size_count += 1;
+    if (target_node.type == .Icon) return;
+    if (target_node.style == null) return;
+    if (target_node.class != null) return;
+    const target_style = target_node.style orelse return;
+    if (target_style.style_id != null) return;
+    for (nodes[0..node_count], 0..) |node, i| {
+        if (seen_nodes[i]) continue;
+        if (node.type == .Icon) continue;
+        const node_style = node.style orelse continue;
+
+        const same = std.meta.eql(target_style, node_style);
+        if (same) {
+            common_nodes[common_count] = i + 1;
+            common_uuids[common_count] = node.uuid;
+            common_count += 1;
+            continue;
+        }
+
+        if (target_style.size != null and node_style.size != null) {
+            const same_size = std.meta.eql(target_style.size.?, node_style.size.?);
+            if (same_size) {
+                common_size_style = target_style;
+                common_size_nodes[common_size_count] = i + 1;
+                common_size_uuids[common_size_count] = node.uuid;
+                common_size_count += 1;
+            }
+        }
+    }
+}
+// const common_key = KeyGenerator.generateCommonStyleKey(&.{ node.uuid, target_node.uuid }, &Fabric.allocator_global);
+// target_node.class = common_key;
+// node.class = common_key;
+// Fabric.println("Common key {s}\n", .{common_key});
 
 pub fn resetAll(ui_ctx: *UIContext, parent_op: ?*UINode) void {
     if (parent_op) |parent| {
