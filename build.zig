@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) void {
     // This creates a "module", which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
     // Every executable or library we compile will be based on one or more modules.
-    var fabric_imports = std.ArrayList(std.Build.Module.Import).init(b.allocator);
+    var fabric_imports = std.array_list.Managed(std.Build.Module.Import).init(b.allocator);
     if (user_config_module) |ucm| {
         fabric_imports.append(.{ .name = "user_config", .module = ucm }) catch @panic("OOM");
     }
@@ -47,7 +47,7 @@ pub fn build(b: *std.Build) void {
     });
     
     // // We will also create a module for our other entry point, 'main.zig'.
-    var exe_imports = std.ArrayList(std.Build.Module.Import).init(b.allocator);
+    var exe_imports = std.array_list.Managed(std.Build.Module.Import).init(b.allocator);
     exe_imports.append(.{ .name = "fabric", .module = mod }) catch @panic("OOM");
     if (user_config_module) |ucm| {
         exe_imports.append(.{ .name = "user_config", .module = ucm }) catch @panic("OOM");

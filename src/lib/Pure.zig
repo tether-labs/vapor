@@ -191,30 +191,6 @@ pub inline fn Draggable(element: *Element, style: Style) fn (void) void {
     return local.CloseElement;
 }
 
-const AllocTextOptions = struct {
-    style: ?*const Style = null,
-};
-
-pub inline fn AllocText(fmt: []const u8, args: anytype, style: *const Style) void {
-    const text = std.fmt.allocPrint(Fabric.allocator_global, fmt, args) catch |err| {
-        println("Error Could not format argument alloc Error details: {any}\n", .{err});
-        return;
-    };
-    const elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .AllocText,
-        .text = text,
-    };
-    _ = LifeCycle.open(elem_decl) orelse {
-        Fabric.println("Could not open AllocText Element\n", .{});
-        unreachable;
-    };
-    _ = LifeCycle.configure(elem_decl);
-    _ = LifeCycle.close({});
-    return;
-}
-
 const FlexType = enum(u8) {
     Flex = 0, // "flex"
     Center = 1,
@@ -273,8 +249,6 @@ pub fn VirtualList(comptime T: type) type {
         down_threshold: f32 = 0,
 
         pub fn init(options: VirtualListOptions) Self {
-
-
             const calculated_item_height = options.item_height.size.minmax.min;
             const calculated_item_width = options.item_width.size.minmax.min;
 
@@ -486,6 +460,81 @@ pub fn VirtualList(comptime T: type) type {
     };
 }
 
+pub const ChainClose = struct {
+    const Self = @This();
+    elem_type: Fabric.ElementType,
+    state_type: Types.StateType = .pure,
+    _flex_type: FlexType = .Flex,
+    text: []const u8 = "",
+    href: []const u8 = "",
+    svg: []const u8 = "",
+    aria_label: ?[]const u8 = null,
+
+    pub fn Text(text: []const u8) Self {
+        return Self{ .elem_type = .Text, .text = text };
+    }
+
+    /// TextFmt takes a format string and a array of arguments and allocates a new string
+    /// This string is handled by the Fabric engine and is not freed by the user
+    pub inline fn TextFmt(fmt: []const u8, args: anytype) Self {
+        const allocator = Fabric.frame_arena.getFrameAllocator();
+        const text = std.fmt.allocPrint(allocator, fmt, args) catch |err| {
+            Fabric.printlnColor(
+                \\Error formatting text: {any}\n"
+                \\FMT: {s}\n"
+                \\ARGS: {any}\n"
+            , .{ err, fmt, args }, .hex("#FF3029"));
+            return Self{ .elem_type = .Text, .text = "ERROR", .state_type = .err };
+        };
+        Fabric.frame_arena.addBytesUsed(text.len);
+        return Self{ .elem_type = .TextFmt, .text = text };
+    }
+
+    /// TextFmt takes a format string and a array of arguments and allocates a new string
+    /// This string is handled by the Fabric engine and is not freed by the user
+    pub inline fn TextFmtErr(fmt: []const u8, args: anytype) Self {
+        // const allocator = Fabric.frame_arena.getFrameAllocator();
+        // const text = std.fmt.allocPrint(allocator, fmt, args) catch |err| {
+        //     std.debug.print("Error formatting text: {any}\n", .{err});
+        Fabric.printlnColor(
+            \\Error formatting text: {any}
+            \\FMT: {s}
+            \\ARGS: {any}
+        , .{ error.CouldNotAllocate, fmt, args }, .hex("#FF3029"));
+        return Self{ .elem_type = .Text, .text = "ERROR", .state_type = .err };
+        // };
+        // Fabric.frame_arena.addBytesUsed(text.len);
+        // return Self{ .elem_type = .TextFmt, .text = text };
+    }
+
+    pub fn Icon(name: []const u8) Self {
+        return Self{ .elem_type = .Icon, .href = name };
+    }
+    pub fn Image(options: struct { src: []const u8 }) Self {
+        return Self{ .elem_type = .Image, .href = options.src };
+    }
+
+    pub fn Svg(options: struct { svg: []const u8 }) Self {
+        return Self{ .elem_type = .Svg, .svg = options.svg };
+    }
+
+    pub inline fn style(self: *const Self, style_ptr: *const Fabric.Style) void {
+        const elem_decl = Fabric.ElementDecl{
+            .dynamic = self.state_type,
+            .elem_type = self.elem_type,
+            .text = self.text,
+            .style = style_ptr,
+            .href = self.href,
+            .svg = self.svg,
+            .aria_label = self.aria_label,
+        };
+
+        _ = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+        Fabric.LifeCycle.configure(elem_decl);
+        return Fabric.LifeCycle.close({});
+    }
+};
+
 pub const Chain = struct {
     const Self = @This();
     elem_type: Fabric.ElementType,
@@ -495,19 +544,7 @@ pub const Chain = struct {
     svg: []const u8 = "",
     aria_label: ?[]const u8 = null,
     options: ?ButtonOptions = null,
-
-    pub fn Text(text: []const u8) Self {
-        return Self{ .elem_type = .Text, .text = text };
-    }
-
-    pub inline fn AllocText(fmt: []const u8, args: anytype) Self {
-        const text = std.fmt.allocPrint(Fabric.allocator_global, fmt, args) catch |err| {
-            println("Error Could not format argument alloc Error details: {any}\n", .{err});
-            unreachable;
-        };
-
-        return Self{ .elem_type = .AllocText, .text = text };
-    }
+    _ui_node: *UINode = undefined,
 
     pub fn Icon(name: []const u8) Self {
         return Self{ .elem_type = .Icon, .href = name };
@@ -515,6 +552,47 @@ pub const Chain = struct {
 
     pub fn Button(options: ButtonOptions) Self {
         return Self{ .elem_type = .Button, .aria_label = options.aria_label, .options = options };
+    }
+
+    pub fn CtxButton(func: anytype, args: anytype) Self {
+        const elem_decl = ElementDecl{
+            .dynamic = .pure,
+            .elem_type = .CtxButton,
+        };
+
+        const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
+            println("{any}\n", .{err});
+            unreachable;
+        };
+        const Args = @TypeOf(args);
+        const Closure = struct {
+            arguments: Args,
+            run_node: Fabric.Node = .{ .data = .{ .runFn = runFn, .deinitFn = deinitFn } },
+            fn runFn(action: *Fabric.Action) void {
+                const run_node: *Fabric.Node = @fieldParentPtr("data", action);
+                const closure: *@This() = @alignCast(@fieldParentPtr("run_node", run_node));
+                @call(.auto, func, closure.arguments);
+            }
+            fn deinitFn(node: *Fabric.Node) void {
+                const closure: *@This() = @alignCast(@fieldParentPtr("run_node", node));
+                Fabric.allocator_global.destroy(closure);
+            }
+        };
+
+        const closure = Fabric.allocator_global.create(Closure) catch |err| {
+            println("Error could not create closure {any}\n ", .{err});
+            unreachable;
+        };
+        closure.* = .{
+            .arguments = args,
+        };
+
+        Fabric.ctx_registry.put(ui_node.uuid, &closure.run_node) catch |err| {
+            println("Button Function Registry {any}\n", .{err});
+            unreachable;
+        };
+
+        return Self{ .elem_type = .CtxButton, ._ui_node = ui_node };
     }
 
     pub fn ButtonCycle(options: ButtonOptions) Self {
@@ -561,13 +639,14 @@ pub const Chain = struct {
             elem_decl.style = &mutable_style;
         }
 
-        const ui_node = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
-
-        if (self.elem_type == .Button or self.elem_type == .ButtonCycle) {
-            if (self.options.?.on_press) |on_press| {
-                Fabric.registry.put(ui_node.uuid, on_press) catch |err| {
-                    println("Button Function Registry {any}\n", .{err});
-                };
+        if (self.elem_type != .CtxButton) {
+            const ui_node = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+            if (self.elem_type == .Button or self.elem_type == .ButtonCycle) {
+                if (self.options.?.on_press) |on_press| {
+                    Fabric.btn_registry.put(ui_node.uuid, on_press) catch |err| {
+                        println("Button Function Registry {any}\n", .{err});
+                    };
+                }
             }
         }
 
@@ -696,45 +775,6 @@ pub inline fn Svg(svg: []const u8, style: Style) fn (void) void {
     return local.CloseElement;
 }
 
-const DialogType = enum {
-    show,
-    close,
-};
-
-pub inline fn DialogBtn(dialog_type: DialogType, func: *const fn () void, style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-    };
-
-    switch (dialog_type) {
-        .show => elem_decl.elem_type = .DialogBtnShow,
-        .close => elem_decl.elem_type = .DialogBtnClose,
-    }
-
-    const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-        unreachable;
-    };
-
-    Fabric.registry.put(ui_node.uuid, func) catch |err| {
-        println("Button Function Registry {any}\n", .{err});
-    };
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-
 const CtxButtonOptions = struct {
     style: ?*const Style = null,
 };
@@ -800,29 +840,6 @@ pub const BtnProps = struct {
     onRelease: ?*const fn () void = null,
     aria_label: ?[]const u8 = null,
 };
-
-pub inline fn Button(
-    btnProps: BtnProps,
-    style: Style,
-) fn (void) void {
-    const elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .Button,
-        .aria_label = btnProps.aria_label,
-    };
-    const ui_node = LifeCycle.open(elem_decl) orelse {
-        unreachable;
-    };
-    if (btnProps.onPress) |onPress| {
-        Fabric.registry.put(ui_node.uuid, onPress) catch |err| {
-            println("Button Function Registry {any}\n", .{err});
-        };
-    }
-
-    LifeCycle.configure(elem_decl);
-    return LifeCycle.close;
-}
 
 pub inline fn Select(style: Style) fn (void) void {
     const local = struct {

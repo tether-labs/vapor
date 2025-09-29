@@ -12,6 +12,12 @@ pub const KeyGenerator = struct {
         call_counter = 0;
     }
 
+
+    // Call this at the beginning of each render cycle
+    pub fn incrementCount() void {
+        call_counter += 1;
+    }
+
     // Call this at the beginning of each render cycle
     pub fn getCount() usize {
         return call_counter;

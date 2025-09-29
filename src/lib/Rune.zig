@@ -136,8 +136,8 @@ pub fn Signal(comptime T: type) type {
         _value: T,
         _parent: *UINode = undefined,
         _subscribers: Set(Subscriber) = undefined,
-        _effect_subscribers: std.ArrayList(*Node) = undefined,
-        _component_subscribers: std.ArrayList(*UINode) = undefined,
+        _effect_subscribers: std.array_list.Managed(*Node) = undefined,
+        _component_subscribers: std.array_list.Managed(*UINode) = undefined,
         allocator_ptr: *std.mem.Allocator,
         _is_batching: bool = false,
         _has_pending_update: bool = false,
@@ -148,8 +148,8 @@ pub fn Signal(comptime T: type) type {
         pub fn init(sig: *Signal(T).Self, value: T) void {
             const allocator_ptr = &Fabric.allocator_global;
             const new_set = Set(Subscriber).init(allocator_ptr);
-            const effects = std.ArrayList(*Node).init(allocator_ptr.*);
-            const components_new_set = std.ArrayList(*UINode).init(allocator_ptr.*);
+            const effects = std.array_list.Managed(*Node).init(allocator_ptr.*);
+            const components_new_set = std.array_list.Managed(*UINode).init(allocator_ptr.*);
 
             const sig_closure = allocator_ptr.create(SignalClosure) catch unreachable;
             sig.* = Signal(T).Self{
@@ -179,8 +179,8 @@ pub fn Signal(comptime T: type) type {
         pub fn initv2(value: T, _: *std.mem.Allocator) *Signal(T).Self {
             const allocator_ptr = &Fabric.allocator_global;
             const new_set = Set(Subscriber).init(allocator_ptr);
-            const effects = std.ArrayList(*Node).init(allocator_ptr.*);
-            const components_new_set = std.ArrayList(*UINode).init(allocator_ptr.*);
+            const effects = std.array_list.Managed(*Node).init(allocator_ptr.*);
+            const components_new_set = std.array_list.Managed(*UINode).init(allocator_ptr.*);
 
             const sig: *Signal(T).Self = allocator_ptr.create(Signal(T).Self) catch unreachable;
             const sig_closure = allocator_ptr.create(SignalClosure) catch unreachable;
@@ -246,7 +246,7 @@ pub fn Signal(comptime T: type) type {
         /// must be int u32, i32, or f32 type
         /// Then calls notify, notifyEffects, notifyComponents
         pub fn updateElement(self: *Self, index: usize, element: @typeInfo(T).array.child) void {
-            // if (@TypeOf(self._value) != std.ArrayList(@typeInfo(T).@"struct")) {
+            // if (@TypeOf(self._value) != std.array_list.Managed(@typeInfo(T).@"struct")) {
             //     return;
             // }
 
@@ -277,7 +277,7 @@ pub fn Signal(comptime T: type) type {
         /// must be int u32, i32, or f32 type
         /// Then calls notify, notifyEffects, notifyComponents
         pub fn append(self: *Self, new_item: anytype) void {
-            // if (@TypeOf(self._value) != std.ArrayList(@typeInfo(T).@"struct")) {
+            // if (@TypeOf(self._value) != std.array_list.Managed(@typeInfo(T).@"struct")) {
             //     return;
             // }
 
@@ -301,7 +301,8 @@ pub fn Signal(comptime T: type) type {
         /// must be int u32, i32, or f32 type
         /// Then calls notify, notifyEffects, notifyComponents
         pub fn increment(self: *Self) void {
-            if (@TypeOf(self._value) != u32 and @TypeOf(self._value) != i32 and @TypeOf(self._value) != f32) {
+            if (@TypeOf(self._value) != u32 and @TypeOf(self._value) != i32 and @TypeOf(self._value) != f32 and @TypeOf(self._value) != usize) {
+                Fabric.printlnErr("increment only takes a u32, i32, f32, and usize", .{});
                 return;
             }
             self._value = self._value + 1;
@@ -604,12 +605,21 @@ pub fn Signal(comptime T: type) type {
         // This is broken
         fn isNodeChild(node: *UINode) bool {
             // Here we find the node which was clicked;
-            const starting_node = Fabric.findNodeByUUID(Fabric.current_ctx.root.?, Fabric.current_depth_node_id) orelse return false;
+            const starting_node = findNodeByUUID(Fabric.current_ctx.root.?, Fabric.current_depth_node_id) orelse return false;
             //Now we search said node if it has children that includes the grain component.
-            if (Fabric.findNodeByUUID(starting_node, node.uuid)) |_| {
+            if (findNodeByUUID(starting_node, node.uuid)) |_| {
                 return true;
             }
             return false;
         }
     };
+}
+pub fn findNodeByUUID(ui_node: *UINode, uuid: []const u8) ?*UINode {
+    for (ui_node.children.items) |node| {
+        if (std.mem.eql(u8, node.uuid, uuid)) {
+            return node;
+        }
+        return findNodeByUUID(ui_node, uuid);
+    }
+    return null;
 }

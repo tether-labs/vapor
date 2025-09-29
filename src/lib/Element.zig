@@ -1,13 +1,10 @@
-const mutateDomElement = @import("Fabric.zig").mutateDomElement;
-const mutateDomElementStyle = @import("Fabric.zig").mutateDomElementStyle;
-const mutateDomElementStyleString = @import("Fabric.zig").mutateDomElementStyleString;
-const showDialog = @import("Fabric.zig").showDialog;
 const types = @import("types.zig");
-const closeDialog = @import("Fabric.zig").closeDialog;
 const Fabric = @import("Fabric.zig");
 const UINode = @import("UITree.zig").UINode;
 const ElementType = @import("types.zig").ElementType;
 const std = @import("std");
+const isWasi = Fabric.isWasi;
+const Wasm = @import("wasm");
 
 const Rect = struct {
     top: f32,
@@ -63,12 +60,6 @@ pub const Element = struct {
         background: []const u8 = "white",
     } = .{},
 
-    // class_name: ?[]const u8 = null,
-    // tag_name: []const u8 = "DIV",
-    // inner_html: ?[]const u8 = null,
-    // outer_html: ?[]const u8 = null,
-    // inner_text: ?[]const u8 = null,
-    // text_content: ?[]const u8 = null,
     pub fn _get_id(self: *Element) ?[]const u8 {
         if (self._node_ptr) |node| {
             return node.uuid;
@@ -128,11 +119,7 @@ pub const Element = struct {
         return Fabric.elementInstEventListener(id, event_type, construct, cb);
     }
 
-    pub fn addListener(
-        self: *Element,
-        event_type: types.EventType,
-        cb: *const fn (event: *Fabric.Event) void
-    ) ?usize {
+    pub fn addListener(self: *Element, event_type: types.EventType, cb: *const fn (event: *Fabric.Event) void) ?usize {
         const id = self._get_id() orelse {
             Fabric.printlnSrc("Id is null", .{}, @src());
             return null;
@@ -196,35 +183,22 @@ pub const Element = struct {
         self.scroll_left = value;
     }
 
-    pub fn showModal(self: *Element) void {
-        const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
-            return;
-        };
-        if (self.element_type != .Dialog) {
-            Fabric.println("Must be Dialog type", .{});
-            return;
-        }
-        showDialog(id.ptr, id.len);
-    }
-    pub fn closeModal(self: *Element) void {
-        const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
-            return;
-        };
-        if (self.element_type != .Dialog) {
-            Fabric.println("Must be Dialog type", .{});
-            return;
-        }
-        closeDialog(id.ptr, id.len);
-    }
-
     pub fn getOffsets(self: *Element) ?Offsets {
         const id = self._get_id() orelse {
             Fabric.printlnSrc("Id is null", .{}, @src());
             return null;
         };
-        const bounds_ptr = Fabric.getOffsets(id.ptr, @intCast(id.len));
+        // const bounds_ptr = Fabric.getOffsets(id.ptr, @intCast(id.len));
+        const bounds_ptr = if (isWasi) {
+            return Wasm.getOffsetsWasm(id.ptr, id.len);
+        } else {
+            // Dummy implementation - return offsets with fake values
+            // Assuming offsets contain [offsetX, offsetY]
+            dummy_float_buffer[0] = 0.0; // offsetX
+            dummy_float_buffer[1] = 0.0; // offsetY
+            return &dummy_float_buffer;
+        };
+
         return Offsets{
             .offset_top = bounds_ptr[0],
             .offset_left = bounds_ptr[1],
@@ -240,7 +214,23 @@ pub const Element = struct {
             Fabric.printlnSrc("Id is null", .{}, @src());
             return;
         };
-        const bounds_ptr = Fabric.getBoundingClientRect(id.ptr, id.len);
+
+        const bounds_ptr = if (isWasi) {
+            return Wasm.getBoundingClientRectWasm(id.ptr, id.len);
+        } else {
+            // Dummy implementation - return rectangle with fake values
+            // Typically: [x, y, width, height, top, right, bottom, left]
+            dummy_float_buffer[0] = 0.0; // x
+            dummy_float_buffer[1] = 0.0; // y
+            dummy_float_buffer[2] = 100.0; // width
+            dummy_float_buffer[3] = 50.0; // height
+            dummy_float_buffer[4] = 0.0; // top
+            dummy_float_buffer[5] = 100.0; // right
+            dummy_float_buffer[6] = 50.0; // bottom
+            dummy_float_buffer[7] = 0.0; // left
+            return &dummy_float_buffer;
+        };
+
         return Rect{
             .top = bounds_ptr[0],
             .left = bounds_ptr[1],
@@ -280,7 +270,15 @@ pub const Element = struct {
             Fabric.printlnSrc("Id is null", .{}, @src());
             return null;
         };
-        const resp = Fabric.getInputValue(id.ptr, @intCast(id.len));
+        const resp = if (isWasi) {
+            return Wasm.getInputValueWasm(id.ptr, id.len);
+        } else {
+            // Dummy implementation - return empty string
+            @memset(dummy_string_buffer[0..dummy_string_buffer.len], 0);
+            const dummy_value = "dummy_input_value";
+            @memcpy(dummy_string_buffer[0..dummy_value.len], dummy_value);
+            return &dummy_string_buffer;
+        };
         return std.mem.span(resp);
     }
 
@@ -332,116 +330,78 @@ pub const Element = struct {
         }
         Fabric.callClickWASM(id.ptr, id.len);
     }
-
-    // // HTMLElement properties
-    // title: ?[]const u8 = null,
-    // lang: ?[]const u8 = null,
-    // translate: bool = false,
-    // dir: ?[]const u8 = null,
-    // hidden: bool = false,
-    // tab_index: i32 = 0,
-    // access_key: ?[]const u8 = null,
-    // spellcheck: bool = true,
-    // autocapitalize: ?[]const u8 = null,
-    // content_editable: bool = false,
-    // is_content_editable: bool = false,
-    //
-
-    //
-    // // Attributes map
-    // attributes: std.StringHashMap([]const u8),
-    //
-    // // Child elements
-    // children: std.ArrayList(*HTMLElement),
-    // first_child: ?*HTMLElement = null,
-    // last_child: ?*HTMLElement = null,
-    // next_sibling: ?*HTMLElement = null,
-    // previous_sibling: ?*HTMLElement = null,
-    // parent_element: ?*HTMLElement = null,
-    //
-    // // Event handlers (represented as function pointers)
-    // on_click: ?fn () void = null,
-    // on_mouseover: ?fn () void = null,
-    // on_mouseout: ?fn () void = null,
-    // on_keydown: ?fn () void = null,
-    // on_keyup: ?fn () void = null,
-    //
-    // pub fn init(allocator: std.mem.Allocator) !HTMLDivElement {
-    //     return HTMLDivElement{
-    //         .attributes = std.StringHashMap([]const u8).init(allocator),
-    //         .children = std.ArrayList(*HTMLElement).init(allocator),
-    //     };
-    // }
-    //
-    // pub fn deinit(self: *HTMLDivElement) void {
-    //     self.attributes.deinit();
-    //     self.children.deinit();
-    // }
-    //
-    // // Methods
-    // pub fn get_attribute(self: *const HTMLDivElement, name: []const u8) ?[]const u8 {
-    //     return self.attributes.get(name);
-    // }
-    //
-    // pub fn set_attribute(self: *HTMLDivElement, name: []const u8, value: []const u8) !void {
-    //     try self.attributes.put(name, value);
-    // }
-    //
-    // pub fn remove_attribute(self: *HTMLDivElement, name: []const u8) void {
-    //     _ = self.attributes.remove(name);
-    // }
-    //
-    // pub fn has_attribute(self: *const HTMLDivElement, name: []const u8) bool {
-    //     return self.attributes.contains(name);
-    // }
-    //
-    // pub fn append_child(self: *HTMLDivElement, child: *HTMLElement) !void {
-    //     try self.children.append(child);
-    //     child.parent_element = @ptrCast(self);
-    //
-    //     // Update last child
-    //     self.last_child = child;
-    //
-    //     // If this is the first child, update first_child too
-    //     if (self.children.items.len == 1) {
-    //         self.first_child = child;
-    //     } else {
-    //         // Update sibling relationships
-    //         const previous_child = self.children.items[self.children.items.len - 2];
-    //         previous_child.next_sibling = child;
-    //         child.previous_sibling = previous_child;
-    //     }
-    // }
-    //
-    // pub fn remove_child(self: *HTMLDivElement, child: *HTMLElement) !void {
-    //     // Find the child index
-    //     for (self.children.items, 0..) |elem, i| {
-    //         if (elem == child) {
-    //             // Update sibling relationships
-    //             if (child.previous_sibling) |prev| {
-    //                 prev.next_sibling = child.next_sibling;
-    //             }
-    //             if (child.next_sibling) |next| {
-    //                 next.previous_sibling = child.previous_sibling;
-    //             }
-    //
-    //             // Update first/last child if needed
-    //             if (self.first_child == child) {
-    //                 self.first_child = child.next_sibling;
-    //             }
-    //             if (self.last_child == child) {
-    //                 self.last_child = child.previous_sibling;
-    //             }
-    //
-    //             // Remove from children array
-    //             _ = self.children.orderedRemove(i);
-    //             child.parent_element = null;
-    //             child.previous_sibling = null;
-    //             child.next_sibling = null;
-    //             return;
-    //         }
-    //     }
-    //
-    //     return error.ChildNotFound;
-    // }
 };
+
+pub fn setInputValue(ptr: [*]const u8, len: u32, text_ptr: [*]const u8, text_len: u32) void {
+    if (isWasi) {
+        return Wasm.setInputValueWasm(ptr, len, text_ptr, text_len);
+    } else {
+        // Dummy implementation - return empty string
+        return void;
+    }
+}
+
+pub fn mutateDomElement(
+    id_ptr: [*]const u8,
+    id_len: usize,
+    attribute: [*]const u8,
+    attribute_len: usize,
+    value: u32,
+) void {
+    if (isWasi) {
+        Wasm.mutateDomElementWasm(id_ptr, id_len, attribute, attribute_len, value);
+    } else {
+        // Dummy implementation - log the action if needed
+        if (comptime std.debug.runtime_safety) {
+            const id = id_ptr[0..id_len];
+            const attr = attribute[0..attribute_len];
+            std.debug.print("DOM: Would set element '{s}' attribute '{s}' to {d}\n", .{ id, attr, value });
+        }
+        // No-op in non-WASM environments
+    }
+}
+
+pub fn mutateDomElementStyle(
+    id_ptr: [*]const u8,
+    id_len: usize,
+    attribute: [*]const u8,
+    attribute_len: usize,
+    value: f32,
+) void {
+    if (isWasi) {
+        Wasm.mutateDomElementStyleWasm(id_ptr, id_len, attribute, attribute_len, value);
+    } else {
+        // Dummy implementation - log the action if needed
+        if (comptime std.debug.runtime_safety) {
+            const id = id_ptr[0..id_len];
+            const attr = attribute[0..attribute_len];
+            std.debug.print("DOM: Would set element '{s}' style '{s}' to {d:.2}\n", .{ id, attr, value });
+        }
+        // No-op in non-WASM environments
+    }
+}
+
+pub fn mutateDomElementStyleString(
+    id_ptr: [*]const u8,
+    id_len: usize,
+    attribute: [*]const u8,
+    attribute_len: usize,
+    value_ptr: [*]const u8,
+    value_len: usize,
+) void {
+    if (isWasi) {
+        Wasm.mutateDomElementStyleStringWasm(id_ptr, id_len, attribute, attribute_len, value_ptr, value_len);
+    } else {
+        // Dummy implementation - log the action if needed
+        if (comptime std.debug.runtime_safety) {
+            const id = id_ptr[0..id_len];
+            const attr = attribute[0..attribute_len];
+            const value = value_ptr[0..value_len];
+            std.debug.print("DOM: Would set element '{s}' style '{s}' to '{s}'\n", .{ id, attr, value });
+        }
+        // No-op in non-WASM environments
+    }
+}
+
+var dummy_float_buffer: [8]f32 = undefined;
+var dummy_string_buffer: [256:0]u8 = undefined;

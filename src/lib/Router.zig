@@ -153,7 +153,7 @@ const Route = struct {
     page: *const fn () void = undefined,
 };
 pub fn searchRoute(radix: *const Radix, path: []const u8) ?Route {
-    // var param_args: ?*std.ArrayList(ParamInfo) = null;
+    // var param_args: ?*std.array_list.Managed(ParamInfo) = null;
     var node = radix.root;
     var start: usize = 1;
 
@@ -275,13 +275,13 @@ fn insert(
 }
 
 fn printTree(radix: *const Radix) !void {
-    var buffer = std.ArrayList(u8).init(radix.allocator);
+    var buffer = std.array_list.Managed(u8).init(radix.allocator);
     defer buffer.deinit();
     // Start traversal from the root's children (root itself has no prefix)
     try printNode(radix.root, &buffer);
 }
 
-fn printNode(node: *const Node, buffer: *std.ArrayList(u8)) !void {
+fn printNode(node: *const Node, buffer: *std.array_list.Managed(u8)) !void {
     // Save current buffer length to backtrack later
     const original_len = buffer.items.len;
 

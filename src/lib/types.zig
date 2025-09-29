@@ -6,9 +6,11 @@ pub const TransitionProperty = @import("Transition.zig").TransitionProperty;
 const print = std.debug.print;
 const ColorTheme = @import("constants/Color.zig");
 const Animation = @import("Animation.zig");
-// pub const ElementType = @import("user_config").ElementType;
+pub const ElementType = @import("user_config").ElementType;
+pub const ThemeTokens = @import("user_config").ThemeTokens;
 pub const color_theme: ColorTheme = ColorTheme{};
 const isMobile = @import("utils.zig").isMobile;
+const Event = @import("Event.zig");
 
 pub const TimingFunction = enum {
     linear,
@@ -20,60 +22,60 @@ pub const TimingFunction = enum {
     elastic,
 };
 
-pub const ElementType = enum(u8) {
-    Rectangle,
-    Text,
-    Image,
-    FlexBox,
-    Input,
-    Button,
-    Block,
-    Box,
-    Header,
-    Svg,
-    Link,
-    EmbedLink,
-    List,
-    ListItem,
-    _If,
-    Hooks,
-    Layout,
-    Page,
-    Bind,
-    Dialog,
-    DialogBtnShow,
-    DialogBtnClose,
-    Draggable,
-    RedirectLink,
-    Select,
-    SelectItem,
-    CtxButton,
-    EmbedIcon,
-    Icon,
-    Label,
-    Form,
-    AllocText,
-    Table,
-    TableRow,
-    TableCell,
-    TableHeader,
-    TableBody,
-    TextArea,
-    Canvas,
-    SubmitCtxButton,
-    HooksCtx,
-    JsonEditor,
-    HtmlText,
-    Code,
-    Span,
-    LazyImage,
-    Intersection,
-    PreImage,
-    TextGradient,
-    Gradient,
-    Virtualize,
-    ButtonCycle,
-};
+// pub const ElementType = enum(u8) {
+//     Rectangle,
+//     Text,
+//     Image,
+//     FlexBox,
+//     Input,
+//     Button,
+//     Block,
+//     Box,
+//     Header,
+//     Svg,
+//     Link,
+//     EmbedLink,
+//     List,
+//     ListItem,
+//     _If,
+//     Hooks,
+//     Layout,
+//     Page,
+//     Bind,
+//     Dialog,
+//     DialogBtnShow,
+//     DialogBtnClose,
+//     Draggable,
+//     RedirectLink,
+//     Select,
+//     SelectItem,
+//     CtxButton,
+//     EmbedIcon,
+//     Icon,
+//     Label,
+//     Form,
+//     AllocText,
+//     Table,
+//     TableRow,
+//     TableCell,
+//     TableHeader,
+//     TableBody,
+//     TextArea,
+//     Canvas,
+//     SubmitCtxButton,
+//     HooksCtx,
+//     JsonEditor,
+//     HtmlText,
+//     Code,
+//     Span,
+//     LazyImage,
+//     Intersection,
+//     PreImage,
+//     TextGradient,
+//     Gradient,
+//     Virtualize,
+//     ButtonCycle,
+// };
 
 pub fn switchColorTheme() void {
     switch (color_theme.theme) {
@@ -222,7 +224,6 @@ pub const Sizing = struct {
     pub fn @"%"(size: f32) Sizing {
         return .{ .type = .percent, .size = .{ .minmax = .{
             .min = size,
-            .max = size,
         } } };
     }
 
@@ -296,20 +297,32 @@ pub const Pos = struct {
     }
 };
 
-pub const Color = struct {
-    r: u8 = 0,
-    g: u8 = 0,
-    b: u8 = 0,
-    a: u8 = 0,
-    pub const transparent = Color{};
+pub const Rgba = struct { r: u8 = 0, g: u8 = 0, b: u8 = 0, a: u8 = 0 };
+pub const Color = union(enum) {
+    Literal: Rgba, // A hardcoded, specific color
+    Thematic: ThemeTokens, // A token name, like "primaryText" or "accentColor"
+
+    pub const transparent = Color{ .Literal = .{ .r = 0, .g = 0, .b = 0, .a = 0 } };
+    pub const white = Color{ .Literal = .{ .r = 255, .g = 255, .b = 255, .a = 255 } };
+    pub const black = Color{ .Literal = .{ .r = 0, .g = 0, .b = 0, .a = 255 } };
+    pub const red = Color{ .Literal = .{ .r = 255, .g = 0, .b = 0, .a = 255 } };
+    pub const green = Color{ .Literal = .{ .r = 0, .g = 255, .b = 0, .a = 255 } };
+    pub const blue = Color{ .Literal = .{ .r = 0, .g = 0, .b = 255, .a = 255 } };
+    pub const yellow = Color{ .Literal = .{ .r = 255, .g = 255, .b = 0, .a = 255 } };
+    pub const cyan = Color{ .Literal = .{ .r = 0, .g = 255, .b = 255, .a = 255 } };
+    pub const magenta = Color{ .Literal = .{ .r = 255, .g = 0, .b = 255, .a = 255 } };
+
+    pub fn palette(thematic: ThemeTokens) Color {
+        return .{ .Thematic = thematic };
+    }
     pub fn hex(hex_str: []const u8) Color {
         const rgba_arr = Fabric.hexToRgba(hex_str);
-        return Color{
+        return .{ .Literal = .{
             .r = rgba_arr[0],
             .g = rgba_arr[1],
             .b = rgba_arr[2],
             .a = rgba_arr[3],
-        };
+        } };
     }
 
     // Function to darken a hex color string by a percentage and return Color struct
@@ -321,15 +334,17 @@ pub const Color = struct {
         const rgba_arr = Fabric.hexToRgba(hex_str);
         const factor = 1.0 - (percentage / 100.0);
 
-        return Color{
-            .r = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[0])) * factor),
-            .g = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[1])) * factor),
-            .b = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[2])) * factor),
-            .a = rgba_arr[3], // Keep alpha unchanged
+        return .{
+            .Literal = .{
+                .r = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[0])) * factor),
+                .g = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[1])) * factor),
+                .b = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[2])) * factor),
+                .a = rgba_arr[3], // Keep alpha unchanged
+            },
         };
     }
 
-    // Function to lighten a hex color string by a percentage and return Color struct
+    // // Function to lighten a hex color string by a percentage and return Color struct
     pub fn lighten(hex_str: []const u8, percentage: f32) Color {
         if (percentage < 0.0 or percentage > 100.0) {
             @panic("Percentage must be between 0 and 100");
@@ -338,37 +353,39 @@ pub const Color = struct {
         const rgba_arr = Fabric.hexToRgba(hex_str);
         const factor = percentage / 100.0;
 
-        return Color{
-            .r = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[0])) + (@as(f32, 255.0) - @as(f32, @floatFromInt(rgba_arr[0]))) * factor),
-            .g = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[1])) + (@as(f32, 255.0) - @as(f32, @floatFromInt(rgba_arr[1]))) * factor),
-            .b = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[2])) + (@as(f32, 255.0) - @as(f32, @floatFromInt(rgba_arr[2]))) * factor),
-            .a = rgba_arr[3], // Keep alpha unchanged
+        return .{
+            .Literal = .{
+                .r = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[0])) + (@as(f32, 255.0) - @as(f32, @floatFromInt(rgba_arr[0]))) * factor),
+                .g = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[1])) + (@as(f32, 255.0) - @as(f32, @floatFromInt(rgba_arr[1]))) * factor),
+                .b = @intFromFloat(@as(f32, @floatFromInt(rgba_arr[2])) + (@as(f32, 255.0) - @as(f32, @floatFromInt(rgba_arr[2]))) * factor),
+                .a = rgba_arr[3], // Keep alpha unchanged
+            },
         };
     }
     pub fn rgba(r: u8, g: u8, b: u8, a: u8) Color {
-        return Color{
+        return .{ .Literal = .{
             .r = r,
             .g = g,
             .b = b,
             .a = a,
-        };
+        } };
     }
     pub fn rgb(r: u8, g: u8, b: u8) Color {
-        return Color{
+        return .{ .Literal = .{
             .r = r,
             .g = g,
             .b = b,
             .a = 255,
-        };
+        } };
     }
     pub fn transparentizeHex(hex_str: []const u8, alpha: u8) Color {
         const rgba_arr = Fabric.transparentize(hex_str, alpha);
-        return Color{
+        return .{ .Literal = .{
             .r = rgba_arr[0],
             .g = rgba_arr[1],
             .b = rgba_arr[2],
             .a = rgba_arr[3],
-        };
+        } };
     }
 };
 
@@ -622,7 +639,7 @@ pub const Shadow = struct {
     left: f32 = 0,
     blur: f32 = 0,
     spread: f32 = 0,
-    color: Color = .{},
+    color: Color = .{ .Literal = .{} },
 };
 
 pub const Border = struct {
@@ -961,7 +978,7 @@ pub const CheckMark = struct {
     font_weight: ?usize = null,
     border_radius: ?BorderRadius = null,
     border_thickness: ?Border = null,
-    border_color: ?Color = .{},
+    border_color: ?Color = null,
     text_color: ?Color = null,
     padding: ?Padding = null,
     child_alignment: ?struct { x: Alignment, y: Alignment } = null,
@@ -1127,7 +1144,7 @@ pub const ChildStyle = struct {
     font_weight: ?usize = null,
     border_radius: ?BorderRadius = null,
     border_thickness: ?Border = null,
-    border_color: ?Color = .{},
+    border_color: ?Color = null,
     text_color: ?Color = null,
     padding: ?Padding = null,
     margin: ?Margin = null,
@@ -1264,6 +1281,14 @@ const BorderGrouped = struct {
         return .{ .thickness = .b(1), .color = color };
     }
 
+    pub fn l(thickness: f32, color: Color) BorderGrouped {
+        return .{ .thickness = .l(thickness), .color = color };
+    }
+
+    pub fn r(thickness: f32, color: Color) BorderGrouped {
+        return .{ .thickness = .l(thickness), .color = color };
+    }
+
     pub fn tb(color: Color) BorderGrouped {
         return .{ .thickness = .tb(1), .color = color };
     }
@@ -1275,6 +1300,47 @@ const BorderGrouped = struct {
     // Zero/none helper
     pub fn none() BorderGrouped {
         return .{ .thickness = .all(0) };
+    }
+};
+
+const FontParams = struct {
+    _size: i32,
+    _weight: ?usize = null,
+    _color: ?Color = null,
+    pub fn size(font_size: i32) FontParams {
+        return .{
+            ._size = font_size,
+        };
+    }
+    pub fn weight(font_weight: ?usize) FontParams {
+        return .{
+            ._weight = font_weight,
+        };
+    }
+
+    pub fn color(font_color: ?Color) FontParams {
+        return .{
+            ._color = font_color,
+        };
+    }
+    pub fn all(font_size: i32, font_weight: ?usize, font_color: ?Color) FontParams {
+        return .{
+            ._size = font_size,
+            ._weight = font_weight,
+            ._color = font_color,
+        };
+    }
+    pub fn size_weight(font_size: i32, font_weight: ?usize) FontParams {
+        return .{
+            ._size = font_size,
+            ._weight = font_weight,
+        };
+    }
+    pub fn size_color(font_size: i32, font_color: ?Color) FontParams {
+        return .{
+            ._size = font_size,
+            ._color = font_color,
+        };
     }
 };
 
@@ -1302,19 +1368,19 @@ pub const Visual = struct {
     border_thickness: ?Border = null,
 
     /// Border color as RGBA array [red, green, blue, alpha]
-    border_color: ?Color = .{},
+    border_color: ?Color = null,
 
     border: ?BorderGrouped = null,
 
     /// Text color as RGBA array [red, green, blue, alpha]
     /// Default: solid black
-    text_color: ?Color = .{ .a = 255 },
+    text_color: ?Color = null,
 
     /// Gradient color as RGBA array [red, green, blue, alpha]
     gradient: ?[]const Color = null,
 
     /// Element opacity (0.0 = fully transparent, 1.0 = fully opaque)
-    opacity: f32 = 1,
+    opacity: ?f32 = null,
 
     /// Shadow configuration for drop shadows
     shadow: Shadow = .{},
@@ -1322,25 +1388,20 @@ pub const Visual = struct {
     /// 2D/3D transformation configuration
     transform: ?Transform = null,
 
-    pub fn font(size: i32, weight: ?usize) Visual {
-        return .{
-            .font_size = size,
-            .font_weight = weight,
-        };
-    }
-
-    pub fn font_sc(size: i32, color: Color) Visual {
-        return .{
-            .font_size = size,
-            .text_color = color,
-        };
-    }
-
-    pub fn font_swc(size: i32, weight: usize, color: Color) Visual {
+    pub fn font(size: i32, weight: ?usize, color: ?Color) Visual {
         return .{
             .font_size = size,
             .font_weight = weight,
             .text_color = color,
+        };
+    }
+
+    pub fn borderSolid(thickness: Border, color: Color) Visual {
+        return .{
+            .border = BorderGrouped{
+                .thickness = thickness,
+                .color = color,
+            },
         };
     }
 
@@ -1379,6 +1440,11 @@ pub const Interactive = struct {
             .hover = .{ .transform = .scale() },
         };
     }
+    pub fn hover_text(color: Color) Interactive {
+        return .{
+            .hover = .{ .text_color = color },
+        };
+    }
 };
 
 /// Global user-defined default style that overrides system defaults
@@ -1398,10 +1464,13 @@ var user_defaults: ?Style = null;
 /// });
 /// ```
 pub const Style = struct {
-    /// Unique identifier for the styled element
+    /// Unique identifier for the element id="92d7dd45a43f36e4_Text_0-genk...
+    /// this defaults to the uuid of the element, which is autogenerated
+    /// It is used during reconciliation to find the correct node to update
+    /// duplicate ids on the same page are considered undefined behaviour
     id: ?[]const u8 = null,
 
-    /// CSS class-like identifier for grouping styles
+    /// Class-like identifier for grouping styles
     style_id: ?[]const u8 = null,
 
     /// Positioning method (static, relative, absolute, fixed)
@@ -1429,7 +1498,6 @@ pub const Style = struct {
     text_decoration: ?TextDecoration = null,
 
     /// Alignment configuration for child elements
-    /// x: horizontal alignment, y: vertical alignment
     layout: ?Layout = null,
 
     /// Gap between child elements in pixels
@@ -1479,15 +1547,6 @@ pub const Style = struct {
 
     /// Interactive
     interactive: ?Interactive = null,
-
-    // /// Hover state styling
-    // hover: ?Visual = null,
-    //
-    // /// Focus state styling
-    // focus: ?Visual = null,
-    //
-    // /// Focus Within state styling
-    // focus_within: ?Visual = null,
 
     /// Button identifier for click handling
     btn_id: u32 = 0,
@@ -1590,7 +1649,7 @@ pub const Style = struct {
     /// const merged = override_style.merge(base_style);
     /// // Result: font_size = 18, padding = .all(8)
     /// ```
-    pub fn merge(self: Style, base: Style) Style {
+    pub fn merge(self: *const Style, base: Style) Style {
         var result = base;
         inline for (@typeInfo(Style).@"struct".fields) |field| {
             const field_value = @field(self, field.name);
@@ -1696,7 +1755,7 @@ const InputType = enum(u8) {
     search = 6,
     telephone = 7,
 };
-const Callback = *const fn (*Fabric.Event) void;
+const Callback = *const fn (*Event) void;
 pub const InputParamsStr = struct {
     default: ?[]const u8 = null,
     tag: ?[]const u8 = null,
@@ -1799,11 +1858,12 @@ pub const InputParams = union(enum) {
 };
 
 pub const StateType = enum {
-    pure,
     static,
+    pure,
     dynamic,
     animation,
     grain,
+    err,
 };
 
 pub const ButtonType = enum {
@@ -1900,13 +1960,14 @@ pub const RenderCommand = struct {
     href: []const u8 = "",
     style: ?Style = null,
     id: []const u8 = "",
-    show: bool = true,
+    index: usize = 0,
     hooks: HooksIds,
     node_ptr: *UINode,
     hover: bool = false,
     focus: bool = false,
     focus_within: bool = false,
     class: ?[]const u8 = null,
+    render_type: StateType = .static,
 };
 
 pub const EventType = enum(u8) {

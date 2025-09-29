@@ -256,7 +256,7 @@ const box_sizing_map = [_][]const u8{ "content-box", "border-box", "padding-box"
 const list_style_map = [_][]const u8{ "none", "disc", "circle", "square", "decimal", "decimal-leading-zero", "lower-roman", "upper-roman", "lower-alpha", "upper-alpha", "lower-greek", "armenian", "georgian", "inherit", "initial", "revert", "unset" };
 const flex_wrap_map = [_][]const u8{ "nowrap", "wrap", "wrap-reverse", "inherit", "initial", "revert", "unset" };
 const white_space_map = [_][]const u8{ "normal", "nowrap", "pre", "pre-wrap", "pre-line", "break-spaces", "inherit", "initial", "revert", "unset" };
-const flex_type_map = [_][]const u8{ "inline-flex", "inline-flex", "block", "inline-block", "none" };
+const flex_type_map = [_][]const u8{ "flex", "inline-flex", "block", "inline-block", "none" };
 const timing_function_map = [_][]const u8{ "ease", "linear", "ease-in", "ease-out", "ease-in-out", "bounce", "elastic" };
 const animation_direction_map = [_][]const u8{ "normal ", "reverse ", "forwards ", "alternate " };
 
@@ -294,48 +294,6 @@ fn transformOriginToCSS(origin: TransformOrigin, writer: anytype) !void {
 fn textDecoToCSS(deco: TextDecoration, writer: anytype) !void {
     try writeMappedString(TextDecoration, deco, &text_decoration_map, writer);
 }
-
-// // Helper function to convert Direction enum to CSS flex-direction
-// fn directionToCSS(dir: Direction, writer: writer_t) !void {
-//     switch (dir) {
-//         .column => try writer.write("column"),
-//         .row => try writer.write("row"),
-//     }
-// }
-//
-// // Helper function to convert Alignment to CSS values
-// fn alignmentToCSS(_align: Alignment, writer: writer_t) !void {
-//     switch (_align) {
-//         .center => try writer.write("center"),
-//         .top => try writer.write("flex-start"),
-//         .bottom => try writer.write("flex-end"),
-//         .start => try writer.write("flex-start"),
-//         .end => try writer.write("flex-end"),
-//         .between => try writer.write("space-between"),
-//         .even => try writer.write("space-evenly"),
-//     }
-// }
-//
-// // Helper function to convert PositionType to CSS values
-// fn positionTypeToCSS(pos_type: PositionType, writer: writer_t) !void {
-//     return switch (pos_type) {
-//         .relative => try writer.write("relative"),
-//         .absolute => try writer.write("absolute"),
-//         .fixed => try writer.write("fixed"),
-//         .sticky => try writer.write("sticky"),
-//     };
-// }
-//
-// // Helper function to convert FloatType to CSS values
-// fn floatTypeToCSS(float_type: FloatType) []const u8 {
-//     return switch (float_type) {
-//         .top => "top",
-//         .bottom => "bottom",
-//         .left => "left",
-//         .right => "right",
-//     };
-// }
-
 // Helper function to convert SizingType to CSS values
 fn sizingTypeToCSS(sizing: Sizing, writer: writer_t) !void {
     switch (sizing.type) {
@@ -394,89 +352,34 @@ fn posTypeToCSS(pos: Pos, writer: writer_t) !void {
 
 // Helper function to convert color array to CSS rgba
 fn colorToCSS(color: Color, writer: anytype) !void {
-    const alpha = @as(f32, @floatFromInt(color.a)) / 255.0;
-    try writer.write("rgba(");
-    try writer.writeU8Num(color.r);
-    try writer.writeByte(',');
-    try writer.writeU8Num(color.g);
-    try writer.writeByte(',');
-    try writer.writeU8Num(color.b);
-    try writer.writeByte(',');
-    try writer.writeF32(alpha);
-    try writer.writeByte(')');
+    switch (color) {
+        .Literal => |rgba| {
+            const alpha = @as(f32, @floatFromInt(rgba.a)) / 255.0;
+            try writer.write("rgba(");
+            try writer.writeU8Num(rgba.r);
+            try writer.writeByte(',');
+            try writer.writeU8Num(rgba.g);
+            try writer.writeByte(',');
+            try writer.writeU8Num(rgba.b);
+            try writer.writeByte(',');
+            try writer.writeF32(alpha);
+            try writer.writeByte(')');
+        },
+        .Thematic => |thematic| {
+            try writer.write("var(--");
+            try writer.write(@tagName(thematic));
+            try writer.write(")");
+        },
+    }
 }
 
-// // Function to convert TransformType to CSS
-// fn transformToCSS(transform: Transform, writer: anytype) !void {
-//     switch (transform.type) {
-//         .none => {},
-//         .scale => try writer.print("scale({d})", .{transform.scale_size}),
-//         .scaleY => try writer.print("scaleY({d})", .{transform.scale_size}),
-//         .scaleX => try writer.print("scaleX({d})", .{transform.scale_size}),
-//         .translateX => try writer.print("translateX({d})", .{transform.dist}),
-//         .translateY => try writer.print("translateY({d})", .{transform.dist}),
-//     }
-// }
-//
-// // Function to convert TransformType to CSS
-// fn transformOriginToCSS(transform_origin: TransformOrigin, writer: anytype) !void {
-//     switch (transform_origin) {
-//         .top => try writer.write("top"),
-//         .bottom => try writer.write("bottom"),
-//         .right => try writer.write("right"),
-//         .left => try writer.write("left"),
-//     }
-// }
-//
-// fn textDecoToCSS(text_decoration: TextDecoration, writer: anytype) !void {
-//     switch (text_decoration) {
-//         .none => try writer.write("none"), // Not implemented in your struct
-//         .inherit => try writer.write("inherit"), // Not implemented in your struct
-//         .underline => try writer.write("underline"), // Not implemented in your struct
-//         .initial => try writer.write("initial"), // Not implemented in your struct
-//         .overline => try writer.write("overline"), // Not implemented in your struct
-//         .unset => try writer.write("unset"), // Not implemented in your struct
-//         .revert => try writer.write("revert"), // Not implemented in your struct
-//     }
-// }
 fn appearanceToCSS(appearance: Appearance, writer: anytype) !void {
     try writeMappedString(Appearance, appearance, &appearance_map, writer);
-    // switch (appearance) {
-    //     .none => try writer.write("none"),
-    //     .auto => try writer.write("auto"),
-    //     .button => try writer.write("button"),
-    //     .textfield => try writer.write("textfield"),
-    //     .menulist => try writer.write("menulist"),
-    //     .searchfield => try writer.write("searchfield"),
-    //     .textarea => try writer.write("textarea"),
-    //     .checkbox => try writer.write("checkbox"),
-    //     .radio => try writer.write("radio"),
-    //     .inherit => try writer.write("inherit"),
-    //     .initial => try writer.write("initial"),
-    //     .revert => try writer.write("revert"),
-    //     .unset => try writer.write("unset"),
-    // }
 }
 
 // Function to convert OutlineStyle enum to a CSS string
 fn outlineStyleToCSS(outline: Outline, writer: anytype) !void {
     try writeMappedString(Outline, outline, &outline_map, writer);
-    // switch (style) {
-    //     .none => try writer.write("none"),
-    //     .auto => try writer.write("auto"),
-    //     .dotted => try writer.write("dotted"),
-    //     .dashed => try writer.write("dashed"),
-    //     .solid => try writer.write("solid"),
-    //     .double => try writer.write("double"),
-    //     .groove => try writer.write("groove"),
-    //     .ridge => try writer.write("ridge"),
-    //     .inset => try writer.write("inset"),
-    //     .outset => try writer.write("outset"),
-    //     .inherit => try writer.write("inherit"),
-    //     .initial => try writer.write("initial"),
-    //     .revert => try writer.write("revert"),
-    //     .unset => try writer.write("unset"),
-    // }
 }
 
 fn transitionStyleToCSS(style: Transition, writer: anytype) void {
@@ -497,65 +400,21 @@ fn transitionStyleToCSS(style: Transition, writer: anytype) void {
     writer.writeU32(style.duration) catch return;
     writer.write("ms ") catch return;
     try writeMappedString(TimingFunction, style.timing, &timing_function_map, writer);
-    // switch (style.timing) {
-    //     .ease => writer.write("ease") catch return,
-    //     .linear => writer.write("linear") catch return,
-    //     .ease_in => writer.write("ease-in") catch return,
-    //     .ease_out => writer.write("ease-out") catch return,
-    //     .ease_in_out => writer.write("ease-in-out") catch return,
-    //     .bounce => writer.write("bounce") catch return,
-    //     .elastic => writer.write("elastic") catch return,
-    // }
 }
 
 // Function to convert ListStyle enum to CSS string
 fn cursorToCSS(cursor_type: Cursor, writer: anytype) !void {
     try writeMappedString(Cursor, cursor_type, &cursor_map, writer);
-    // switch (cursor_type) {
-    //     .pointer => try writer.write("pointer"),
-    //     .help => try writer.write("help"),
-    //     .grab => try writer.write("grab"),
-    //     .zoom_in => try writer.write("zoom-in"),
-    //     .zoom_out => try writer.write("zoom-out"),
-    // }
 }
 
 // Function to convert ListStyle enum to CSS string
 fn listStyleToCSS(list_style: ListStyle, writer: anytype) !void {
     try writeMappedString(ListStyle, list_style, &list_style_map, writer);
-    // switch (list_style) {
-    //     .none => try writer.write("none"),
-    //     .disc => try writer.write("disc"),
-    //     .circle => try writer.write("circle"),
-    //     .square => try writer.write("square"),
-    //     .decimal => try writer.write("decimal"),
-    //     .decimal_leading_zero => try writer.write("decimal-leading-zero"),
-    //     .lower_roman => try writer.write("lower-roman"),
-    //     .upper_roman => try writer.write("upper-roman"),
-    //     .lower_alpha => try writer.write("lower-alpha"),
-    //     .upper_alpha => try writer.write("upper-alpha"),
-    //     .lower_greek => try writer.write("lower-greek"),
-    //     .armenian => try writer.write("armenian"),
-    //     .georgian => try writer.write("georgian"),
-    //     .inherit => try writer.write("inherit"),
-    //     .initial => try writer.write("initial"),
-    //     .revert => try writer.write("revert"),
-    //     .unset => try writer.write("unset"),
-    // }
 }
 
 // Function to convert FlexWrap enum to CSS string
 fn flexWrapToCSS(flex_wrap: FlexWrap, writer: anytype) !void {
     try writeMappedString(FlexWrap, flex_wrap, &flex_wrap_map, writer);
-    // switch (flex_wrap) {
-    //     .nowrap => try writer.write("nowrap"),
-    //     .wrap => try writer.write("wrap"),
-    //     .wrap_reverse => try writer.write("wrap-reverse"),
-    //     .inherit => try writer.write("inherit"),
-    //     .initial => try writer.write("initial"),
-    //     .revert => try writer.write("revert"),
-    //     .unset => try writer.write("unset"),
-    // }
 }
 fn animationToCSS(animation: Animation.Specs, writer: anytype) !void {
     writer.write(animation.tag) catch {};
@@ -563,59 +422,25 @@ fn animationToCSS(animation: Animation.Specs, writer: anytype) !void {
     writer.writeF32(animation.duration_s) catch {};
     writer.write("s ") catch {};
     try writeMappedString(TimingFunction, animation.timing_function, &timing_function_map, writer);
-    // switch (animation.timing_function) {
-    //     .linear => try writer.write("linear "),
-    //     .ease => try writer.write("ease "),
-    //     .ease_in => try writer.write("ease-in "),
-    //     .ease_in_out => try writer.write("ease-in-out "),
-    //     .ease_out => try writer.write("ease_out "),
-    // }
     try writeMappedString(AnimDir, animation.direction, &animation_direction_map, writer);
-    // switch (animation.direction) {
-    //     .normal => try writer.write("normal "),
-    //     .reverse => try writer.write("reverse "),
-    //     .forwards => try writer.write("forwards "),
-    //     .pingpong => try writer.write("alternate "),
-    // }
     if (animation.iteration_count.iter_count == 0) {
         try writer.write("infinite");
-    } else {
-        // try writer.print("{d}", .{animation.iteration_count.iter_count});
     }
 }
 
 fn whiteSpaceToCSS(white_space: WhiteSpace, writer: anytype) !void {
     try writeMappedString(WhiteSpace, white_space, &white_space_map, writer);
-    // switch (white_space) {
-    //     .normal => try writer.write("normal"),
-    //     .nowrap => try writer.write("nowrap"),
-    //     .pre => try writer.write("pre"),
-    //     .pre_wrap => try writer.write("pre-wrap"),
-    //     .pre_line => try writer.write("pre-line"),
-    //     .break_spaces => try writer.write("break-spaces"),
-    //     .inherit => try writer.write("inherit"),
-    //     .initial => try writer.write("initial"),
-    //     .revert => try writer.write("revert"),
-    //     .unset => try writer.write("unset"),
-    // }
 }
 
 // Function to convert FlexType enum to a CSS string
 fn flexTypeToCSS(flex_type: FlexType, writer: anytype) !void {
     try writeMappedString(FlexType, flex_type, &flex_type_map, writer);
-    // switch (flex_type) {
-    //     .Flex, .Center => try writer.write("flex"),
-    //     .Stack => try writer.write("block"),
-    //     .Flow => try writer.write("inline-block"),
-    //     .None => try writer.write("none"),
-    // }
 }
 
 fn checkVisual(ptr: ?*UINode, visual: *const Types.Visual, writer: writer_t, visual_type: u8) void {
     // Color color
     if (visual.background) |background| {
         writePropValue("background-color", .{ .tag = .background, .data = .{ .background = background } }, writer);
-        // writePropValue("background-color", background, &writer);
     } else if (ptr != null and ptr.?.type == .Button or ptr.?.type == .CtxButton) {
         _ = writer.write("background-color:rgba(0,0,0,0);\n") catch {};
     }
@@ -646,24 +471,19 @@ fn checkVisual(ptr: ?*UINode, visual: *const Types.Visual, writer: writer_t, vis
     if (visual.border) |border| {
         const border_thickness = border.thickness;
         writePropValue("border-width", .{ .tag = .border, .data = .{ .border = border_thickness } }, writer);
-        // writePropValue("border-width", border_thickness, writer);
         if (border.color) |border_color| {
             writePropValue("border-color", .{ .tag = .background, .data = .{ .background = border_color } }, writer);
-            // writePropValue("border-color", border_color, writer);
         }
         writer.write("border-style: solid;\n") catch {};
 
         // Border radius
         if (border.radius) |border_radius| {
             writePropValue("border-radius", .{ .tag = .border_radius, .data = .{ .border_radius = border_radius } }, writer);
-            // writePropValue("border-radius", border_radius, writer);
         }
     } else if (visual.border_thickness) |border_thickness| {
         writePropValue("border-width", .{ .tag = .border, .data = .{ .border = border_thickness } }, writer);
-        // writePropValue("border-width", border_thickness, writer);
         if (visual.border_color) |border_color| {
             writePropValue("border-color", .{ .tag = .background, .data = .{ .background = border_color } }, writer);
-            // writePropValue("border-color", border_color, writer);
         }
         writer.write("border-style:solid;\n") catch {};
     } else if (visual_type != 0) {
@@ -675,17 +495,16 @@ fn checkVisual(ptr: ?*UINode, visual: *const Types.Visual, writer: writer_t, vis
     // Border radius
     if (visual.border_radius) |border_radius| {
         writePropValue("border-radius", .{ .tag = .border_radius, .data = .{ .border_radius = border_radius } }, writer);
-        // writePropValue("border-radius", border_radius, writer);
     }
 
     // Text color
     if (visual.text_color) |color| {
-        if (ptr.?.type == .Svg) {
+        if (ptr.?.type == .Svg or ptr.?.type == .Graphic) {
             writePropValue("fill", .{ .tag = .background, .data = .{ .background = color } }, writer);
+            writePropValue("stroke", .{ .tag = .background, .data = .{ .background = color } }, writer);
         } else {
             writePropValue("color", .{ .tag = .background, .data = .{ .background = color } }, writer);
         }
-        // writePropValue("color", color, writer);
     }
 
     // Shadow
@@ -697,7 +516,13 @@ fn checkVisual(ptr: ?*UINode, visual: *const Types.Visual, writer: writer_t, vis
     // Transform
     if (visual.transform) |tr| {
         writePropValue("transform", .{ .tag = .transform_type, .data = .{ .transform_type = tr } }, writer);
-        // writePropValue("transform", tr, &writer);
+    }
+
+    // Transform
+    if (visual.opacity) |opacity| {
+        writer.write("opacity:") catch {};
+        writer.writeF32(opacity) catch {};
+        writer.write(";\n") catch {};
     }
 }
 
@@ -733,56 +558,33 @@ pub fn generateStyle(ptr: ?*UINode, style: *const Types.Style) void {
     // Write display and flex properties
     if (ptr != null and ptr.?.type == .FlexBox) {
         writePropValue("display", .{ .tag = .flex_type, .data = .{ .flex_type = .Flex } }, &writer);
-        // if (style.layout) |layout| {
-        //     writePropValue("display", .{ .tag = .flex_type, .data = .{ .flex_type = layout } }, &writer);
-        //     // writePropValue("display", layout, &writer);
-        // } else {
-        //     writePropValue("display", .{ .tag = .flex_type, .data = .{ .flex_type = .Flex } }, &writer);
-        //     // writePropValue("display", "flex", &writer);
-        // }
         writePropValue("flex-direction", .{ .tag = .direction, .data = .{ .direction = style.direction } }, &writer);
-        // writePropValue("flex-direction", style.direction, &writer);
-
-        // justify content is x by default
-        // align items is y by default and they swap when doing direction .column
         if (style.layout) |layout| {
             if (style.direction == .row) {
                 writePropValue("justify-content", .{ .tag = .alignment, .data = .{ .alignment = layout.x } }, &writer);
                 writePropValue("align-items", .{ .tag = .alignment, .data = .{ .alignment = layout.y } }, &writer);
-                // writePropValue("justify-content", layout.x, &writer);
-                // writePropValue("align-items", layout.y, &writer);
             } else {
                 writePropValue("align-items", .{ .tag = .alignment, .data = .{ .alignment = layout.x } }, &writer);
                 writePropValue("justify-content", .{ .tag = .alignment, .data = .{ .alignment = layout.y } }, &writer);
-                // writePropValue("align-items", layout.x, &writer);
-                // writePropValue("justify-content", layout.y, &writer);
             }
         }
     } else if (style.layout) |layout| {
         if (ptr != null and ptr.?.text.len > 0 and layout.x == .center and layout.y == .center and ptr.?.type != .Svg) {
             writePropValue("text-align", .{ .tag = .alignment, .data = .{ .alignment = .center } }, &writer);
-            // writePropValue("text-align", "center", &writer);
         } else {
-            // writePropValue("display", d, &writer);
             writePropValue("display", .{ .tag = .flex_type, .data = .{ .flex_type = .Flex } }, &writer);
-            // writePropValue("flex-direction", style.direction, &writer);
+            writePropValue("flex-direction", .{ .tag = .direction, .data = .{ .direction = style.direction } }, &writer);
 
             if (layout.x == .center and layout.y == .center) {
                 writePropValue("justify-content", .{ .tag = .alignment, .data = .{ .alignment = .center } }, &writer);
                 writePropValue("align-items", .{ .tag = .alignment, .data = .{ .alignment = .center } }, &writer);
-                // writePropValue("justify-content", "center", &writer);
-                // writePropValue("align-items", "center", &writer);
             } else {
                 if (style.direction == .row) {
                     writePropValue("justify-content", .{ .tag = .alignment, .data = .{ .alignment = layout.x } }, &writer);
                     writePropValue("align-items", .{ .tag = .alignment, .data = .{ .alignment = layout.y } }, &writer);
-                    // writePropValue("justify-content", layout.x, &writer);
-                    // writePropValue("align-items", layout.y, &writer);
                 } else {
                     writePropValue("align-items", .{ .tag = .alignment, .data = .{ .alignment = layout.x } }, &writer);
                     writePropValue("justify-content", .{ .tag = .alignment, .data = .{ .alignment = layout.y } }, &writer);
-                    // writePropValue("align-items", layout.x, &writer);
-                    // writePropValue("justify-content", layout.y, &writer);
                 }
             }
         }
@@ -806,7 +608,6 @@ pub fn generateStyle(ptr: ?*UINode, style: *const Types.Style) void {
                 writer.write("%;\n") catch {};
             } else {
                 writePropValue("width", .{ .tag = .sizing, .data = .{ .sizing = size.width } }, &writer);
-                // writePropValue("width", size.width, &writer);
             }
         } else if (size.width.type == .grow) {
             writer.write("flex: 1;\n") catch {};
@@ -817,9 +618,11 @@ pub fn generateStyle(ptr: ?*UINode, style: *const Types.Style) void {
                 writer.write("min-height:") catch {};
                 writer.writeF32(size.height.size.min_max_vp.min) catch {};
                 writer.write("vh;\n") catch {};
+                writer.write("max-height:") catch {};
+                writer.writeF32(size.height.size.min_max_vp.max) catch {};
+                writer.write("vh;\n") catch {};
             } else {
                 writePropValue("height", .{ .tag = .sizing, .data = .{ .sizing = size.height } }, &writer);
-                // writePropValue("height", size.height, &writer);
             }
         } else if (size.height.type == .grow) {
             writer.write("flex: 1;\n") catch {};
@@ -829,11 +632,9 @@ pub fn generateStyle(ptr: ?*UINode, style: *const Types.Style) void {
     // Padding
     if (style.padding) |padding| {
         writePropValue("padding", .{ .tag = .padding, .data = .{ .padding = padding } }, &writer);
-        // writePropValue("padding", padding, &writer);
     }
     if (style.margin) |margin| {
         writePropValue("margin", .{ .tag = .margin, .data = .{ .margin = margin } }, &writer);
-        // writePropValue("margin", margin, &writer);
     }
 
     if (style.visual) |visual| {
@@ -841,7 +642,6 @@ pub fn generateStyle(ptr: ?*UINode, style: *const Types.Style) void {
     }
 
     // Alignment
-
     if (style.child_gap > 0) {
         writer.write("gap:") catch {};
         writer.writeU32(style.child_gap) catch {};
@@ -851,25 +651,20 @@ pub fn generateStyle(ptr: ?*UINode, style: *const Types.Style) void {
     // Text-Deco
     if (style.text_decoration) |td| {
         writePropValue("text-decoration", .{ .tag = .text_decoration, .data = .{ .text_decoration = td } }, &writer);
-        // writePropValue("text-decoration", td, &writer);
     }
 
     if (style.white_space) |ws| {
         writePropValue("white-space", .{ .tag = .white_space, .data = .{ .white_space = ws } }, &writer);
-        // writePropValue("white-space", ws, &writer);
     }
     if (style.flex_wrap) |fw| {
         writePropValue("flex-wrap", .{ .tag = .flex_wrap, .data = .{ .flex_wrap = fw } }, &writer);
-        // writePropValue("flex-wrap", fw, &writer);
     }
 
     if (style.animation) |an| {
         writePropValue("animation", .{ .tag = .animation_specs, .data = .{ .animation_specs = an } }, &writer);
-        // writePropValue("animation", an, &writer);
         writer.write("animation-delay:") catch {};
         writer.writeF32(an.delay) catch {};
         writer.write("s;\n") catch {};
-        // writer.print("animation-delay:{any}s;\n", .{an.delay}) catch {};
     }
 
     if (style.z_index) |zi| {
@@ -905,12 +700,10 @@ pub fn generateStyle(ptr: ?*UINode, style: *const Types.Style) void {
 
     if (style.list_style) |ls| {
         writePropValue("list-style", .{ .tag = .list_style, .data = .{ .list_style = ls } }, &writer);
-        // writePropValue("list-style", ls, &writer);
     }
 
     if (style.outline) |ol| {
         writePropValue("outline", .{ .tag = .outline, .data = .{ .outline = ol } }, &writer);
-        // writePropValue("outline", ol, &writer);
     }
 
     if (style.font_family.len > 0) {
@@ -921,7 +714,6 @@ pub fn generateStyle(ptr: ?*UINode, style: *const Types.Style) void {
 
     if (style.transition) |tr| {
         writePropValue("transition", .{ .tag = .transition, .data = .{ .transition = tr } }, &writer);
-        // writePropValue("transition", tr, &writer);
     }
 
     if (!style.show_scrollbar) {
@@ -931,14 +723,12 @@ pub fn generateStyle(ptr: ?*UINode, style: *const Types.Style) void {
 
     if (style.cursor) |c| {
         writePropValue("cursor", .{ .tag = .cursor, .data = .{ .cursor = c } }, &writer);
-        // writePropValue("cursor", c, &writer);
     } else if (ptr != null and ptr.?.type == .Button or ptr.?.type == .CtxButton or ptr.?.type == .ButtonCycle) {
         writePropValue("cursor", .{ .tag = .cursor, .data = .{ .cursor = .pointer } }, &writer);
     }
 
     if (style.appearance) |ap| {
         writePropValue("appearance", .{ .tag = .appearance, .data = .{ .appearance = ap } }, &writer);
-        // writePropValue("appearance", ap, &writer);
     }
 
     if (style.will_change) |wc| {
@@ -954,7 +744,6 @@ pub fn generateStyle(ptr: ?*UINode, style: *const Types.Style) void {
 
     if (style.transform_origin) |to| {
         writePropValue("transform-origin", .{ .tag = .transform_origin, .data = .{ .transform_origin = to } }, &writer);
-        // writePropValue("transform-origin", to, &writer);
     }
 
     writer.write("box-sizing: border-box;\n") catch {};
@@ -971,6 +760,76 @@ pub export fn getStyle(node_ptr: ?*UINode) ?[*]const u8 {
     generateStyle(node_ptr, &style);
     // Return a pointer to the CSS string
     return style_style.ptr;
+}
+
+pub export fn getGlobalStyle() ?[*]const u8 {
+    const user_defaults = Fabric.Style.getDefault();
+    generateStyle(null, &user_defaults);
+    // Return a pointer to the CSS string
+    return style_style.ptr;
+}
+
+pub const ThemeType = union(enum) {
+    default: void,
+    name: []const u8,
+};
+
+var global_style: []const u8 = "";
+var global_buffer: [4096]u8 = undefined;
+pub fn setGlobalStyleVariables(theme_types: []const ThemeType, comptime T: type, themes: []const T) void {
+    const theme_fields = @typeInfo(T).@"struct".fields;
+    var writer: Writer = undefined;
+    writer.init(&css_buffer);
+
+    for (themes, 0..) |theme, i| {
+        const theme_type = theme_types[i];
+        if (theme_type == .default) {
+            writer.write(":root") catch {};
+        } else {
+            // here we write the root theme
+            writer.write("[data-theme=") catch {};
+            writer.writeByte('"') catch {};
+            writer.write(theme_type.name) catch {};
+            writer.writeByte('"') catch {};
+            writer.write("]") catch {};
+        }
+        writer.write(" {\n") catch {};
+
+        inline for (theme_fields) |field| {
+            const field_value = @field(theme, field.name);
+            const field_name = field.name;
+            const field_type = field.type;
+            switch (field_type) {
+                []const u8 => {
+                    writer.write("--") catch {};
+                    writer.write(field_name) catch {};
+                    writer.writeByte(':') catch {};
+                    writer.write(field_value) catch {};
+                    writer.write(";\n") catch {};
+                },
+                Color => {
+                    writer.write("--") catch {};
+                    writer.write(field_name) catch {};
+                    writer.writeByte(':') catch {};
+                    colorToCSS(field_value, &writer) catch {};
+                    writer.write(";\n") catch {};
+                },
+                else => {},
+            }
+        }
+        writer.write("}\n") catch {};
+    }
+    const len: usize = writer.pos;
+    css_buffer[len] = 0;
+    global_style = css_buffer[0..len];
+}
+
+pub export fn getGlobalVariablesPtr() [*]const u8 {
+    return global_style.ptr;
+}
+
+pub export fn getGlobalVariablesLen() usize {
+    return global_style.len;
 }
 
 export fn showScrollBar() bool {
@@ -1011,30 +870,3 @@ pub export fn getVisualStyle(node_ptr: ?*UINode, visual_type: u8) ?[*]const u8 {
 export fn getVisualLen() usize {
     return visual_style.len;
 }
-
-test "generateCss" {
-    var node = UINode{
-        .style = &.{
-            .position = .{ .top = .px(100), .right = .px(600) },
-            .layout = .Flex,
-            .direction = .row,
-            .child_gap = 0,
-            .font_family = "",
-            .padding = .horizontal(16),
-            .visual = .{
-                .opacity = 1,
-                .background = .{ .a = 255, .r = 0, .g = 0, .b = 0 },
-                .border = .{ .thickness = .all(1), .color = .hex("#DFDFDF"), .radius = .all(8) },
-            },
-            .text_decoration = .underline,
-            .white_space = .pre_line,
-            .flex_wrap = .wrap,
-            .cursor = .pointer,
-        },
-    };
-
-    _ = getStyle(&node) orelse return error.StyleNull;
-    const len = getStyleLen();
-    std.debug.print("{s}\n", .{css_buffer[0..len]});
-}
-

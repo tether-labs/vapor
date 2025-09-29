@@ -222,7 +222,7 @@ pub fn fetch(url: []const u8, cb: *const fn () void, http_req: HttpReq) void {
         Fabric.println("Button Function Registry {any}\n", .{err});
         return;
     };
-    js_fetch(url.ptr, url.len, id, json.ptr, json.len);
+    fetchWasm(url.ptr, url.len, id, json.ptr, json.len);
 }
 
 var last_time: i64 = 0;
@@ -235,7 +235,7 @@ pub fn throttle() bool {
     return false;
 }
 
-extern fn js_fetch(
+extern fn fetchWasm(
     url_ptr: [*]const u8,
     url_len: usize,
     callback_id: usize,
@@ -243,7 +243,7 @@ extern fn js_fetch(
     size: usize,
 ) void;
 
-extern fn js_fetch_params(
+extern fn fetchParamsWasm(
     url_ptr: [*]const u8,
     url_len: usize,
     callback_id: usize,
@@ -251,27 +251,27 @@ extern fn js_fetch_params(
     size: usize,
 ) void;
 
-extern fn setWindowLocationWASM(
+extern fn setWindowLocationWasm(
     url_ptr: [*]const u8,
     url_len: usize,
 ) void;
 
 pub fn setWindowLocation(url: []const u8) void {
     if (isWasi) {
-        setWindowLocationWASM(url.ptr, url.len);
+        setWindowLocationWasm(url.ptr, url.len);
     } else {
         Fabric.printlnSrc("Attempted to reroute, but not wasi", .{url}, @src());
     }
 }
 
-extern fn navigateWASM(
+extern fn navigateWasm(
     path_ptr: [*]const u8,
     path_len: usize,
 ) void;
 
 pub fn navigate(path: []const u8) void {
     if (isWasi) {
-        navigateWASM(path.ptr, path.len);
+        navigateWasm(path.ptr, path.len);
     } else {
         Fabric.printlnSrc("Attempted to reroute, but not wasi", .{path}, @src());
     }
@@ -296,11 +296,11 @@ pub fn getWindowPath() []const u8 {
     return std.mem.span(getWindowInformationWasm());
 }
 
-extern fn getWindowParamsWASM() [*:0]u8;
+extern fn getWindowParamsWasm() [*:0]u8;
 
 pub fn getWindowParams() ?[]const u8 {
     if (isWasi) {
-        const params = getWindowParamsWASM();
+        const params = getWindowParamsWasm();
         const params_str = std.mem.span(params);
         if (params_str.len == 0) {
             return null;
@@ -336,7 +336,7 @@ pub fn findIndex(haystack: []const u8, needle: u8) ?usize {
     return null;
 }
 
-fn decoder(encoded: []const u8, decoded: *std.ArrayList(u8)) !void {
+fn decoder(encoded: []const u8, decoded: *std.array_list.Managed(u8)) !void {
     var i: usize = 0;
     while (i < encoded.len) : (i += 1) {
         if (encoded[i] == '%') {
@@ -370,7 +370,7 @@ pub fn parseParams(url: []const u8, allocator: *std.mem.Allocator) !?std.StringH
             // We only have one pair hence we add and return
             const seperator = findIndex(url[pos..], '=') orelse return error.SeperatorNotFound;
             const key = url[pos .. seperator + pos];
-            var decoded = std.ArrayList(u8).init(allocator.*);
+            var decoded = std.array_list.Managed(u8).init(allocator.*);
             try decoder(url[seperator + pos + 1 .. url.len], &decoded);
             const value = try decoded.toOwnedSlice();
             try params.put(key, value);
@@ -381,7 +381,7 @@ pub fn parseParams(url: []const u8, allocator: *std.mem.Allocator) !?std.StringH
         const pair = url[pos .. param_pair_end + pos];
         const seperator = findIndex(pair, '=') orelse return error.SeperatorNotFound;
         const key = pair[0..seperator];
-        var decoded = std.ArrayList(u8).init(allocator.*);
+        var decoded = std.array_list.Managed(u8).init(allocator.*);
         try decoder(pair[seperator + 1 ..], &decoded);
         const value = try decoded.toOwnedSlice();
         try params.put(key, value);
@@ -650,7 +650,7 @@ pub fn fetchWithParams(url: []const u8, self: anytype, cb: anytype, http_req: Ht
         Fabric.println("Button Function Registry {any}\n", .{err});
         return;
     };
-    js_fetch_params(url.ptr, url.len, id, json.ptr, json.len);
+    fetchParamsWasm(url.ptr, url.len, id, json.ptr, json.len);
 }
 
 const http = std.http;
@@ -662,7 +662,7 @@ const Param = struct {
 
 pub const QueryBuilder = struct {
     allocator: std.mem.Allocator,
-    params: std.ArrayList(Param),
+    params: std.array_list.Managed(Param),
     str: []const u8,
 
     /// This function takes a pointer to this QueryBuilder instance.
@@ -676,7 +676,7 @@ pub const QueryBuilder = struct {
     pub fn init(query_builder: *QueryBuilder, allocator: std.mem.Allocator) !void {
         query_builder.* = .{
             .allocator = allocator,
-            .params = std.ArrayList(Param).init(allocator),
+            .params = std.array_list.Managed(Param).init(allocator),
             .str = "",
         };
     }
@@ -744,7 +744,7 @@ pub const QueryBuilder = struct {
     /// # Returns:
     /// []const u8
     pub fn urlEncoder(query_builder: *QueryBuilder, url: []const u8) ![]const u8 {
-        var encoded = std.ArrayList(u8).init(query_builder.allocator);
+        var encoded = std.array_list.Managed(u8).init(query_builder.allocator);
         defer encoded.deinit();
 
         for (url) |c| {
@@ -772,7 +772,7 @@ pub const QueryBuilder = struct {
             return;
         }
 
-        var list = std.ArrayList(u8).init(query_builder.allocator);
+        var list = std.array_list.Managed(u8).init(query_builder.allocator);
         errdefer list.deinit();
 
         for (query_builder.params.items, 0..) |param, i| {
@@ -807,7 +807,7 @@ pub const QueryBuilder = struct {
     /// # Returns:
     /// []const u8
     pub fn generateUrl(query_builder: *QueryBuilder, base_url: []const u8, query: []const u8) ![]const u8 {
-        var result = std.ArrayList(u8).init(query_builder.allocator);
+        var result = std.array_list.Managed(u8).init(query_builder.allocator);
         errdefer result.deinit();
 
         try result.appendSlice(base_url);
