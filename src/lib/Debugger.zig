@@ -143,7 +143,6 @@ fn hoverHighlight(target_id: []const u8, _: *Event) void {
 }
 
 fn mount(node: *PureTree.PureNode) void {
-    Fabric.println("Mounted {s}\n", .{node.uuid});
     _ = node.element.addInstListener(.mouseenter, node.uuid, hoverHighlight);
     _ = node.element.addListener(.mouseleave, clearHoverHighlight);
 }
@@ -157,7 +156,7 @@ fn displayChild(node: *PureTree.PureNode) void {
             .border = if (child.dirty) .simple(.hex("#4800FF")) else .simple(.transparent),
         };
         Static.CtxHooks(.mounted, mount, .{child}, &.{})({
-            Chain.CtxButton(highlight, .{child.uuid}).bind(&child.element).style(&.{
+            ChainPure.CtxButton(highlight, .{child.uuid}).bind(&child.element).style(&.{
                 .layout = .{},
                 .direction = .row,
                 .margin = .l(margin_left),

@@ -138,6 +138,7 @@ pub fn printStats(self: *FrameAllocator) void {
     writer.print("╔══════════════════════════════╗\n", .{}) catch return;
     writer.print("║    Frame Allocator Stats     ║\n", .{}) catch return;
     writer.print("╠══════════════════════════════╣\n", .{}) catch return;
+    writer.print("║ Max Node count     : {d: >7} ║\n", .{Fabric.page_node_count}) catch return;
     writer.print("║ Nodes allocated    : {d: >7} ║\n", .{stats.nodes_allocated}) catch return;
     writer.print("║ Commands allocated : {d: >7} ║\n", .{stats.commands_allocated}) catch return;
     writer.print("║ Bytes used         : {d: >7} ║\n", .{stats.bytes_used}) catch return;

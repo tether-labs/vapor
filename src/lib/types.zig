@@ -262,6 +262,14 @@ pub const Sizing = struct {
         } } };
     }
 
+    pub fn mobile_desktop(mobile: Sizing, desktop: Sizing) Sizing {
+        if (isMobile()) {
+            return mobile;
+        } else {
+            return desktop;
+        }
+    }
+
     pub fn clamp_percent(min: f32, preferred: f32, max: f32) Sizing {
         return .{ .type = .clamp_percent, .size = .{ .clamp_percent = .{
             .min = min,

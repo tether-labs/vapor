@@ -544,7 +544,8 @@ pub const Chain = struct {
     svg: []const u8 = "",
     aria_label: ?[]const u8 = null,
     options: ?ButtonOptions = null,
-    _ui_node: *UINode = undefined,
+    _ui_node: ?*UINode = null,
+    _id: ?[]const u8 = null,
 
     pub fn Icon(name: []const u8) Self {
         return Self{ .elem_type = .Icon, .href = name };
@@ -613,6 +614,17 @@ pub const Chain = struct {
 
     pub fn Svg(options: struct { svg: []const u8 }) Self {
         return Self{ .elem_type = .Svg, .svg = options.svg };
+    }
+
+    pub inline fn id(self: *const Self, element_id: []const u8) Self {
+        var new_self: Self = self.*;
+        new_self._id = element_id;
+        return new_self;
+    }
+
+    pub inline fn bind(self: *const Self, element: *Element) *const Self {
+        element._node_ptr = self._ui_node orelse unreachable;
+        return self;
     }
 
     pub inline fn style(self: *const Self, style_ptr: *const Fabric.Style) fn (void) void {

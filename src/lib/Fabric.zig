@@ -19,12 +19,13 @@ pub const Wasm = @import("wasm");
 const getVisualStyle = @import("convertStyleCustomWriter.zig").getVisualStyle;
 const Bridge = @import("Bridge.zig");
 const Event = @import("Event.zig");
+const Canopy = @import("Canopy.zig");
 
-const DebugLevel = enum(u8) { all = 0, debug = 1, info = 2, warn = 3 };
+const DebugLevel = enum(u8) { all = 0, debug = 1, info = 2, warn = 3, none = 4 };
 
 pub const build_options = struct {
     enable_debug: bool = true,
-    debug_level: DebugLevel = .debug,
+    debug_level: DebugLevel = .all,
 }{};
 // const getFocusStyle = @import("convertFocus.zig").getFocusStyle;
 // const getFocusWithinStyle = @import("convertFocusWithin.zig").getFocusWithinStyle;
@@ -214,6 +215,7 @@ pub var continuations: [64]?ContinuationFn = undefined;
 pub var allocator_global: std.mem.Allocator = undefined;
 pub var browser_width: f32 = 0;
 pub var browser_height: f32 = 0;
+pub var page_node_count: usize = 256;
 const FrameAllocator = @import("FrameAllocator.zig");
 pub var frame_arena: FrameAllocator = undefined;
 
@@ -221,6 +223,7 @@ pub const FabricConfig = struct {
     screen_width: f32,
     screen_height: f32,
     allocator: *std.mem.Allocator,
+    page_node_count: usize = 256,
 };
 
 sw: f32,
@@ -246,6 +249,7 @@ pub fn init(target: *Fabric, config: FabricConfig) void {
     };
     browser_width = config.screen_width;
     browser_height = config.screen_height;
+    page_node_count = config.page_node_count;
 
     initRegistries(allocator);
     initCalls(allocator);
@@ -262,13 +266,13 @@ pub fn init(target: *Fabric, config: FabricConfig) void {
     Reconciler.node_map = std.StringHashMap(usize).init(allocator);
 
     // Reconciliation styles dedupe
-    UIContext.nodes = allocator.alloc(*UINode, 256) catch unreachable;
-    UIContext.seen_nodes = allocator.alloc(bool, 256) catch unreachable;
-    UIContext.common_nodes = allocator.alloc(usize, 256) catch unreachable;
-    UIContext.common_size_nodes = allocator.alloc(usize, 256) catch unreachable;
-    UIContext.common_uuids = allocator.alloc([]const u8, 256) catch unreachable;
-    UIContext.common_size_uuids = allocator.alloc([]const u8, 256) catch unreachable;
-    UIContext.base_styles = allocator.alloc(Style, 256) catch unreachable;
+    UIContext.nodes = allocator.alloc(*UINode, config.page_node_count) catch unreachable;
+    UIContext.seen_nodes = allocator.alloc(bool, config.page_node_count) catch unreachable;
+    UIContext.common_nodes = allocator.alloc(usize, config.page_node_count) catch unreachable;
+    UIContext.common_size_nodes = allocator.alloc(usize, config.page_node_count) catch unreachable;
+    UIContext.common_uuids = allocator.alloc([]const u8, config.page_node_count) catch unreachable;
+    UIContext.common_size_uuids = allocator.alloc([]const u8, config.page_node_count) catch unreachable;
+    UIContext.base_styles = allocator.alloc(Style, config.page_node_count) catch unreachable;
     @memset(UIContext.seen_nodes, false);
     @memset(UIContext.common_nodes, 0);
 
@@ -683,6 +687,11 @@ pub fn createPage(style: ?*const Style, path: []const u8, page: fn () void, page
 
 pub fn endPage(path_ctx: *UIContext) void {
     path_ctx.endContext();
+    // TODO: We need to finish the layout engine for working with IOS
+    // Canopy.createStack(path_ctx, path_ctx.root.?);
+    // Canopy.calcWidth(path_ctx);
+    // printUITree(path_ctx.root.?);
+
     // UIContext.reconcileStyles(path_ctx.root.?);
     path_ctx.traverse();
 }
@@ -1001,7 +1010,7 @@ pub fn markChildrenNotDirty(node: *UINode) void {
 }
 
 fn printUITree(node: *UINode) void {
-    println("UI: {s} {any}", .{ node.uuid, node.dirty });
+    println("UI: {any} {s}", .{ node.box_sizing.?.width, node.uuid });
     for (node.children.items) |child| {
         printUITree(child);
     }
@@ -1173,7 +1182,7 @@ pub fn printlnErr(
 ) void {
     const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
     const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%cERROR%c] {s}", .{buf[0..]}) catch return;
-    if (isWasi) {
+    if (isWasi and build_options.enable_debug) {
         const style_1 = "color: #FF3029;";
         const style_2 = "";
         _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
@@ -1189,7 +1198,7 @@ pub fn printlnSrcErr(
 ) void {
     const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
     const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%c{s}:{d}%c]\n[Fabric] [ERROR] {s}", .{ src.file, src.line, buf[0..] }) catch return;
-    if (isWasi) {
+    if (isWasi and build_options.enable_debug) {
         const style_1 = "color: #FF3029;";
         const style_2 = "";
         _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
@@ -1240,7 +1249,9 @@ pub fn printlnColor(
     const color_buf = std.fmt.allocPrint(allocator_global, "color: {s};", .{convertColorToString(color)}) catch return;
     const buf_with_src = std.fmt.allocPrint(allocator_global, "%c{s}%c", .{buf[0..]}) catch return;
     const style_2 = "";
-    _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, color_buf[0..].ptr, color_buf.len, style_2[0..].ptr, style_2.len);
+    if (isWasi and build_options.enable_debug) {
+        _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, color_buf[0..].ptr, color_buf.len, style_2[0..].ptr, style_2.len);
+    }
     allocator_global.free(buf_with_src);
     allocator_global.free(color_buf);
     allocator_global.free(buf);
@@ -1268,7 +1279,9 @@ pub fn printlnSrc(
     const buf_with_src = std.fmt.allocPrint(allocator_global, "[%c{s}:{d}%c]\n[MSG] {s}", .{ src.file, src.line, buf[0..] }) catch return;
     const style_1 = "color: #3CE98A;";
     const style_2 = "";
-    _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
+    if (isWasi and build_options.enable_debug) {
+        _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
+    }
     allocator_global.free(buf_with_src);
     allocator_global.free(buf);
 }

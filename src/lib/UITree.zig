@@ -36,6 +36,13 @@ pub const CommandsTree = struct {
     children: std.array_list.Managed(*CommandsTree),
 };
 
+pub const BoxSizing = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    width: f32 = 0,
+    height: f32 = 0,
+};
+
 pub const UINode = struct {
     dirty: bool = false,
     parent: ?*UINode = null,
@@ -53,6 +60,7 @@ pub const UINode = struct {
     aria_label: ?[]const u8 = null,
     class: ?[]const u8 = null,
     udata: ?*anyopaque = null,
+    box_sizing: ?BoxSizing = null,
 
     pub fn deinit(ui_node: *UINode) void {
         ui_node.children.deinit();
@@ -91,12 +99,17 @@ pub fn initContext(ui_ctx: *UIContext) !void {
     node_ptr.uuid = "fabric_root_id";
     node_ptr.dirty = false;
     ui_ctx.root = node_ptr;
+    ui_ctx.root.?.box_sizing = .{
+        .width = Fabric.browser_width,
+        .height = Fabric.browser_height,
+    };
     const item: *Item = try ui_ctx.memory_pool.create();
     item.* = .{
         .ptr = node_ptr,
     };
     ui_ctx.root_stack_ptr = item;
     ui_ctx.stack = item;
+    node_count = 0;
 }
 
 pub fn deinit(ui_ctx: *UIContext) void {
@@ -214,7 +227,19 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
     if (style) |s| {
         current_open.class = s.style_id;
         current_open.style = s.*;
-        nodes[node_count] = current_open;
+        if (s.size) |size| {
+            current_open.box_sizing = .{
+                .x = size.width.size.minmax.min,
+                .y = size.height.size.minmax.min,
+                .width = size.width.size.minmax.max,
+                .height = size.height.size.minmax.max,
+            };
+        }
+        if (node_count >= nodes.len) {
+            Fabric.printlnErr("Page Node count is too small {d}", .{node_count});
+        } else {
+            nodes[node_count] = current_open;
+        }
         node_count += 1;
     }
 
