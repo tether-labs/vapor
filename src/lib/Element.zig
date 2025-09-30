@@ -5,6 +5,7 @@ const ElementType = @import("types.zig").ElementType;
 const std = @import("std");
 const isWasi = Fabric.isWasi;
 const Wasm = @import("wasm");
+const Event = @import("Event.zig");
 
 const Rect = struct {
     top: f32,
@@ -119,7 +120,7 @@ pub const Element = struct {
         return Fabric.elementInstEventListener(id, event_type, construct, cb);
     }
 
-    pub fn addListener(self: *Element, event_type: types.EventType, cb: *const fn (event: *Fabric.Event) void) ?usize {
+    pub fn addListener(self: *Element, event_type: types.EventType, cb: *const fn (event: *Event) void) ?usize {
         const id = self._get_id() orelse {
             Fabric.printlnSrc("Id is null", .{}, @src());
             return null;

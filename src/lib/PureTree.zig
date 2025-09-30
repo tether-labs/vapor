@@ -2,6 +2,7 @@ const std = @import("std");
 const UINode = @import("UITree.zig").UINode;
 const UI = @import("UITree.zig");
 const Fabric = @import("Fabric.zig");
+const Element = @import("Element.zig").Element;
 // const print = std.debug.print;
 const print = Fabric.println;
 
@@ -10,6 +11,7 @@ pub const PureNode = struct {
     ui_node: *UINode,
     children: std.array_list.Managed(*PureNode),
     dirty: bool = false,
+    element: Element,
 };
 
 // The stack holds the current node we are traversing and the next node
@@ -31,6 +33,7 @@ pub fn init(pure_tree: *PureTree, ui_node: *UINode, allocator: *std.mem.Allocato
         .uuid = ui_node.uuid,
         .ui_node = ui_node,
         .children = std.array_list.Managed(*PureNode).init(allocator.*),
+        .element = Element{},
     };
     const item = try allocator.create(StackItem);
     item.* = .{ .node = root };
@@ -49,6 +52,7 @@ pub fn createNode(pure_tree: *PureTree, ui_node: *UINode) !*PureNode {
         .ui_node = ui_node,
         .dirty = ui_node.dirty,
         .children = std.array_list.Managed(*PureNode).init(pure_tree.allocator.*),
+        .element = Element{},
     };
 
     return node;
@@ -105,7 +109,7 @@ fn printNode(self: *PureTree, writer: anytype, node: *PureNode, prefix: []const 
     try writer.print("{s}", .{connector});
 
     // 3. Print the node's own data.
-    try writer.print("{s} {any}\n", .{node.uuid, node.dirty});
+    try writer.print("{s} {any}\n", .{ node.uuid, node.dirty });
 
     // 4. Prepare the prefix for the *children* of this node.
     //    - If this node was the last one, the connection from its parent is done, so we use a space.

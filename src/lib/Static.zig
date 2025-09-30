@@ -8,6 +8,7 @@ const Style = types.Style;
 const InputParams = types.InputParams;
 const ElementDecl = types.ElementDeclaration;
 const ElementType = types.Elements.ElementType;
+const Element = @import("Element.zig").Element;
 
 const HeaderSize = enum(u32) {
     XXLarge = 12,
@@ -75,7 +76,7 @@ pub inline fn CtxHooks(hooks: Fabric.HooksCtxFuncs, func: anytype, args: anytype
 
         const id = Fabric.mounted_ctx_funcs.items.len;
         elem_decl.hooks.mounted_id += id + 1;
-        Fabric.mounted_ctx_funcs.append(elem_decl.hooks.mounted_id, &closure.run_node) catch |err| {
+        Fabric.mounted_ctx_funcs.append(&closure.run_node) catch |err| {
             println("Hooks Function Registry {any}\n", .{err});
         };
     }
@@ -471,6 +472,11 @@ pub const Chain = struct {
         var new_self: Self = self.*;
         new_self._id = element_id;
         return new_self;
+    }
+
+    pub inline fn bind(self: *const Self, element: *Element) *const Self {
+        element._node_ptr = self._ui_node orelse unreachable;   
+        return self;
     }
 
     pub inline fn style(self: *const Self, style_ptr: *const Fabric.Style) fn (void) void {

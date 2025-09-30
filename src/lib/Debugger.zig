@@ -11,6 +11,7 @@ const Types = @import("types.zig");
 const ChainPure = @import("Pure.zig").Chain;
 const ChainPureClose = @import("Pure.zig").ChainClose;
 const TextFmt = ChainPureClose.TextFmt;
+const Static = @import("Static.zig");
 
 pub var old_debugger_node: ?*UINode = null;
 pub var new_debugger_node: ?*UINode = null;
@@ -109,6 +110,18 @@ fn highlightErrorTarget(target_id: []const u8) void {
     Wasm.highlightTargetNode(target_id.ptr, target_id.len, 1);
 }
 
+fn highlightHoverTarget(target_id: []const u8) void {
+    Wasm.highlightHoverTargetNode(target_id.ptr, target_id.len, 0);
+}
+
+fn highlightHoverErrorTarget(target_id: []const u8) void {
+    Wasm.highlightHoverTargetNode(target_id.ptr, target_id.len, 1);
+}
+
+fn clearHoverHighlight(_: *Event) void {
+    Wasm.clearHoverHighlight();
+}
+
 fn clearHighlight() void {
     Wasm.clearHighlight();
 }
@@ -121,6 +134,20 @@ fn highlight(target_id: []const u8) void {
     }
 }
 
+fn hoverHighlight(target_id: []const u8, _: *Event) void {
+    if (tree == .Pure) {
+        highlightHoverTarget(target_id);
+    } else {
+        highlightHoverErrorTarget(target_id);
+    }
+}
+
+fn mount(node: *PureTree.PureNode) void {
+    Fabric.println("Mounted {s}\n", .{node.uuid});
+    _ = node.element.addInstListener(.mouseenter, node.uuid, hoverHighlight);
+    _ = node.element.addListener(.mouseleave, clearHoverHighlight);
+}
+
 var margin_left: usize = 0;
 fn displayChild(node: *PureTree.PureNode) void {
     margin_left += 10;
@@ -129,19 +156,21 @@ fn displayChild(node: *PureTree.PureNode) void {
             .font_size = 12,
             .border = if (child.dirty) .simple(.hex("#4800FF")) else .simple(.transparent),
         };
-        ChainPure.CtxButton(highlight, .{child.uuid}).style(&.{
-            .layout = .{},
-            .direction = .row,
-            .margin = .l(margin_left),
-            .size = .hw(.fit, .fit),
-            .padding = .lr(4, 4),
-            .visual = visual,
-        })({
-            TextFmt("{s}", .{@tagName(child.ui_node.type)}).style(&.{
-                .visual = .{ .font_size = 12, .font_weight = 600 },
-                .margin = .r(4),
+        Static.CtxHooks(.mounted, mount, .{child}, &.{})({
+            Chain.CtxButton(highlight, .{child.uuid}).bind(&child.element).style(&.{
+                .layout = .{},
+                .direction = .row,
+                .margin = .l(margin_left),
+                .size = .hw(.fit, .fit),
+                .padding = .lr(4, 4),
+                .visual = visual,
+            })({
+                TextFmt("{s}", .{@tagName(child.ui_node.type)}).style(&.{
+                    .visual = .{ .font_size = 12, .font_weight = 600 },
+                    .margin = .r(4),
+                });
+                TextFmt("UUID: {s}", .{child.uuid}).style(&.{});
             });
-            TextFmt("UUID: {s}", .{child.uuid}).style(&.{});
         });
         displayChild(child);
     }
