@@ -6,7 +6,6 @@
 const std = @import("std");
 const UITree = @import("UITree.zig");
 const Fabric = @import("Fabric.zig");
-const print = std.debug.print;
 const mem = std.mem;
 
 const RadixError = error{
@@ -290,9 +289,6 @@ fn printNode(node: *const Node, buffer: *std.array_list.Managed(u8)) !void {
 
     // print("\n{s}", .{node.prefix});
     // If this node marks the end of a word, print the accumulated buffer
-    if (node.is_end) {
-        print("{s}\n", .{buffer.items});
-    }
 
     // Recursively process all children
     var children_itr = node.children.iterator();
@@ -303,28 +299,9 @@ fn printNode(node: *const Node, buffer: *std.array_list.Managed(u8)) !void {
     if (node.param_child) |child| {
         if (child.is_end) {
             try buffer.appendSlice(child.prefix);
-            print("{s}\n", .{buffer.items});
         }
     }
 
     // Backtrack: remove this node's prefix to prepare for sibling paths
     buffer.shrinkRetainingCapacity(original_len);
-}
-
-fn handlePosts(path: []const u8) void {
-    std.debug.print("\nPost request: {s} \n", .{path});
-}
-fn handlePostsDynamic(path: []const u8) void {
-    std.debug.print("\nDynamic route: {s} \n", .{path});
-}
-
-fn handleUsers(path: []const u8) void {
-    std.debug.print("\nUsers: {s} \n", .{path});
-}
-fn handleUser(path: []const u8) void {
-    std.debug.print("\nUser: {s} \n", .{path});
-}
-
-fn handleIds(path: []const u8) void {
-    std.debug.print("\nIds: {s} \n", .{path});
 }

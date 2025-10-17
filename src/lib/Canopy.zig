@@ -1,7 +1,6 @@
 const std = @import("std");
 const UIContext = @import("UITree.zig");
 const UINode = UIContext.UINode;
-const println = std.debug.print;
 const Types = @import("types.zig");
 const Engine = @This();
 const Fabric = @import("Fabric.zig");
@@ -11,7 +10,7 @@ pub fn createStack(ui_ctx: *UIContext, parent: *UINode) void {
 
     for (parent.children.items) |child| {
         ui_ctx.stackRegister(child) catch {
-            println("Could not stack register\n", .{});
+            Fabric.println("Could not stack register\n", .{});
             unreachable;
         };
     }

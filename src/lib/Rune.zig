@@ -1,8 +1,8 @@
 const std = @import("std");
 const UINode = @import("UITree.zig").UINode;
 const println = @import("Fabric.zig").println;
-// const print = std.debug.print;
 const Fabric = @import("Fabric.zig");
+/// This is all very confusing, I have no idea how I came up with this solution, but it works idk, its kinda magic
 
 // Set uses AutoHashMap underneath the hood
 // this means that iterating through the set does not have consitent order
@@ -19,7 +19,7 @@ pub fn Set(comptime T: type) type {
 
         pub fn add(self: *Self, value: T) void {
             self.map.put(value, {}) catch |err| {
-                std.log.err("{any}\n", .{err});
+                Fabric.printlnSrcErr("{any}\n", .{err}, @src());
                 return;
             };
         }

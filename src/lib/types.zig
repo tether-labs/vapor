@@ -3,7 +3,7 @@ const UINode = @import("UITree.zig").UINode;
 const Fabric = @import("Fabric.zig");
 pub const Transition = @import("Transition.zig").Transition;
 pub const TransitionProperty = @import("Transition.zig").TransitionProperty;
-const print = std.debug.print;
+pub const PackedTransition = @import("Transition.zig").PackedTransition;
 const ColorTheme = @import("constants/Color.zig");
 const Animation = @import("Animation.zig");
 pub const ElementType = @import("user_config").ElementType;
@@ -11,8 +11,15 @@ pub const ThemeTokens = @import("user_config").ThemeTokens;
 pub const color_theme: ColorTheme = ColorTheme{};
 const isMobile = @import("utils.zig").isMobile;
 const Event = @import("Event.zig");
+const Theme = @import("theme");
 
-pub const TimingFunction = enum {
+pub const ThemeDefinition = struct {
+    default: bool = false,
+    name: []const u8,
+    theme: Theme.Colors,
+};
+
+pub const TimingFunction = enum(u8) {
     linear,
     ease,
     ease_in,
@@ -21,61 +28,6 @@ pub const TimingFunction = enum {
     bounce,
     elastic,
 };
-
-// pub const ElementType = enum(u8) {
-//     Rectangle,
-//     Text,
-//     Image,
-//     FlexBox,
-//     Input,
-//     Button,
-//     Block,
-//     Box,
-//     Header,
-//     Svg,
-//     Link,
-//     EmbedLink,
-//     List,
-//     ListItem,
-//     _If,
-//     Hooks,
-//     Layout,
-//     Page,
-//     Bind,
-//     Dialog,
-//     DialogBtnShow,
-//     DialogBtnClose,
-//     Draggable,
-//     RedirectLink,
-//     Select,
-//     SelectItem,
-//     CtxButton,
-//     EmbedIcon,
-//     Icon,
-//     Label,
-//     Form,
-//     AllocText,
-//     Table,
-//     TableRow,
-//     TableCell,
-//     TableHeader,
-//     TableBody,
-//     TextArea,
-//     Canvas,
-//     SubmitCtxButton,
-//     HooksCtx,
-//     JsonEditor,
-//     HtmlText,
-//     Code,
-//     Span,
-//     LazyImage,
-//     Intersection,
-//     PreImage,
-//     TextGradient,
-//     Gradient,
-//     Virtualize,
-//     ButtonCycle,
-// };
 
 pub fn switchColorTheme() void {
     switch (color_theme.theme) {
@@ -90,19 +42,19 @@ pub const Direction = enum(u8) {
 };
 
 pub const SizingType = enum(u8) {
-    fit = 0,
-    grow = 1,
-    percent = 2,
-    fixed = 3,
-    elastic = 4,
-    elastic_percent = 5,
-    none = 6,
-    clamp_px = 7,
-    clamp_percent = 8,
-    min_max_vp = 9,
+    none,
+    fit,
+    grow,
+    percent,
+    fixed,
+    elastic,
+    elastic_percent,
+    clamp_px,
+    clamp_percent,
+    min_max_vp,
 };
 
-const MinMax = struct {
+const MinMax = packed struct {
     min: f32 = 0,
     max: f32 = 0,
 
@@ -111,7 +63,7 @@ const MinMax = struct {
     }
 };
 
-const Clamp = struct {
+const Clamp = packed struct {
     min: f32 = 0,
     max: f32 = 0,
     preferred: f32 = 0,
@@ -121,28 +73,41 @@ const Clamp = struct {
     }
 };
 
-// Make it a tagged union by adding an enum
-pub const SizingConstraint = union(enum) {
-    minmax: MinMax,
-    percent: MinMax,
-    clamp_percent: Clamp,
-    clamp_px: Clamp,
-    min_max_vp: MinMax,
-
-    pub fn eql(self: SizingConstraint, other: SizingConstraint) bool {
-        if (std.meta.activeTag(self) != std.meta.activeTag(other)) return false;
-
-        return switch (self) {
-            .min_max_vp => |mm| mm.eql(other.min_max_vp),
-            .minmax => |mm| mm.eql(other.minmax),
-            .percent => |mm| mm.eql(other.percent),
-            .clamp_px => |mm| mm.eql(other.clamp_px),
-            .clamp_percent => |mm| mm.eql(other.clamp_percent),
-        };
-    }
+const Tag = enum {
+    minmax,
+    clamp,
 };
 
-pub const Size = struct {
+// Make it a tagged union by adding an enum
+pub const SizingConstraint = packed struct {
+    min: f32 = 0,
+    max: f32 = 0,
+    preferred: f32 = 0,
+};
+
+// const SizingConstraint = packed struct {
+//     tag: Tag,
+//     data: SizingUnion,
+//     // minmax: MinMax,
+//     // percent: MinMax,
+//     // clamp_percent: Clamp,
+//     // clamp_px: Clamp,
+//     // min_max_vp: MinMax,
+//
+//     // pub fn eql(self: SizingConstraint, other: SizingConstraint) bool {
+//     //     if (std.meta.activeTag(self) != std.meta.activeTag(other)) return false;
+//     //
+//     //     return switch (self) {
+//     //         .min_max_vp => |mm| mm.eql(other.min_max_vp),
+//     //         .minmax => |mm| mm.eql(other.minmax),
+//     //         .percent => |mm| mm.eql(other.percent),
+//     //         .clamp_px => |mm| mm.eql(other.clamp_px),
+//     //         .clamp_percent => |mm| mm.eql(other.clamp_percent),
+//     //     };
+//     // }
+// };
+
+pub const Size = packed struct {
     width: Sizing = .{},
     height: Sizing = .{},
     pub const full = Size{ .width = .percent(100), .height = .percent(100) };
@@ -193,75 +158,75 @@ pub const Size = struct {
     }
 };
 
-pub const Sizing = struct {
-    size: SizingConstraint = .{ .minmax = .{} },
+pub const Sizing = packed struct {
+    size: SizingConstraint = .{},
     type: SizingType = .none,
 
-    pub const grow = Sizing{ .type = .grow, .size = .{ .minmax = .{ .min = 0, .max = 0 } } };
-    pub const fit = Sizing{ .type = .fit, .size = .{ .minmax = .{ .min = 0, .max = 0 } } };
+    pub const grow = Sizing{ .type = .grow, .size = .{ .min = 0, .max = 0 } };
+    pub const fit = Sizing{ .type = .fit, .size = .{ .min = 0, .max = 0 } };
 
     pub fn px(size: f32) Sizing {
-        return .{ .type = .fixed, .size = .{ .minmax = .{
+        return .{ .type = .fixed, .size = .{
             .min = size,
             .max = size,
-        } } };
+        } };
     }
 
     pub fn elastic(min: f32, max: f32) Sizing {
-        return .{ .type = .elastic, .size = .{ .minmax = .{
+        return .{ .type = .elastic, .size = .{
             .min = min,
             .max = max,
-        } } };
+        } };
     }
 
     pub fn percent(size: f32) Sizing {
-        return .{ .type = .percent, .size = .{ .minmax = .{
+        return .{ .type = .percent, .size = .{
             .min = size,
             .max = size,
-        } } };
+        } };
     }
 
-    pub fn @"%"(size: f32) Sizing {
-        return .{ .type = .percent, .size = .{ .minmax = .{
-            .min = size,
-        } } };
-    }
-
-    pub fn elastic_percent(min: f32, max: f32) Sizing {
-        return .{ .type = .elastic_percent, .size = .{ .percent = .{
-            .min = min,
-            .max = max,
-        } } };
-    }
-
-    pub fn clamp_px(min: f32, boundary: f32, max: f32) Sizing {
-        return .{ .type = .clamp_px, .size = .{ .clamp_px = .{
-            .min = min,
-            .boundary = boundary,
-            .max = max,
-        } } };
-    }
-
-    pub fn min_max_vp(min: f32, max: f32) Sizing {
-        return .{ .type = .min_max_vp, .size = .{ .min_max_vp = .{
-            .min = min,
-            .max = max,
-        } } };
-    }
-
+    // pub fn @"%"(size: f32) Sizing {
+    //     return .{ .type = .percent, .size = .{ .minmax = .{
+    //         .min = size,
+    //     } } };
+    // }
+    //
+    // pub fn elastic_percent(min: f32, max: f32) Sizing {
+    //     return .{ .type = .elastic_percent, .size = .{ .percent = .{
+    //         .min = min,
+    //         .max = max,
+    //     } } };
+    // }
+    //
+    // pub fn clamp_px(min: f32, boundary: f32, max: f32) Sizing {
+    //     return .{ .type = .clamp_px, .size = .{ .clamp_px = .{
+    //         .min = min,
+    //         .boundary = boundary,
+    //         .max = max,
+    //     } } };
+    // }
+    //
+    // pub fn min_max_vp(min: f32, max: f32) Sizing {
+    //     return .{ .type = .min_max_vp, .size = .{ .min_max_vp = .{
+    //         .min = min,
+    //         .max = max,
+    //     } } };
+    // }
+    //
     pub fn mobile_desktop_percent(mobile: f32, desktop: f32) Sizing {
         if (isMobile()) {
-            return .{ .type = .percent, .size = .{ .minmax = .{
+            return .{ .type = .percent, .size = .{
                 .min = mobile,
                 .max = mobile,
-            } } };
+            } };
         }
-        return .{ .type = .percent, .size = .{ .minmax = .{
+        return .{ .type = .percent, .size = .{
             .min = desktop,
             .max = desktop,
-        } } };
+        } };
     }
-
+    //
     pub fn mobile_desktop(mobile: Sizing, desktop: Sizing) Sizing {
         if (isMobile()) {
             return mobile;
@@ -269,19 +234,19 @@ pub const Sizing = struct {
             return desktop;
         }
     }
-
-    pub fn clamp_percent(min: f32, preferred: f32, max: f32) Sizing {
-        return .{ .type = .clamp_percent, .size = .{ .clamp_percent = .{
-            .min = min,
-            .preferred = preferred,
-            .max = max,
-        } } };
-    }
-
-    // Add custom equality function for Sizing
-    pub fn eql(self: Sizing, other: Sizing) bool {
-        return self.type == other.type and self.size.eql(other.size);
-    }
+    //
+    // pub fn clamp_percent(min: f32, preferred: f32, max: f32) Sizing {
+    //     return .{ .type = .clamp_percent, .size = .{ .clamp_percent = .{
+    //         .min = min,
+    //         .preferred = preferred,
+    //         .max = max,
+    //     } } };
+    // }
+    //
+    // // Add custom equality function for Sizing
+    // pub fn eql(self: Sizing, other: Sizing) bool {
+    //     return self.type == other.type and self.size.eql(other.size);
+    // }
 };
 
 pub const PosType = enum(u8) {
@@ -291,8 +256,8 @@ pub const PosType = enum(u8) {
     fixed = 3,
 };
 
-pub const Pos = struct {
-    type: PosType = .fit,
+pub const Pos = packed struct {
+    type: SizingType = .none,
     value: f32 = 0,
 
     pub const grow = Pos{ .type = .grow, .value = 0 };
@@ -304,31 +269,111 @@ pub const Pos = struct {
         return .{ .type = .percent, .value = pos };
     }
 };
+// Represents a single background image source and its properties.
+pub const Image = struct {
+    url: []const u8,
+    // TODO: Add other CSS properties like repeat, size, position
+    // repeat: enum { repeat, no_repeat, repeat_x, repeat_y } = .repeat,
+    // size: union(enum) { auto, cover, contain, explicit: struct { w: f32, h: f32 } } = .auto,
+};
 
-pub const Rgba = struct { r: u8 = 0, g: u8 = 0, b: u8 = 0, a: u8 = 0 };
+// Represents a generated grid pattern.
+pub const Grid = struct {
+    size: u8 = 0,
+    color: Color = .transparent,
+    thickness: u8 = 1,
+};
+
+// A BackgroundLayer can be one of several mutually exclusive types,
+// like an image or a generated pattern. This is a perfect use for a union.
+pub const BackgroundLayer = union(enum) {
+    Image: Image,
+    Grid: Grid,
+};
+
+// The main Background struct now models CSS properties more closely.
+// It has a base color and an optional top layer.
+pub const Background = struct {
+    color: ?Color = null,
+    layer: ?BackgroundLayer = null,
+
+    pub const white = Background{ .color = .{ .Literal = .{ .r = 255, .g = 255, .b = 255, .a = 1 } } };
+    pub const black = Background{ .color = .{ .Literal = .{ .r = 0, .g = 0, .b = 0, .a = 1 } } };
+    pub const red = Background{ .color = .{ .Literal = .{ .r = 255, .g = 0, .b = 0, .a = 1 } } };
+    pub const green = Background{ .color = .{ .Literal = .{ .r = 0, .g = 255, .b = 0, .a = 1 } } };
+    pub const blue = Background{ .color = .{ .Literal = .{ .r = 0, .g = 0, .b = 255, .a = 1 } } };
+    pub const yellow = Background{ .color = .{ .Literal = .{ .r = 255, .g = 255, .b = 0, .a = 1 } } };
+    pub const cyan = Background{ .color = .{ .Literal = .{ .r = 0, .g = 255, .b = 255, .a = 1 } } };
+    pub const magenta = Background{ .color = .{ .Literal = .{ .r = 255, .g = 0, .b = 255, .a = 1 } } };
+
+    /// Creates a background with only a solid color.
+    pub fn solid(color: Color) Background {
+        return .{ .color = color };
+    }
+
+    /// Creates a background with a grid pattern on top of a transparent color.
+    pub fn grid(size: u8, thickness: u8, color: Color) Background {
+        return .{
+            .layer = .{ .Grid = .{
+                .size = size,
+                .thickness = thickness,
+                .color = color,
+            } },
+        };
+    }
+
+    /// Creates a background with an image on top of a specified background color.
+    pub fn image(url: []const u8, bg_color: Color) Background {
+        return .{
+            .color = bg_color,
+            .layer = .{ .Image = .{ .url = url } },
+        };
+    }
+
+    // --- Convenience functions from your original code, now updated ---
+
+    pub fn hex(hex_str: []const u8) Background {
+        return .solid(.hex(hex_str));
+    }
+
+    pub fn palette(thematic: ThemeTokens) Background {
+        return .solid(.palette(thematic));
+    }
+
+    pub fn transparentizeHex(color: Color, alpha: f32) Background {
+        return Background{ .color = color.transparentizeHex(alpha) };
+    }
+
+    pub const transparent = Background.solid(.transparent);
+};
+
+pub const Thematic = packed struct {
+    token: ThemeTokens,
+    alpha: f32 = -1,
+};
+pub const Rgba = packed struct { r: u8 = 0, g: u8 = 0, b: u8 = 0, a: f32 = 0 };
 pub const Color = union(enum) {
     Literal: Rgba, // A hardcoded, specific color
-    Thematic: ThemeTokens, // A token name, like "primaryText" or "accentColor"
+    Thematic: Thematic, // A token name, like "primaryText" or "accentColor"
 
     pub const transparent = Color{ .Literal = .{ .r = 0, .g = 0, .b = 0, .a = 0 } };
-    pub const white = Color{ .Literal = .{ .r = 255, .g = 255, .b = 255, .a = 255 } };
-    pub const black = Color{ .Literal = .{ .r = 0, .g = 0, .b = 0, .a = 255 } };
-    pub const red = Color{ .Literal = .{ .r = 255, .g = 0, .b = 0, .a = 255 } };
-    pub const green = Color{ .Literal = .{ .r = 0, .g = 255, .b = 0, .a = 255 } };
-    pub const blue = Color{ .Literal = .{ .r = 0, .g = 0, .b = 255, .a = 255 } };
-    pub const yellow = Color{ .Literal = .{ .r = 255, .g = 255, .b = 0, .a = 255 } };
-    pub const cyan = Color{ .Literal = .{ .r = 0, .g = 255, .b = 255, .a = 255 } };
-    pub const magenta = Color{ .Literal = .{ .r = 255, .g = 0, .b = 255, .a = 255 } };
-
+    pub const white = Color{ .Literal = .{ .r = 255, .g = 255, .b = 255, .a = 1 } };
+    pub const black = Color{ .Literal = .{ .r = 0, .g = 0, .b = 0, .a = 1 } };
+    pub const red = Color{ .Literal = .{ .r = 255, .g = 0, .b = 0, .a = 1 } };
+    pub const green = Color{ .Literal = .{ .r = 0, .g = 255, .b = 0, .a = 1 } };
+    pub const blue = Color{ .Literal = .{ .r = 0, .g = 0, .b = 255, .a = 1 } };
+    pub const yellow = Color{ .Literal = .{ .r = 255, .g = 255, .b = 0, .a = 1 } };
+    pub const cyan = Color{ .Literal = .{ .r = 0, .g = 255, .b = 255, .a = 1 } };
+    pub const magenta = Color{ .Literal = .{ .r = 255, .g = 0, .b = 255, .a = 1 } };
     pub fn palette(thematic: ThemeTokens) Color {
-        return .{ .Thematic = thematic };
+        return .{ .Thematic = .{ .token = thematic } };
     }
     pub fn hex(hex_str: []const u8) Color {
         const rgba_arr = Fabric.hexToRgba(hex_str);
         return .{ .Literal = .{
-            .r = rgba_arr[0],
-            .g = rgba_arr[1],
-            .b = rgba_arr[2],
+            .r = @as(u8, @intFromFloat(rgba_arr[0])),
+            .g = @as(u8, @intFromFloat(rgba_arr[1])),
+            .b = @as(u8, @intFromFloat(rgba_arr[2])),
             .a = rgba_arr[3],
         } };
     }
@@ -383,26 +428,32 @@ pub const Color = union(enum) {
             .r = r,
             .g = g,
             .b = b,
-            .a = 255,
+            .a = 1,
         } };
     }
-    pub fn transparentizeHex(hex_str: []const u8, alpha: u8) Color {
-        const rgba_arr = Fabric.transparentize(hex_str, alpha);
+    pub fn transparentizeHex(color: Color, alpha: f32) Color {
+        if (color == .Thematic) return Color{ .Thematic = .{
+            .token = color.Thematic.token,
+            .alpha = alpha,
+        } };
+        const r = color.Literal.r;
+        const g = color.Literal.g;
+        const b = color.Literal.b;
         return .{ .Literal = .{
-            .r = rgba_arr[0],
-            .g = rgba_arr[1],
-            .b = rgba_arr[2],
-            .a = rgba_arr[3],
+            .r = r,
+            .g = g,
+            .b = b,
+            .a = alpha,
         } };
     }
 };
 
-pub const Padding = struct {
-    top: u32 = 0,
-    bottom: u32 = 0,
-    left: u32 = 0,
-    right: u32 = 0,
-    pub fn all(size: u32) Padding {
+pub const Padding = packed struct {
+    top: u8 = 0,
+    bottom: u8 = 0,
+    left: u8 = 0,
+    right: u8 = 0,
+    pub fn all(size: u8) Padding {
         return Padding{
             .top = size,
             .bottom = size,
@@ -410,7 +461,7 @@ pub const Padding = struct {
             .right = size,
         };
     }
-    pub fn tblr(top: u32, bottom: u32, left: u32, right: u32) Padding {
+    pub fn tblr(top: u8, bottom: u8, left: u8, right: u8) Padding {
         return Padding{
             .top = top,
             .bottom = bottom,
@@ -419,7 +470,7 @@ pub const Padding = struct {
         };
     }
 
-    pub fn tb(top: u32, bottom: u32) Padding {
+    pub fn tb(top: u8, bottom: u8) Padding {
         return Padding{
             .top = top,
             .bottom = bottom,
@@ -427,7 +478,7 @@ pub const Padding = struct {
             .right = 0,
         };
     }
-    pub fn lr(left: u32, right: u32) Padding {
+    pub fn lr(left: u8, right: u8) Padding {
         return Padding{
             .top = 0,
             .bottom = 0,
@@ -435,7 +486,7 @@ pub const Padding = struct {
             .right = right,
         };
     }
-    pub fn horizontal(size: u32) Padding {
+    pub fn horizontal(size: u8) Padding {
         return Padding{
             .top = 0,
             .bottom = 0,
@@ -443,7 +494,7 @@ pub const Padding = struct {
             .right = size,
         };
     }
-    pub fn vertical(size: u32) Padding {
+    pub fn vertical(size: u8) Padding {
         return Padding{
             .top = size,
             .bottom = size,
@@ -451,7 +502,7 @@ pub const Padding = struct {
             .right = 0,
         };
     }
-    pub fn t(size: u32) Padding {
+    pub fn t(size: u8) Padding {
         return Padding{
             .top = size,
             .bottom = 0,
@@ -459,7 +510,7 @@ pub const Padding = struct {
             .right = 0,
         };
     }
-    pub fn l(size: u32) Padding {
+    pub fn l(size: u8) Padding {
         return Padding{
             .top = 0,
             .bottom = 0,
@@ -467,7 +518,7 @@ pub const Padding = struct {
             .right = 0,
         };
     }
-    pub fn r(size: u32) Padding {
+    pub fn r(size: u8) Padding {
         return Padding{
             .top = 0,
             .bottom = 0,
@@ -475,7 +526,7 @@ pub const Padding = struct {
             .right = size,
         };
     }
-    pub fn b(size: u32) Padding {
+    pub fn b(size: u8) Padding {
         return Padding{
             .top = 0,
             .bottom = size,
@@ -485,12 +536,12 @@ pub const Padding = struct {
     }
 };
 
-pub const Margin = struct {
-    top: u32 = 0,
-    bottom: u32 = 0,
-    left: u32 = 0,
-    right: u32 = 0,
-    pub fn all(size: u32) Margin {
+pub const Margin = packed struct {
+    top: u8 = 0,
+    bottom: u8 = 0,
+    left: u8 = 0,
+    right: u8 = 0,
+    pub fn all(size: u8) Margin {
         return Margin{
             .top = size,
             .bottom = size,
@@ -498,7 +549,7 @@ pub const Margin = struct {
             .right = size,
         };
     }
-    pub fn tblr(top: u32, bottom: u32, left: u32, right: u32) Margin {
+    pub fn tblr(top: u8, bottom: u8, left: u8, right: u8) Margin {
         return Margin{
             .top = top,
             .bottom = bottom,
@@ -506,40 +557,40 @@ pub const Margin = struct {
             .right = right,
         };
     }
-    pub fn tb(top: u32, bottom: u32) Margin {
+    pub fn tb(top: u8, bottom: u8) Margin {
         return Margin{
             .top = top,
             .bottom = bottom,
         };
     }
-    pub fn br(bottom: u32, right: u32) Margin {
+    pub fn br(bottom: u8, right: u8) Margin {
         return Margin{
             .bottom = bottom,
             .right = right,
         };
     }
-    pub fn lr(left: u32, right: u32) Margin {
+    pub fn lr(left: u8, right: u8) Margin {
         return Margin{
             .left = left,
             .right = right,
         };
     }
-    pub fn t(top: u32) Margin {
+    pub fn t(top: u8) Margin {
         return Margin{
             .top = top,
         };
     }
-    pub fn b(bottom: u32) Margin {
+    pub fn b(bottom: u8) Margin {
         return Margin{
             .bottom = bottom,
         };
     }
-    pub fn l(left: u32) Margin {
+    pub fn l(left: u8) Margin {
         return Margin{
             .left = left,
         };
     }
-    pub fn r(right: u32) Margin {
+    pub fn r(right: u8) Margin {
         return Margin{
             .right = right,
         };
@@ -547,13 +598,14 @@ pub const Margin = struct {
 };
 
 pub const Overflow = enum(u8) {
-    scroll = 0,
-    hidden = 1,
+    default,
+    scroll,
+    hidden,
 };
 
-pub const Scroll = struct {
-    x: ?Overflow = null,
-    y: ?Overflow = null,
+pub const Scroll = packed struct {
+    x: Overflow = .default,
+    y: Overflow = .default,
 
     pub fn none() Scroll {
         return .{ .x = .hidden, .y = .hidden };
@@ -579,11 +631,11 @@ pub const Scroll = struct {
     }
 };
 
-pub const BorderRadius = struct {
-    top_left: f32 = 0,
-    top_right: f32 = 0,
-    bottom_left: f32 = 0,
-    bottom_right: f32 = 0,
+pub const BorderRadius = packed struct {
+    top_left: u8 = 0,
+    top_right: u8 = 0,
+    bottom_left: u8 = 0,
+    bottom_right: u8 = 0,
     fn default() BorderRadius {
         return BorderRadius{
             .top_left = 0,
@@ -592,7 +644,7 @@ pub const BorderRadius = struct {
             .bottom_right = 0,
         };
     }
-    pub fn all(radius: f32) BorderRadius {
+    pub fn all(radius: u8) BorderRadius {
         return BorderRadius{
             .top_left = radius,
             .top_right = radius,
@@ -600,7 +652,7 @@ pub const BorderRadius = struct {
             .bottom_right = radius,
         };
     }
-    pub fn specific(top_left: f32, top_right: f32, bottom_left: f32, bottom_right: f32) BorderRadius {
+    pub fn specific(top_left: u8, top_right: u8, bottom_left: u8, bottom_right: u8) BorderRadius {
         return BorderRadius{
             .top_left = top_left,
             .top_right = top_right,
@@ -608,7 +660,7 @@ pub const BorderRadius = struct {
             .bottom_right = bottom_right,
         };
     }
-    pub fn top_bottom(top_radius: f32, bottom_radius: f32) BorderRadius {
+    pub fn top_bottom(top_radius: u8, bottom_radius: u8) BorderRadius {
         return BorderRadius{
             .top_left = top_radius,
             .top_right = top_radius,
@@ -616,7 +668,7 @@ pub const BorderRadius = struct {
             .bottom_right = bottom_radius,
         };
     }
-    pub fn bottom(radius: f32) BorderRadius {
+    pub fn bottom(radius: u8) BorderRadius {
         return BorderRadius{
             .top_left = 0,
             .top_right = 0,
@@ -624,7 +676,7 @@ pub const BorderRadius = struct {
             .bottom_right = radius,
         };
     }
-    pub fn top(radius: f32) BorderRadius {
+    pub fn top(radius: u8) BorderRadius {
         return BorderRadius{
             .top_left = radius,
             .top_right = radius,
@@ -632,7 +684,7 @@ pub const BorderRadius = struct {
             .bottom_right = 0,
         };
     }
-    pub fn left_right(left: f32, right: f32) BorderRadius {
+    pub fn left_right(left: u8, right: u8) BorderRadius {
         return BorderRadius{
             .top_left = left,
             .top_right = right,
@@ -643,18 +695,18 @@ pub const BorderRadius = struct {
 };
 
 pub const Shadow = struct {
-    top: f32 = 0,
-    left: f32 = 0,
-    blur: f32 = 0,
-    spread: f32 = 0,
+    top: u8 = 0,
+    left: u8 = 0,
+    blur: u8 = 0,
+    spread: u8 = 0,
     color: Color = .{ .Literal = .{} },
 };
 
-pub const Border = struct {
-    top: f32 = 0,
-    bottom: f32 = 0,
-    left: f32 = 0,
-    right: f32 = 0,
+pub const Border = packed struct {
+    top: u8 = 0,
+    bottom: u8 = 0,
+    left: u8 = 0,
+    right: u8 = 0,
     pub fn default() Border {
         return Border{
             .top = 0,
@@ -663,7 +715,7 @@ pub const Border = struct {
             .right = 0,
         };
     }
-    pub fn all(thickness: f32) Border {
+    pub fn all(thickness: u8) Border {
         return Border{
             .top = thickness,
             .bottom = thickness,
@@ -671,7 +723,7 @@ pub const Border = struct {
             .right = thickness,
         };
     }
-    pub fn specific(left: f32, top: f32, right: f32, bottom: f32) Border {
+    pub fn specific(left: u8, top: u8, right: u8, bottom: u8) Border {
         return Border{
             .top = top,
             .bottom = bottom,
@@ -680,7 +732,7 @@ pub const Border = struct {
         };
     }
 
-    pub fn tb(thickness: f32) Border {
+    pub fn tb(thickness: u8) Border {
         return Border{
             .top = thickness,
             .bottom = thickness,
@@ -688,8 +740,16 @@ pub const Border = struct {
             .right = 0,
         };
     }
+    pub fn lr(thickness: u8) Border {
+        return Border{
+            .top = 0,
+            .bottom = 0,
+            .left = thickness,
+            .right = thickness,
+        };
+    }
 
-    pub fn b(thickness: f32) Border {
+    pub fn b(thickness: u8) Border {
         return Border{
             .top = 0,
             .bottom = thickness,
@@ -698,7 +758,7 @@ pub const Border = struct {
         };
     }
 
-    pub fn t(thickness: f32) Border {
+    pub fn t(thickness: u8) Border {
         return Border{
             .top = thickness,
             .bottom = 0,
@@ -707,7 +767,7 @@ pub const Border = struct {
         };
     }
 
-    pub fn l(thickness: f32) Border {
+    pub fn l(thickness: u8) Border {
         return Border{
             .top = 0,
             .bottom = 0,
@@ -716,7 +776,7 @@ pub const Border = struct {
         };
     }
 
-    pub fn r(thickness: f32) Border {
+    pub fn r(thickness: u8) Border {
         return Border{
             .top = 0,
             .bottom = 0,
@@ -727,13 +787,14 @@ pub const Border = struct {
 };
 
 pub const Alignment = enum(u8) {
-    center = 0,
-    top = 1,
-    bottom = 2,
-    start = 3,
-    end = 4,
-    between = 5,
-    even = 6,
+    none,
+    center,
+    top,
+    bottom,
+    start,
+    end,
+    between,
+    even,
 };
 
 pub const BoundingBox = struct {
@@ -755,10 +816,11 @@ pub const FloatType = enum(u8) {
 };
 
 pub const PositionType = enum(u8) {
-    relative = 0,
-    absolute = 1,
-    fixed = 2,
-    sticky = 3,
+    none,
+    relative,
+    absolute,
+    fixed,
+    sticky,
 };
 
 pub const Position = struct {
@@ -767,6 +829,8 @@ pub const Position = struct {
     top: ?Pos = null,
     bottom: ?Pos = null,
     type: PositionType = .relative,
+
+    pub const relative = Position{ .type = .relative };
 
     pub const nav = Position{
         .left = .px(0),
@@ -835,7 +899,7 @@ pub const Position = struct {
     }
 };
 
-pub const TransformType = enum {
+pub const TransformType = enum(u8) {
     none,
     translateX,
     translateY,
@@ -849,34 +913,73 @@ pub const TransformType = enum {
 };
 
 pub const Transform = struct {
-    scale_size: f32 = 1,
-    dist: f32 = 0,
-    percent: f32 = 0,
-    deg: f32 = 0,
-    x: f32 = 0,
-    y: f32 = 0,
-    z: f32 = 0,
-    type: TransformType = .none,
-    opacity: ?u32 = null,
+    const Direction = enum(u8) {
+        up,
+        down,
+        left,
+        right,
+    };
+    size_type: SizeType = .none,
+    scale_size: f16 = 1,
+    trans_x: f16 = 0,
+    trans_y: f16 = 0,
+    deg: f16 = 0,
+    x: f16 = 0,
+    y: f16 = 0,
+    z: f16 = 0,
+    type: []const TransformType = &.{.none},
+    opacity: f16 = 1,
 
     pub fn scale() Transform {
-        return .{ .scale_size = 1.05, .type = .scale };
+        return .{ .scale_size = 1.05, .type = &.{.scale}, .size_type = .scale };
     }
 
-    pub fn rotate(deg: f32) Transform {
-        return .{ .deg = deg, .type = .rotate };
+    pub fn up(dist: f16) Transform {
+        return .{ .trans_y = -dist, .type = &.{.translateY}, .size_type = .px };
     }
 
-    pub fn rotateX(deg: f32) Transform {
-        return .{ .deg = deg, .type = .rotateX };
+    pub fn direction_scale(dir: Transform.Direction, dist: f16, scale_size: f16) Transform {
+        switch (dir) {
+            .up => return .{ .trans_y = -dist, .scale_size = scale_size, .type = &.{ .translateY, .scale }, .size_type = .px },
+            .down => return .{ .trans_y = dist, .scale_size = scale_size, .type = &.{ .translateY, .scale }, .size_type = .px },
+            .left => return .{ .trans_x = -dist, .scale_size = scale_size, .type = &.{ .translateX, .scale }, .size_type = .px },
+            .right => return .{ .trans_x = dist, .scale_size = scale_size, .type = &.{ .translateX, .scale }, .size_type = .px },
+        }
     }
 
-    pub fn rotateY(deg: f32) Transform {
-        return .{ .deg = deg, .type = .rotateY };
+    pub fn down(dist: f16) Transform {
+        return .{ .trans_y = dist, .type = &.{.translateY}, .size_type = .px };
     }
 
-    pub fn rotateXYZ(x: f32, y: f32, z: f32) Transform {
-        return .{ .x = x, .y = y, .z = z, .type = .rotateXYZ };
+    pub fn left(dist: f16) Transform {
+        return .{ .trans_x = -dist, .type = &.{.translateX}, .size_type = .px };
+    }
+    pub fn right(dist: f16) Transform {
+        return .{ .trans_x = dist, .type = &.{.translateX}, .size_type = .px };
+    }
+
+    pub fn left_percent(percent: f16) Transform {
+        return .{ .trans_x = percent, .type = &.{.translateX}, .size_type = .percent };
+    }
+
+    pub fn top_percent(percent: f16) Transform {
+        return .{ .percent = percent, .type = &.{.translateY}, .size_type = .percent };
+    }
+
+    pub fn rotate(deg: f16) Transform {
+        return .{ .deg = deg, .type = &.{.rotate}, .size_type = .deg };
+    }
+
+    pub fn rotateX(deg: f16) Transform {
+        return .{ .deg = deg, .type = &.{.rotateX}, .size_type = .deg };
+    }
+
+    pub fn rotateY(deg: f16) Transform {
+        return .{ .deg = deg, .type = &.{.rotateY}, .size_type = .deg };
+    }
+
+    pub fn rotateXYZ(x: f16, y: f16, z: f16) Transform {
+        return .{ .x = x, .y = y, .z = z, .type = &.{.rotateXYZ}, .size_type = .deg };
     }
 };
 
@@ -900,7 +1003,7 @@ pub const Focus = struct {
     background: ?Color = null,
     shadow: Shadow = .{},
     transform: Transform = .{},
-    opacity: f32 = 1,
+    opacity: f16 = 1,
     child_style: ?ChildStyle = null,
 };
 
@@ -994,11 +1097,9 @@ pub const CheckMark = struct {
     background: ?Color = null,
     shadow: Shadow = .{},
     transform: Transform = .{},
-    opacity: f32 = 1,
+    opacity: f16 = 1,
     child_style: ?ChildStyle = null,
 };
-
-pub const TextColor: [4]u8 = .{ 0, 0, 0, 255 };
 
 pub const Dim = struct {
     type: SizingType = .fit,
@@ -1019,89 +1120,90 @@ pub const Dim = struct {
 };
 
 pub const TextDecoration = enum(u8) {
-    none = 0,
-    overline = 1,
-    underline = 2,
-    inherit = 3,
-    initial = 4,
-    revert = 5,
-    unset = 6,
+    default,
+    none,
+    overline,
+    underline,
+    inherit,
+    initial,
+    revert,
+    unset,
 };
 
 pub const WhiteSpace = enum(u8) {
-    normal = 0, // Collapses whitespace and breaks on necessary
-    nowrap = 1, // Collapses whitespace but prevents breaking
-    pre = 2, // Preserves whitespace and breaks on newlines
-    pre_wrap = 3, // Preserves whitespace and breaks as needed
-    pre_line = 4, // Collapses whitespace but preserves line breaks
-    break_spaces = 5, // Like pre-wrap but also breaks at spaces
-    inherit = 6, // Inherits from parent
-    initial = 7, // Default value
-    revert = 8, // Reverts to inherited value
-    unset = 9, // Resets to inherited value or initial
+    default,
+    normal, // Collapses whitespace and breaks on necessary
+    nowrap, // Collapses whitespace but prevents breaking
+    pre, // Preserves whitespace and breaks on newlines
+    pre_wrap, // Preserves whitespace and breaks as needed
+    pre_line, // Collapses whitespace but preserves line breaks
+    break_spaces, // Like pre-wrap but also breaks at spaces
+    inherit, // Inherits from parent
+    initial, // Default value
+    revert, // Reverts to inherited value
+    unset, // Resets to inherited value or initial
 };
 
 // Enum definition for CSS list-style-type property
 pub const ListStyle = enum(u8) {
-    none = 0, // No bullet or marker
-    disc = 1, // Filled circle (default for unordered lists)
-    circle = 2, // Open circle
-    square = 3, // Square marker
-    decimal = 4, // Decimal numbers (default for ordered lists)
-    decimal_leading_zero = 5, // Decimal numbers with a leading zero (e.g. 01, 02, 03, ...)
-    lower_roman = 6, // Lowercase roman numerals (i, ii, iii, ...)
-    upper_roman = 7, // Uppercase roman numerals (I, II, III, ...)
-    lower_alpha = 8, // Lowercase alphabetic (a, b, c, ...)
-    upper_alpha = 9, // Uppercase alphabetic (A, B, C, ...)
-    lower_greek = 10, // Lowercase Greek letters (α, β, γ, ...)
-    armenian = 11, // Armenian numbering
-    georgian = 12, // Georgian numbering
-    inherit = 13, // Inherits from parent element
-    initial = 14, // Resets to the default value
-    revert = 15, // Reverts to the inherited value if explicitly changed
-    unset = 16, // Resets to inherited or initial value
+    default,
+    none, // No bullet or marker
+    disc, // Filled circle (default for unordered lists)
+    circle, // Open circle
+    square, // Square marker
+    decimal, // Decimal numbers (default for ordered lists)
+    decimal_leading_zero, // Decimal numbers with a leading zero (e.g. 01, 02, 03, ...)
+    lower_roman, // Lowercase roman numerals (i, ii, iii, ...)
+    upper_roman, // Uppercase roman numerals (I, II, III, ...)
+    lower_alpha, // Lowercase alphabetic (a, b, c, ...)
+    upper_alpha, // Uppercase alphabetic (A, B, C, ...)
+    lower_greek, // Lowercase Greek letters (α, β, γ, ...)
+    armenian, // Armenian numbering
+    georgian, // Georgian numbering
+    inherit, // Inherits from parent element
+    initial, // Resets to the default value
+    revert, // Reverts to the inherited value if explicitly changed
+    unset, // Resets to inherited or initial value
 };
 
 pub const Outline = enum(u8) {
-    none = 0, // No outline
-    auto = 1, // Default outline (typically browser-specific)
-    dotted = 2, // Dotted outline
-    dashed = 3, // Dashed outline
-    solid = 4, // Solid outline
-    double = 5, // Two parallel solid lines
-    groove = 6, // 3D grooved effect
-    ridge = 7, // 3D ridged effect
-    inset = 8, // 3D inset effect
-    outset = 9, // 3D outset effect
-    inherit = 10, // Inherits from the parent element
-    initial = 11, // Resets to the default value
-    revert = 12, // Reverts to the inherited value if explicitly changed
-    unset = 13, // Resets to inherited or initial value
+    default,
+    none, // No outline
+    auto, // Default outline (typically browser-specific)
+    dotted, // Dotted outline
+    dashed, // Dashed outline
+    solid, // Solid outline
+    double, // Two parallel solid lines
+    groove, // 3D grooved effect
+    ridge, // 3D ridged effect
+    inset, // 3D inset effect
+    outset, // 3D outset effect
+    inherit, // Inherits from the parent element
+    initial, // Resets to the default value
+    revert, // Reverts to the inherited value if explicitly changed
+    unset, // Resets to inherited or initial value
 };
 
 pub const FlexType = enum(u8) {
-    Flex = 0, // "flex"
-    Center = 1,
-    Stack = 2, // "inline-flex"
-    Flow = 3, // "inherit"
-    // Initial = 3, // "initial"
-    // Revert = 4, // "revert"
-    // Unset = 5, // "unset"
-    // InlineBlock = 7, // "inline-block"
-    // Inline = 8, // "inline-flex"
-    None = 4, // "centers the child content"
-    CenterStack = 5, // "centers the child content"
+    default,
+    flex, // "flex"
+    center,
+    stack, // "inline-flex"
+    flow, // "inherit"
+    none, // "centers the child content"
+    center_stack, // "centers the child content"
 };
 
 // Enum definition for flex-wrap property
 pub const FlexWrap = enum(u8) {
-    nowrap = 0, // Single-line, no wrapping
-    wrap = 1, // Multi-line, wrapping if needed
-    wrap_reverse = 2, // Multi-line, reverse wrapping direction
-    inherit = 3, // Inherits from parent
-    initial = 4, // Default value
-    revert = 5, // Reverts to inherited value
-    unset = 6, // Resets to inherited value or initial
+    none,
+    nowrap, // Single-line, no wrapping
+    wrap, // Multi-line, wrapping if needed
+    wrap_reverse, // Multi-line, reverse wrapping direction
+    inherit, // Inherits from parent
+    initial, // Default value
+    revert, // Reverts to inherited value
+    unset, // Resets to inherited value or initial
 };
 
 pub const KeyFrame = struct {
@@ -1164,15 +1266,15 @@ pub const ChildStyle = struct {
     flex_shrink: ?u32 = null,
     font_family_file: []const u8 = "",
     font_family: []const u8 = "",
-    opacity: f32 = 1,
+    opacity: f16 = 1,
     text_decoration: ?TextDecoration = null,
-    shadow: Shadow = .{},
+    shadow: ?Shadow = .{},
     white_space: ?WhiteSpace = null,
     flex_wrap: ?FlexWrap = null,
     key_frame: ?KeyFrame = null,
     key_frames: ?[]const KeyFrame = null,
-    animation: ?Animation.Specs = null,
-    z_index: ?f32 = null,
+    // animation: ?Animation.Specs = null,
+    z_index: ?i16 = null,
     list_style: ?ListStyle = null,
     blur: ?u32 = null,
     outline: ?Outline = null,
@@ -1183,7 +1285,8 @@ pub const ChildStyle = struct {
     accent_color: ?[4]u8 = null,
 };
 
-pub const Cursor = enum {
+pub const Cursor = enum(u8) {
+    default,
     pointer,
     help,
     grab,
@@ -1224,9 +1327,9 @@ pub const TransformOrigin = enum(u8) {
     left = 3,
 };
 
-pub const Layout = struct {
-    x: Alignment = .start,
-    y: Alignment = .start,
+pub const Layout = packed struct {
+    x: Alignment = .none,
+    y: Alignment = .none,
     pub const flex = Layout{};
     pub const center = Layout{ .x = .center, .y = .center };
     pub const top_center = Layout{ .x = .center, .y = .start };
@@ -1241,11 +1344,14 @@ pub const Layout = struct {
     pub const x_even_center = Layout{ .x = .even, .y = .center };
     pub const y_even = Layout{ .x = .start, .y = .even };
     pub const y_even_center = Layout{ .x = .center, .y = .even };
+    pub const x_between = Layout{ .x = .between, .y = .start };
     pub const x_between_center = Layout{ .x = .between, .y = .center };
+    pub const x_between_bottom = Layout{ .x = .between, .y = .end };
+    pub const x_between_top = Layout{ .x = .between, .y = .start };
     pub const y_between_center = Layout{ .x = .center, .y = .between };
 };
 
-const BorderGrouped = struct {
+pub const BorderGrouped = struct {
     thickness: Border = .all(1),
     color: ?Color = .hex("#000000"),
     radius: ?BorderRadius = null,
@@ -1276,12 +1382,12 @@ const BorderGrouped = struct {
     }
 
     // Rounded variants (common radius values)
-    pub fn rounded(color: Color) BorderGrouped {
-        return .{ .color = color, .radius = .all(4) };
+    pub fn round(color: Color, radius: BorderRadius) BorderGrouped {
+        return .{ .color = color, .radius = radius };
     }
 
     pub fn pill(color: Color) BorderGrouped {
-        return .{ .color = color, .radius = .all(999) }; // Large radius for pill shape
+        return .{ .color = color, .radius = .all(99) }; // Large radius for pill shape
     }
 
     // Side-specific shortcuts
@@ -1299,6 +1405,10 @@ const BorderGrouped = struct {
 
     pub fn tb(color: Color) BorderGrouped {
         return .{ .thickness = .tb(1), .color = color };
+    }
+
+    pub fn lr(color: Color) BorderGrouped {
+        return .{ .thickness = .lr(1), .color = color };
     }
 
     pub fn top(color: Color) BorderGrouped {
@@ -1320,7 +1430,7 @@ const FontParams = struct {
             ._size = font_size,
         };
     }
-    pub fn weight(font_weight: ?usize) FontParams {
+    pub fn weight(font_weight: ?u16) FontParams {
         return .{
             ._weight = font_weight,
         };
@@ -1331,14 +1441,14 @@ const FontParams = struct {
             ._color = font_color,
         };
     }
-    pub fn all(font_size: i32, font_weight: ?usize, font_color: ?Color) FontParams {
+    pub fn all(font_size: u8, font_weight: ?u16, font_color: ?Color) FontParams {
         return .{
             ._size = font_size,
             ._weight = font_weight,
             ._color = font_color,
         };
     }
-    pub fn size_weight(font_size: i32, font_weight: ?usize) FontParams {
+    pub fn size_weight(font_size: u8, font_weight: ?u16) FontParams {
         return .{
             ._size = font_size,
             ._weight = font_weight,
@@ -1355,19 +1465,19 @@ const FontParams = struct {
 pub const Visual = struct {
     /// Color color as RGBA array [red, green, blue, alpha] (0-255 each)
     /// Default: transparent black
-    background: ?Color = null,
+    background: ?Background = null,
 
     /// Font size in pixels
-    font_size: ?i32 = null,
+    font_size: ?u8 = null,
 
     /// Letter spacing in pixels (can be negative for tighter spacing)
-    letter_spacing: ?i32 = null,
+    letter_spacing: ?u8 = null,
 
     /// Line height in pixels for text content
-    line_height: ?i32 = null,
+    line_height: ?u8 = null,
 
     /// Font weight (100-900, where 400 is normal, 700 is bold)
-    font_weight: ?usize = null,
+    font_weight: ?u16 = null,
 
     /// Border radius configuration for rounded corners
     border_radius: ?BorderRadius = null,
@@ -1385,18 +1495,27 @@ pub const Visual = struct {
     text_color: ?Color = null,
 
     /// Gradient color as RGBA array [red, green, blue, alpha]
-    gradient: ?[]const Color = null,
+    // gradient: ?[]const Color = null,
 
     /// Element opacity (0.0 = fully transparent, 1.0 = fully opaque)
-    opacity: ?f32 = null,
+    opacity: ?f16 = null,
 
     /// Shadow configuration for drop shadows
-    shadow: Shadow = .{},
+    shadow: ?Shadow = null,
 
     /// 2D/3D transformation configuration
     transform: ?Transform = null,
 
-    pub fn font(size: i32, weight: ?usize, color: ?Color) Visual {
+    /// Text decoration (underline, strikethrough, etc.)
+    text_decoration: ?TextDecoration = null,
+
+    cursor: ?Cursor = null,
+
+    fill: ?Color = null,
+    stroke: ?Color = null,
+    blur: ?u8 = 0,
+
+    pub fn font(size: u8, weight: ?u16, color: ?Color) Visual {
         return .{
             .font_size = size,
             .font_weight = weight,
@@ -1414,8 +1533,8 @@ pub const Visual = struct {
     }
 
     // Background shortcuts
-    pub fn bg(color: Color) Visual {
-        return .{ .background = color };
+    pub fn bg(background: Background) Visual {
+        return .{ .background = background };
     }
 
     pub fn pill(color: Color) Visual {
@@ -1430,7 +1549,7 @@ pub const Visual = struct {
         }
     }
 
-    pub fn button(background: Color, border: BorderGrouped) Visual {
+    pub fn button(background: Background, border: BorderGrouped) Visual {
         return .{
             .background = background,
             .border = border,
@@ -1455,8 +1574,159 @@ pub const Interactive = struct {
     }
 };
 
+const PackedPosType = enum(u8) {
+    fit = 0,
+    grow = 1,
+    percent = 2,
+    fixed = 3,
+    elastic = 4,
+    elastic_percent = 5,
+    clamp_px = 6,
+    clamp_percent = 7,
+    none = 8,
+};
+
+const PackedSizeType = packed struct {
+    type: SizingType = .fit,
+    value: f32 = 0,
+};
+
+pub const PackedLayout = packed struct {
+    flex: FlexType = .default,
+    layout: Layout = .{},
+    direction: Direction = .row,
+    size: Size = .{},
+    child_gap: u8 = 0,
+    scroll: Scroll = .{},
+    flex_wrap: FlexWrap = .none,
+    text_align: Layout = .{},
+};
+
+pub const PackedPosition = packed struct {
+    position_type: PositionType = .none,
+    top: Pos = .{},
+    right: Pos = .{},
+    bottom: Pos = .{},
+    left: Pos = .{},
+    z_index: i16 = 0,
+};
+
+pub const PackedMarginsPaddings = packed struct {
+    padding: Padding = .{},
+    margin: Margin = .{},
+};
+
+pub const PackedGrid = packed struct {
+    size: u8 = 0,
+    thickness: u8 = 1,
+    packed_color: PackedColor = .{},
+};
+
+pub const PackedColor = packed struct {
+    has_token: bool = false,
+    has_color: bool = false,
+    color: Rgba = undefined,
+    token: Thematic = undefined,
+};
+
+pub const PackedShadow = packed struct {
+    top: u8 = 0,
+    left: u8 = 0,
+    blur: u8 = 0,
+    spread: u8 = 0,
+    color: PackedColor = .{},
+};
+
+const SizeType = enum(u8) {
+    percent,
+    deg,
+    px,
+    scale,
+    none,
+};
+
+pub const PackedTransform = packed struct {
+    size_type: SizeType = .none,
+    type: TransformType = .none,
+    scale_size: f16 = 1,
+    trans_x: f16 = 0,
+    trans_y: f16 = 0,
+    deg: f16 = 0,
+    x: f16 = 0,
+    y: f16 = 0,
+    z: f16 = 0,
+    opacity: f16 = 1,
+    type_ptr: ?[*]const TransformType = null,
+    type_len: u32 = 0,
+
+    pub fn set(packed_transform: *PackedTransform, transform: *const Transform) void {
+        const type_slice = transform.type;
+        var slice: []TransformType = Fabric.frame_arena.getFrameAllocator().alloc(TransformType, type_slice.len) catch unreachable;
+        for (type_slice, 0..) |element, i| {
+            slice[i] = element;
+        }
+
+        packed_transform.size_type = transform.size_type;
+        packed_transform.scale_size = transform.scale_size;
+        packed_transform.trans_x = transform.trans_x;
+        packed_transform.trans_y = transform.trans_y;
+        packed_transform.deg = transform.deg;
+        packed_transform.x = transform.x;
+        packed_transform.y = transform.y;
+        packed_transform.z = transform.z;
+        packed_transform.opacity = transform.opacity;
+        packed_transform.type_ptr = slice.ptr;
+        packed_transform.type_len = slice.len;
+    }
+};
+
+pub const PackedVisual = packed struct {
+    background: PackedColor = .{},
+    background_grid: PackedGrid = .{},
+    has_border_radius: bool = false,
+    border_radius: BorderRadius = .{},
+    has_border_thickeness: bool = false,
+    border_thickness: Border = .{},
+    has_border_color: bool = false,
+    border_color: PackedColor = .{},
+    font_size: u8 = 0,
+    font_weight: u16 = 0,
+    text_color: PackedColor = .{},
+    has_opacity: bool = false,
+    opacity: f16 = 1,
+    text_decoration: TextDecoration = .none,
+    blur: u8 = 0,
+    list_style: ListStyle = .default,
+    outline: Outline = .default,
+    shadow: PackedShadow = .{},
+    has_white_space: bool = false,
+    white_space: WhiteSpace = .normal,
+    cursor: Cursor = .default,
+    fill: PackedColor = .{},
+    stroke: PackedColor = .{},
+    font_family_ptr: ?[*]const u8 = null,
+    font_family_len: usize = 0,
+    has_transitions: bool = false,
+    transitions: PackedTransition = undefined,
+};
+
+pub const PackedInteractive = packed struct {
+    has_hover: bool = false,
+    hover: PackedVisual = undefined,
+    has_focus: bool = false,
+    focus: PackedVisual = undefined,
+    has_focus_within: bool = false,
+    focus_within: PackedVisual = undefined,
+};
+
+pub const PackedAnimations = packed struct {
+    has_transform: bool = false,
+    transform: PackedTransform = undefined,
+};
+
 /// Global user-defined default style that overrides system defaults
 var user_defaults: ?Style = null;
+pub const default: Style = Style{};
 
 /// Comprehensive styling struct that provides CSS-like properties for UI components.
 /// Supports layout, visual styling, typography, animations, and interactions.
@@ -1494,7 +1764,7 @@ pub const Style = struct {
     padding: ?Padding = null,
 
     /// External spacing configuration
-    margin: ?Margin = .{},
+    margin: ?Margin = null,
 
     /// Style Props
     visual: ?Visual = null,
@@ -1502,17 +1772,14 @@ pub const Style = struct {
     /// Horizontal overflow behavior
     scroll: ?Scroll = null,
 
-    /// Text decoration (underline, strikethrough, etc.)
-    text_decoration: ?TextDecoration = null,
-
     /// Alignment configuration for child elements
     layout: ?Layout = null,
 
     /// Gap between child elements in pixels
-    child_gap: u32 = 0,
+    child_gap: ?u8 = null,
 
     /// Font family name (e.g., "Arial", "Helvetica", "Montserrat")
-    font_family: []const u8 = "",
+    font_family: ?[]const u8 = null,
 
     /// White space handling (normal, nowrap, pre, pre-wrap)
     white_space: ?WhiteSpace = null,
@@ -1533,13 +1800,10 @@ pub const Style = struct {
     exit_animation: ?[]const u8 = null,
 
     /// Z-index for layering control (higher values appear on top)
-    z_index: ?f32 = null,
+    z_index: ?i16 = null,
 
     /// List styling for ul/ol elements
     list_style: ?ListStyle = null,
-
-    /// Blur effect intensity in pixels
-    blur: ?u32 = null,
 
     /// Outline configuration (different from border)
     outline: ?Outline = null,
@@ -1549,9 +1813,6 @@ pub const Style = struct {
 
     /// Whether to show scrollbars when content overflows
     show_scrollbar: bool = true,
-
-    /// Cursor type when hovering over element
-    cursor: ?Cursor = null,
 
     /// Interactive
     interactive: ?Interactive = null,
@@ -1563,7 +1824,7 @@ pub const Style = struct {
     dialog_id: ?[]const u8 = null,
 
     /// Array of child-specific style overrides
-    child_styles: ?[]const ChildStyle = null,
+    child_styles: ?[]*const ChildStyle = null,
 
     /// Element appearance override
     appearance: ?Appearance = null,
@@ -1580,50 +1841,6 @@ pub const Style = struct {
     /// Backface visibility for 3D transforms
     backface_visibility: ?[]const u8 = null,
 
-    /// System default style configuration with sensible defaults.
-    /// Used as the base when no user defaults are set.
-    pub const default: Style = Style{};
-
-    /// Pre-configured opaque style with common visual properties.
-    /// Useful as a starting point for solid, bordered elements.
-    ///
-    /// # Properties:
-    /// - Font: Montserrat
-    /// - Border radius: 4px on all corners
-    /// - Border: 1px solid light gray (#DFDFDF)
-    pub const Opaque: Style = .{
-        .font_family = "Montserrat",
-        .border_radius = .all(4),
-        .border_color = .hex("#DFDFDF"),
-        .border_thickness = .default(),
-    };
-
-    pub const Container: Style = .{
-        .display = .flex,
-        .direction = .row,
-        .child_gap = 12,
-        .child_alignment = .{ .x = .start, .y = .center },
-        .flex_wrap = .wrap,
-        .width = .percent(100),
-    };
-
-    pub const Button: Style = .{
-        .padding = .{ .top = 8, .bottom = 8, .left = 12, .right = 12 },
-        .border_radius = .all(6),
-        .display = .inline_flex,
-        .child_alignment = .{ .x = .center, .y = .center },
-        .cursor = .pointer,
-        .font_weight = 600,
-    };
-
-    pub const Card: Style = .{
-        .background = .{ 255, 255, 255, 255 }, // White
-        .padding = .all(16),
-        .border_radius = .all(8),
-        .shadow = .{ .blur = 8, .top = 2, .color = .{ 0, 0, 0, 25 } },
-        .display = .block,
-    };
-
     /// Gets the current base style to use for inheritance.
     /// Returns user-defined defaults if set, otherwise returns system defaults.
     ///
@@ -1636,7 +1853,7 @@ pub const Style = struct {
     /// const custom = Style{ .font_size = 16 }.merge(base);
     /// ```
     pub fn getDefault() Style {
-        return user_defaults orelse Style.default;
+        return user_defaults orelse default;
     }
 
     /// Merges this style with a base style, creating a new style where
@@ -1644,8 +1861,8 @@ pub const Style = struct {
     /// Only properties that differ from system defaults are applied.
     ///
     /// # Parameters:
-    /// - `self`: Style - The style with override properties
-    /// - `base`: Style - The base style to merge with
+    /// - `base`: *const Style - The style with base properties
+    /// - `override`: Style - The override style to merge with
     ///
     /// # Returns:
     /// Style - New style with merged properties
@@ -1654,93 +1871,164 @@ pub const Style = struct {
     /// ```zig
     /// const base_style = Style{ .font_size = 14, .padding = .all(8) };
     /// const override_style = Style{ .font_size = 18 }; // Only override font size
-    /// const merged = override_style.merge(base_style);
+    /// const merged = base_style.merge(override_style);
     /// // Result: font_size = 18, padding = .all(8)
     /// ```
-    pub fn merge(self: *const Style, base: Style) Style {
-        var result = base;
-        inline for (@typeInfo(Style).@"struct".fields) |field| {
-            const field_value = @field(self, field.name);
-            const default_value = @field(default, field.name);
+    pub fn merge(base: *const Style, override: Style) Style {
+        // var result = base.*;
+        // inline for (@typeInfo(Style).@"struct".fields) |field| {
+        //     const field_value = @field(override, field.name);
+        //     const default_value = @field(default, field.name);
+        //
+        //     // Only override if the field is not the default value
+        //     if (!std.meta.eql(field_value, default_value)) {
+        //         @field(result, field.name) = field_value;
+        //     }
+        // }
 
-            // Only override if the field is not the default value
-            if (!std.meta.eql(field_value, default_value)) {
-                @field(result, field.name) = field_value;
-            }
-        }
+        var result = base.*;
+
+        if (override.id != null) result.id = override.id;
+        if (override.style_id != null) result.style_id = override.style_id;
+        if (override.position != null) result.position = override.position;
+        if (override.direction != .row) result.direction = override.direction;
+        if (override.size != null) result.size = override.size;
+        if (override.padding != null) result.padding = override.padding;
+        if (override.margin != null) result.margin = override.margin;
+        if (override.visual != null) result.visual = override.visual;
+        if (override.scroll != null) result.scroll = override.scroll;
+        if (override.layout != null) result.layout = override.layout;
+        if (override.font_family != null) result.font_family = override.font_family;
+        if (override.white_space != null) result.white_space = override.white_space;
+        if (override.flex_wrap != null) result.flex_wrap = override.flex_wrap;
+        if (override.key_frame != null) result.key_frame = override.key_frame;
+        if (override.key_frames != null) result.key_frames = override.key_frames;
+        // if (override.animation != null) result.animation = override.animation;
+        // if (override.exit_animation != null) result.exit_animation = override.exit_animation;
+        if (override.z_index != null) result.z_index = override.z_index;
+        if (override.list_style != null) result.list_style = override.list_style;
+        if (override.outline != null) result.outline = override.outline;
+        if (override.transition != null) result.transition = override.transition;
+        if (override.show_scrollbar != true) result.show_scrollbar = override.show_scrollbar;
+        if (override.interactive != null) result.interactive = override.interactive;
+        if (override.btn_id != 0) result.btn_id = override.btn_id;
+        if (override.dialog_id != null) result.dialog_id = override.dialog_id;
+        if (override.child_styles != null) result.child_styles = override.child_styles;
+        if (override.appearance != null) result.appearance = override.appearance;
+        if (override.checkmark_style != null) result.checkmark_style = override.checkmark_style;
+        if (override.will_change != null) result.will_change = override.will_change;
+        if (override.transform_origin != null) result.transform_origin = override.transform_origin;
+        if (override.backface_visibility != null) result.backface_visibility = override.backface_visibility;
+        if (override.child_gap != null) result.child_gap = override.child_gap;
+
         return result;
     }
 
     pub fn extend(self: *Style, target: Style) void {
-        inline for (@typeInfo(Style).@"struct".fields) |field| {
-            const target_value = @field(target, field.name);
-            const field_value = @field(self, field.name);
-            const default_value = @field(default, field.name);
-
-            // Only override if the field is not the default value
-            if (!std.meta.eql(field_value, target_value) and !std.meta.eql(target_value, default_value)) {
-                @field(self, field.name) = target_value;
-            }
-        }
+        if (target.id != null) self.id = target.id;
+        if (target.style_id != null) self.style_id = target.style_id;
+        if (target.position != null) self.position = target.position;
+        if (target.direction != .row) self.direction = target.direction;
+        if (target.size != null) self.size = target.size;
+        if (target.padding != null) self.padding = target.padding;
+        if (target.margin != null) self.margin = target.margin;
+        if (target.visual != null) self.visual = target.visual;
+        if (target.scroll != null) self.scroll = target.scroll;
+        if (target.layout != null) self.layout = target.layout;
+        if (target.font_family != null) self.font_family = target.font_family;
+        if (target.white_space != null) self.white_space = target.white_space;
+        if (target.flex_wrap != null) self.flex_wrap = target.flex_wrap;
+        if (target.key_frame != null) self.key_frame = target.key_frame;
+        if (target.key_frames != null) self.key_frames = target.key_frames;
+        // if (target.animation != null) self.animation = target.animation;
+        // if (target.exit_animation != null) self.exit_animation = target.exit_animation;
+        if (target.z_index != null) self.z_index = target.z_index;
+        if (target.list_style != null) self.list_style = target.list_style;
+        if (target.outline != null) self.outline = target.outline;
+        if (target.transition != null) self.transition = target.transition;
+        if (target.show_scrollbar != true) self.show_scrollbar = target.show_scrollbar;
+        if (target.interactive != null) self.interactive = target.interactive;
+        if (target.btn_id != 0) self.btn_id = target.btn_id;
+        if (target.dialog_id != null) self.dialog_id = target.dialog_id;
+        if (target.child_styles != null) self.child_styles = target.child_styles;
+        if (target.appearance != null) self.appearance = target.appearance;
+        if (target.checkmark_style != null) self.checkmark_style = target.checkmark_style;
+        if (target.will_change != null) self.will_change = target.will_change;
+        if (target.transform_origin != null) self.transform_origin = target.transform_origin;
+        if (target.backface_visibility != null) self.backface_visibility = target.backface_visibility;
+        if (target.child_gap != null) self.child_gap = target.child_gap;
     }
-
-    /// Creates a new style by merging the provided overrides with the current default style.
-    /// This is the primary way to create styled components with inheritance.
-    ///
-    /// # Parameters:
-    /// - `overrides`: Style - Style properties to override defaults
-    ///
-    /// # Returns:
-    /// Style - New style with default properties and specified overrides
-    ///
-    /// # Usage:
-    /// ```zig
-    /// // Create a button style with custom background and padding
-    /// const button_style = Style.override(.{
-    ///     .background = .{ 70, 130, 180, 255 }, // Steel blue
-    ///     .padding = .all(12),
-    ///     .border_radius = .all(6),
-    ///     .text_color = .{ 255, 255, 255, 255 }, // White text
-    /// });
-    ///
-    /// // Create a card style with shadow and border
-    /// const card_style = Style.override(.{
-    ///     .background = .{ 255, 255, 255, 255 }, // White background
-    ///     .shadow = .{ .blur = 10, .color = .{ 0, 0, 0, 50 } },
-    ///     .border_radius = .all(8),
-    ///     .padding = .all(16),
-    /// });
-    /// ```
-    pub fn override(overrides: Style) Style {
-        return overrides.merge(Style.getDefault());
-    }
-
-    /// Sets the global user defaults that will be used as the base for all future styles.
-    /// This allows you to establish consistent theming across your application.
-    ///
-    /// # Parameters:
-    /// - `new_default`: Style - The new default style configuration
-    ///
-    /// # Returns:
-    /// void
-    ///
-    /// # Usage:
-    /// ```zig
-    /// // Set up application-wide defaults
-    /// Style.setDefault(.{
-    ///     .font_family = "Inter",
-    ///     .font_size = 14,
-    ///     .text_color = .{ 33, 37, 41, 255 }, // Dark gray
-    ///     .background = .{ 248, 249, 250, 255 }, // Light gray
-    /// });
-    ///
-    /// // All subsequent Style.override() calls will inherit these defaults
-    /// const button = Style.override(.{ .padding = .all(8) });
-    /// // button now has Inter font, 14px size, dark gray text, etc.
-    /// ```
-    pub fn setDefault(new_default: Style) void {
-        user_defaults = new_default;
-    }
+    //
+    // // pub fn extend(self: *Style, target: Style) void {
+    // //     inline for (@typeInfo(Style).@"struct".fields) |field| {
+    // //         const target_value = @field(target, field.name);
+    // //         const field_value = @field(self, field.name);
+    // //         const default_value = @field(default, field.name);
+    // //
+    // //         // Only override if the field is not the default value
+    // //         if (!std.meta.eql(field_value, target_value) and !std.meta.eql(target_value, default_value)) {
+    // //             @field(self, field.name) = target_value;
+    // //         }
+    // //     }
+    // // }
+    //
+    // // /// Creates a new style by merging the provided overrides with the current default style.
+    // // /// This is the primary way to create styled components with inheritance.
+    // // ///
+    // // /// # Parameters:
+    // // /// - `overrides`: Style - Style properties to override defaults
+    // // ///
+    // // /// # Returns:
+    // // /// Style - New style with default properties and specified overrides
+    // // ///
+    // // /// # Usage:
+    // // /// ```zig
+    // // /// // Create a button style with custom background and padding
+    // // /// const button_style = Style.override(.{
+    // // ///     .background = .{ 70, 130, 180, 255 }, // Steel blue
+    // // ///     .padding = .all(12),
+    // // ///     .border_radius = .all(6),
+    // // ///     .text_color = .{ 255, 255, 255, 255 }, // White text
+    // // /// });
+    // // ///
+    // // /// // Create a card style with shadow and border
+    // // /// const card_style = Style.override(.{
+    // // ///     .background = .{ 255, 255, 255, 255 }, // White background
+    // // ///     .shadow = .{ .blur = 10, .color = .{ 0, 0, 0, 50 } },
+    // // ///     .border_radius = .all(8),
+    // // ///     .padding = .all(16),
+    // // /// });
+    // // /// ```
+    // // pub fn override(overrides: Style) Style {
+    // //     return overrides.merge(Style.getDefault());
+    // // }
+    //
+    // /// Sets the global user defaults that will be used as the base for all future styles.
+    // /// This allows you to establish consistent theming across your application.
+    // ///
+    // /// # Parameters:
+    // /// - `new_default`: Style - The new default style configuration
+    // ///
+    // /// # Returns:
+    // /// void
+    // ///
+    // /// # Usage:
+    // /// ```zig
+    // /// // Set up application-wide defaults
+    // /// Style.setDefault(.{
+    // ///     .font_family = "Inter",
+    // ///     .font_size = 14,
+    // ///     .text_color = .{ 33, 37, 41, 255 }, // Dark gray
+    // ///     .background = .{ 248, 249, 250, 255 }, // Light gray
+    // /// });
+    // ///
+    // /// // All subsequent Style.override() calls will inherit these defaults
+    // /// const button = Style.override(.{ .padding = .all(8) });
+    // /// // button now has Inter font, 14px size, dark gray text, etc.
+    // /// ```
+    // pub fn setDefault(new_default: Style) void {
+    //     user_defaults = new_default;
+    // }
 };
 pub const Config = struct {
     style: Style,
@@ -1883,90 +2171,32 @@ pub const ElementDeclaration = struct {
     hooks: HooksIds = .{},
     style: ?*const Style = null,
     elem_type: ElementType,
-    text: []const u8 = "",
+    text: ?[]const u8 = null,
     svg: []const u8 = "",
-    href: []const u8 = "",
+    href: ?[]const u8 = null,
     show: bool = true,
     input_params: ?*const InputParams = null,
     event_type: ?EventType = null,
-    dynamic: StateType = .static,
+    state_type: StateType = .static,
     aria_label: ?[]const u8 = null,
+    tooltip: ?*const Tooltip = null,
+    animation_enter: ?*const Animation = null,
+    animation_exit: ?*const Animation = null,
     /// Used for passing ect data
     udata: usize = 0,
 };
 
-// A comptime function to merge two enums
-pub fn createMergedEnum(comptime BaseEnum: type, comptime CustomEnum: type) type {
-    // Get the fields of both enums using @typeInfo
-    const base_fields = @typeInfo(BaseEnum).@"enum".fields;
-    const custom_fields = @typeInfo(CustomEnum).@"enum".fields;
-
-    // Create a new array to hold the merged fields
-    var merged_fields: [base_fields.len + custom_fields.len]std.builtin.Type.EnumField = undefined;
-
-    // Copy fields from the base enum
-    for (base_fields, 0..) |field, i| {
-        merged_fields[i] = .{
-            .name = field.name,
-            .value = field.value,
-        };
-    }
-
-    // Copy fields from the custom enum, adjusting their values to avoid conflicts
-    for (custom_fields, 0..) |field, i| {
-        merged_fields[base_fields.len + i] = .{
-            .name = field.name,
-            .value = base_fields.len + field.value,
-        };
-    }
-
-    // Create the new enum type using @Type
-    return @Type(.{
-        .@"enum" = .{
-            .tag_type = u8, // Or another suitable integer type
-            .fields = &merged_fields,
-            .decls = &.{},
-            .is_exhaustive = true,
-        },
-    });
-}
-pub fn addCustomChoice(_name: []const u8, comptime T: anytype) type {
-    const name = std.mem.Allocator.dupeZ(std.heap.page_allocator, u8, _name) catch {};
-    // we should probably add some error-checks here that T is an enum etc!
-
-    // use reflection to get the information of the comptime parameter T
-    const enum_type = @typeInfo(T).@"enum";
-
-    // define an array, in compile time, with the fields of our new enum
-    // that has room for "custom".
-    comptime var fields: [enum_type.fields.len + 1]std.builtin.Type.EnumField = undefined;
-
-    // define our first field to be "custom" and have the value "1 more than
-    // the number of fields".
-    fields[0] = .{ .name = name, .value = enum_type.fields.len };
-
-    // copy the field from the "base" enum
-    inline for (1.., enum_type.fields) |idx, f| {
-        fields[idx] = f;
-    }
-
-    // and declare and return our new type!
-    const enumInfo = std.builtin.Type.Enum{
-        .tag_type = u8,
-        .fields = &fields,
-        .decls = &[0]std.builtin.Type.Declaration{},
-        .is_exhaustive = true,
-    };
-
-    return @Type(std.builtin.Type{ .@"enum" = enumInfo });
-}
+pub const Tooltip = struct {
+    text: []const u8,
+    style: ?Style = null,
+};
 
 pub const RenderCommand = struct {
     /// Rectangular box that fully encloses this UI element
     elem_type: ElementType,
     text: []const u8 = "",
     href: []const u8 = "",
-    style: ?Style = null,
+    style: ?*const Style = null,
     id: []const u8 = "",
     index: usize = 0,
     hooks: HooksIds,
@@ -1976,6 +2206,9 @@ pub const RenderCommand = struct {
     focus_within: bool = false,
     class: ?[]const u8 = null,
     render_type: StateType = .static,
+    tooltip: ?Tooltip = null,
+    changed_style: bool = false,
+    changed_props: bool = false,
 };
 
 pub const EventType = enum(u8) {

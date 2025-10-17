@@ -9,7 +9,7 @@ const hashKey = utils.hashKey;
 const Self = @This();
 
 var layout_path: []const u8 = "";
-pub var node_map: std.AutoHashMap(u32, usize) = undefined;
+pub var node_map: std.AutoHashMap(u64, usize) = undefined;
 pub fn reconcile(old_ctx: *UIContext, new_ctx: *UIContext) void {
     reconcile_debug = false;
     if (old_ctx.root == null) return;
@@ -253,22 +253,7 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
     if (!reconcile_debug and std.mem.eql(u8, old_node.uuid, "fabric-debugger")) {
         return;
     }
-
-    if (new_node.props_hash != old_node.props_hash) {
-        new_node.changed_props = true;
-        new_node.dirty = true;
-        Fabric.has_dirty = true;
-    } else {
-        new_node.changed_props = false;
-    }
-    if (new_node.style_hash != old_node.style_hash) {
-        new_node.changed_style = true;
-        new_node.dirty = true;
-        Fabric.has_dirty = true;
-    } else {
-        new_node.changed_style = false;
-    }
-    if (new_node.dirty and Fabric.has_dirty) {} else if (Fabric.rerender_everything or old_node.dirty) {
+    if (Fabric.rerender_everything or old_node.dirty) {
         new_node.dirty = true;
         Fabric.has_dirty = true;
     } else if (!std.mem.eql(u8, old_node.uuid, new_node.uuid)) {
@@ -276,26 +261,26 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
         // If the uuids are different it means the node needs to be removed as it is a new node replacing an old node.
         new_node.dirty = true;
         Fabric.has_dirty = true;
-        Fabric.removed_nodes.append(.{ .uuid = old_node.uuid, .index = old_node.index }) catch {};
+        // Fabric.removed_nodes.append(.{ .uuid = old_node.uuid, .index = old_node.index }) catch {};
     } else {
-        // if (old_node.state_type == .pure) {
-        //     // Static
-        //     if (!nodesEqual(old_node, new_node)) {
-        //         new_node.dirty = true;
-        //         Fabric.has_dirty = true;
-        //     } else {
-        //         new_node.dirty = false;
-        //     }
-        // } else
-        if (new_node.type != old_node.type) {
+        if (old_node.state_type == .pure) {
+            // Static
+            if (!nodesEqual(old_node, new_node)) {
+                new_node.dirty = true;
+                Fabric.has_dirty = true;
+            } else {
+                new_node.dirty = false;
+            }
+        } else if (new_node.state_type == .animation or old_node.state_type == .animation) {
+        } else if (new_node.type != old_node.type) {
             new_node.dirty = true;
-            Fabric.has_dirty = true;
+        } else if (new_node.hash != old_node.hash) {
+            new_node.dirty = true;
         } else {
             new_node.dirty = false;
         }
     }
 
-    if (!old_node.can_have_children and !new_node.can_have_children) return;
     if (old_node.children.items.len != new_node.children.items.len) {
 
         // Here we remove items, since old_node has more children than new_node
@@ -309,7 +294,6 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
         if (old_node.children.items.len > new_node.children.items.len) {
             if (new_node.children.items.len == 0) {
                 for (old_node.children.items, 0..) |node, j| {
-                    // Fabric.println("Removing node {s}\n", .{node.uuid});
                     if (!reconcile_debug and std.mem.eql(u8, node.uuid, "fabric-debugger")) {
                         continue;
                     }
@@ -330,8 +314,8 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
                 if (std.mem.eql(u8, old_child.uuid, new_child.uuid)) {
                     traverseNodes(old_child, new_child);
                 } else {
-                    new_node.dirty = true;
-                    // Fabric.println("Breaking\n", .{});
+                    new_child.dirty = true;
+                    Fabric.markChildrenDirty(new_child);
                     break :blk;
                 }
             }
@@ -346,7 +330,6 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
                 const new_child = new_node.children.items[back_i_new - 1];
                 const old_child = old_node.children.items[back_i_old - 1];
                 // Here we the last node are equal in uuid
-                // Fabric.println("Back Comparing {s} and {s} {d}\n", .{ old_child.uuid, new_child.uuid, back_i_old });
                 if (std.mem.eql(u8, old_child.uuid, new_child.uuid)) {
                     traverseNodes(old_child, new_child);
                     back_i_old -= 1;
@@ -359,12 +342,11 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
             // We only check reording if there are still new nodes to be processed
             // const end = back_i_old;
             const end_new = back_i_new;
-            // const end_old = len_old;
+            const end_old = back_i_old;
             // the start is the index of the first node that is not equal it is the same for both slices
             const start = i;
             // We create a node map of all the old nodes this is used to find the index of the new node in case things shifted
-            for (old_node.children.items[start..back_i_old], 0..) |old_child, j| {
-                // Fabric.println("Adding {s} to node map\n", .{old_child.uuid});
+            for (old_node.children.items[start..end_old], 0..) |old_child, j| {
                 node_map.put(hashKey(old_child.uuid), start + j) catch {
                     Fabric.printlnSrcErr("Could not put node into node_map {any}\n", .{old_child.uuid}, @src());
                 };
@@ -383,33 +365,27 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
                     Fabric.has_dirty = true;
                 }
             }
+
             // // Then we iterate through the node map and remove all the nodes that are not in the new node
-            var node_itr = node_map.iterator();
-            while (node_itr.next()) |entry| {
-                // const uuid = entry.key_ptr.*;
-                const j = entry.value_ptr.*;
-                const node = old_node.children.items[j];
-                // if (!reconcile_debug and std.mem.eql(u8, uuid, "fabric-debugger")) {
-                //     continue;
-                // }
-
-                //     const node = node_map.fetchRemove(hashKey(old_child.uuid)) orelse continue;
-                Fabric.removed_nodes.append(.{ .uuid = node.uuid, .index = j }) catch {};
-            }
-            while (node_itr.next()) |entry| {
-                const j = entry.value_ptr.*;
-                const node = old_node.children.items[j];
-                _ = node_map.fetchRemove(hashKey(node.uuid)) orelse continue;
-            }
-
-            // for (old_node.children.items) |old_child| {
-            //     if (!reconcile_debug and std.mem.eql(u8, old_child.uuid, "fabric-debugger")) {
+            // var node_itr = node_map.iterator();
+            // while (node_itr.next()) |entry| {
+            //     const uuid = entry.key_ptr.*;
+            //     const j = entry.value_ptr.*;
+            //     // Fabric.println("Removing node {s}\n", .{uuid});
+            //     if (!reconcile_debug and std.mem.eql(u8, uuid, "fabric-debugger")) {
             //         continue;
             //     }
-            //     const node = node_map.fetchRemove(hashKey(old_child.uuid)) orelse continue;
-            //     Fabric.println("Removed node {s}", .{old_child.uuid});
-            //     Fabric.removed_nodes.append(.{ .uuid = old_child.uuid, .index = node.value }) catch {};
+            //
+            //     Fabric.removed_nodes.append(.{ .uuid = uuid, .index = j }) catch {};
             // }
+
+            for (old_node.children.items) |old_child| {
+                if (!reconcile_debug and std.mem.eql(u8, old_child.uuid, "fabric-debugger")) {
+                    continue;
+                }
+                const node = node_map.fetchRemove(hashKey(old_child.uuid)) orelse continue;
+                Fabric.removed_nodes.append(.{ .uuid = old_child.uuid, .index = node.value }) catch {};
+            }
 
             // for (old_node.children.items[start..end]) |node| {
             //     // if (!reconcile_debug and std.mem.eql(u8, node.uuid, "fabric-debugger")) {
@@ -427,47 +403,46 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
             //         Fabric.addToClassesList(uuid, exit);
             //     }
             // }
-        } else if (old_node.children.items.len > 0 and new_node.children.items.len > 0 and old_node.children.items.len < new_node.children.items.len) {
+        } else if (old_node.children.items.len > 0 and new_node.children.items.len > 0) {
             if (!reconcile_debug and std.mem.eql(u8, old_node.uuid, "fabric-debugger")) {
                 return;
             }
 
-            // Fabric.println("Parsing {s}\n", .{new_node.uuid});
-            // Fabric.println("New node length {any}\n", .{new_node.children.items.len});
-            // Fabric.println("Old node length {any}\n", .{old_node.children.items.len});
+            if (new_node.children.items.len == 0) {
+                for (old_node.children.items, 0..) |node, j| {
+                    // Fabric.println("Removing node {s}\n", .{node.uuid});
+                    Fabric.removed_nodes.append(.{ .uuid = node.uuid, .index = j }) catch {};
+                }
+                return;
+            }
+
             // First we perform a diff sync checking the beginning and end of the slices;
-            // Moving inwards from both ends, ie [0,1,2,3] and [3,2,1,0]
-            // we check 0 == 3 and 1 == 2 and 2 == 1 and 3 == 0
             // this assume the keys are unique
             const len_old = old_node.children.items.len;
             const len_new = new_node.children.items.len;
-            // We check as long as i is less than old length since we are adding new nodes now
-            // We dont want to go over the old length via indexing thus we only loop until the old length
+            // We check as long as i is less than old length sicne we are adding new nodes now
             var i: usize = 0;
-            blk: while (i < len_old - 1) : (i += 1) {
+            blk: while (i < len_old) : (i += 1) {
                 const new_child = new_node.children.items[i];
                 const old_child = old_node.children.items[i];
-                // We compare the uuids of the nodes, if they are equal then we traverse the nodes
-                // to see if there styles or props have changed
+                // Here we the first node are equal in uuid
                 if (std.mem.eql(u8, old_child.uuid, new_child.uuid)) {
                     traverseNodes(old_child, new_child);
                 } else {
-                    // Otherwise we break out of the loop and we have foudn the first node that is not equal
+                    // Fabric.println("Breaking\n", .{});
                     break :blk;
                 }
             }
-            // This is the index of the first node that is not equal
-            const start_unique = i;
+            // Fabric.println("Moving on\n", .{}); //
 
-            // We create copies of the lengths, to iterate backwards
-            var back_i_old: usize = len_old - 1;
-            var back_i_new: usize = len_new - 1;
-            // We perform the same loop but now backwards up to start_unique
-            // Again we start from the old length since we are adding new nodes, and dont want to use an undefined index
-            // [0,1,2,3] and [5,4,3,2,1,0], len_old = 4, len_new = 6, start_unique = 0
-            blk: while (i < back_i_old) : (back_i_old -= 1) {
-                const new_child = new_node.children.items[back_i_new];
-                const old_child = old_node.children.items[back_i_old];
+            // i = 1; then element 0 is the same and thus we want to check everything from the back up to element 1
+            // since element 1 was checked in the previous loop
+            var back_i_new: usize = len_new;
+            var back_i_old: usize = len_old;
+            // Here we decrement the back_i_new and back_i_old until we find a non equal element
+            blk: while (back_i_old > i) : (back_i_old -= 1) {
+                const new_child = new_node.children.items[back_i_new - 1];
+                const old_child = old_node.children.items[back_i_old - 1];
                 // Here we the last node are equal in uuid
                 if (std.mem.eql(u8, old_child.uuid, new_child.uuid)) {
                     traverseNodes(old_child, new_child);
@@ -477,51 +452,50 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
                 }
             } // Here old node has less then new_node, which means we added nodes
 
-            const end_unique_new = back_i_new + 1;
-            const end_unique_old = back_i_old + 1;
-            // Fabric.println("Unique new nodes {d} {d}\n", .{end_unique_new, end_unique_old});
-            // Fabric.println("Start Unique {d}\n", .{start_unique});
-            // Now we know the middle section where nodes on either side are not equal
+            // Fabric.println("Moving on\n", .{}); //
+            // now we know the middle section where nodes on either side are not equal
             // We only check reording if there are still new nodes to be processed
+            const end_new = back_i_new;
+            const end_old = back_i_old;
             // the start is the index of the first node that is not equal it is the same for both slices
+            const start = i;
             // We create a node map of all the new nodes this is used to find the index of the old node in case things shifted
-            // We add the nodes beyond the middle section for example [0,1,2,3] and [0,4,5,2,1,3]
-            // middle section of the new nodes is [4,5,2,1] since before we checked the first node 0 == 0 and the last node 3 == 3
-            for (new_node.children.items[start_unique..end_unique_new], start_unique..) |new_child, offset| {
-                node_map.put(hashKey(new_child.uuid), offset) catch {
+            for (new_node.children.items[start..end_new], start..) |new_child, j| {
+                node_map.put(hashKey(new_child.uuid), j) catch {
                     Fabric.printlnSrcErr("Could not put node into node_map {any}\n", .{new_child.uuid}, @src());
                 };
             }
 
-            // Now we check shifting of the old nodes we use the end_unique_old since we are looping backwards through the old nodes
-            // [1,2] is the old nodes middle section
-            // node_map = [4,5,2,1]
-            for (old_node.children.items[start_unique..end_unique_old], start_unique..) |old_child, offset| {
-                // '1' is in the node map and so is '2', thus it shifted
-                // We check if the new node is in the node map if so then we know it shifted
-                const new_child_index = node_map.get(hashKey(old_child.uuid)) orelse {
-                    // This means the old node is not in the new set of nodes
-                    Fabric.removed_nodes.append(.{ .uuid = old_child.uuid, .index = offset }) catch {};
-                    continue;
-                };
-                // We remove the node from the map
-                _ = node_map.remove(hashKey(old_child.uuid));
-                // Fabric.println("Found node {s} in node map\n", .{old_child.uuid});
-                // We grab the new nodes that shifted and the curren old node that got shifted and compare them
-                // In the old slice, '1' is at index 1 and in the new slice '1' is at index 4
-                const new_child = new_node.children.items[new_child_index];
-                traverseNodes(old_child, new_child);
-                // We mark this as dirty since we are shifting the nodes even if the nodes content hasnt changed
-                Fabric.has_dirty = true;
+            // We iterate over the old nodes and compare them to the new nodes
+            if (end_old > 0) {
+                for (old_node.children.items[start..end_old], 0..) |old_child, j| {
+                    // We check if the new node is in the node map if so then we know it shifted
+                    const new_child_index = node_map.get(hashKey(old_child.uuid)) orelse {
+                        // This means the old node is not in the new set of nodes
+                        Fabric.removed_nodes.append(.{ .uuid = old_child.uuid, .index = start + j }) catch {};
+                        continue;
+                    };
+                    _ = node_map.remove(hashKey(old_child.uuid));
+                    const new_child = new_node.children.items[new_child_index];
+                    traverseNodes(old_child, new_child);
+                    // We mark this as dirty since we are shifting the nodes even if the nodes content hasnt changed
+                    Fabric.has_dirty = true;
+                }
             }
-
-            // After marking all the shifted nodes and comparing them to the old nodes, we iterate over the node map that is left
-            // And mark all of them as dirty
+            // We iterate over the node map and mark all the nodes as dirty as these are added nodes
             var node_itr = node_map.valueIterator();
             while (node_itr.next()) |index| {
                 const new_child = new_node.children.items[index.*];
                 Fabric.markChildrenDirty(new_child);
             }
+
+            for (new_node.children.items) |new_child| {
+                // if (!reconcile_debug and std.mem.eql(u8, new_node.uuid, "fabric-debugger")) {
+                //     continue;
+                // }
+                _ = node_map.fetchRemove(hashKey(new_child.uuid)) orelse continue;
+            }
+
             Fabric.has_dirty = true;
         } else if (new_node.children.items.len > 0) {
             if (!reconcile_debug and std.mem.eql(u8, old_node.uuid, "fabric-debugger")) {
@@ -543,8 +517,8 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
         }
     } else {
         for (old_node.children.items, 0..) |old_child, i| {
-            const new_child = new_node.children.items[i];
-            traverseNodes(old_child, new_child);
+            // Fabric.printlnSrc("Same lengths {s} {s}", .{ old_node.uuid, new_node.uuid }, @src());
+            traverseNodes(old_child, new_node.children.items[i]);
         }
     }
 }

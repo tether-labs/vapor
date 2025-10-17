@@ -3,7 +3,6 @@ const UINode = @import("UITree.zig").UINode;
 const UI = @import("UITree.zig");
 const Fabric = @import("Fabric.zig");
 const Element = @import("Element.zig").Element;
-// const print = std.debug.print;
 const print = Fabric.println;
 
 pub const PureNode = struct {

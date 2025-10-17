@@ -1,6 +1,6 @@
 const std = @import("std");
-const isWasi = true;
 const Fabric = @import("Fabric.zig");
+const isWasi = Fabric.isWasi;
 const UIContext = @import("UITree.zig");
 const CommandsTree = UIContext.CommandsTree;
 const Types = @import("types.zig");
@@ -10,6 +10,9 @@ const UINode = UIContext.UINode;
 const Event = @import("Event.zig");
 const StyleCompiler = @import("convertStyleCustomWriter.zig");
 const Wasm = @import("wasm");
+const Writer = @import("Writer.zig");
+const utils = @import("utils.zig");
+const hashKey = utils.hashKey;
 
 export fn eventCallback(id: u32) void {
     const func = Fabric.events_callbacks.get(id).?;
@@ -93,7 +96,9 @@ export fn clearRemovedNodesretainingCapacity() void {
 }
 // The first node needs to be marked as false always
 export fn markCurrentTreeDirty() void {
-    Fabric.markChildrenDirty(Fabric.current_ctx.root.?);
+    if (!Fabric.has_context) return;
+    const root = Fabric.current_ctx.root orelse return;
+    Fabric.markChildrenDirty(root);
 }
 
 export fn markUINodeTreeDirty(node: *UINode) void {
@@ -102,7 +107,9 @@ export fn markUINodeTreeDirty(node: *UINode) void {
 
 // The first node needs to be marked as false always
 export fn markCurrentTreeNotDirty() void {
-    Fabric.markChildrenNotDirty(Fabric.current_ctx.root.?);
+    if (!Fabric.has_context) return;
+    const root = Fabric.current_ctx.root orelse return;
+    Fabric.markChildrenNotDirty(root);
 }
 
 export fn getRemovedNode(index: usize) [*]const u8 {
@@ -119,9 +126,7 @@ export fn getRemovedNodeLength(index: usize) usize {
 
 /// Calling route renderCycle will mark eveything as dirty
 export fn callRouteRenderCycle(ptr: [*:0]u8) void {
-    Fabric.println("Calling route render cycle\n", .{});
     Fabric.renderCycle(ptr);
-    Fabric.println("Ending route render cycle\n", .{});
     Fabric.markChildrenDirty(Fabric.current_ctx.root.?);
     return;
 }
@@ -191,31 +196,131 @@ export fn allocate(size: usize) ?[*]f32 {
     return buf.ptr;
 }
 //
-const writer_t = *std.io.FixedBufferStream([]u8).Writer;
 // Global buffer to store the CSS string for returning to JavaScript
-var common_style_buffer: [4096]u8 = undefined;
+var common_style_buffer: [8192 * 6]u8 = undefined;
 var common_style: []const u8 = "";
 pub export fn getBaseStyles() ?[*]const u8 {
-    var fbs = std.io.fixedBufferStream(&common_style_buffer);
-    var writer = fbs.writer();
-    const base_styles = UIContext.base_styles[0..UIContext.base_style_count];
-    for (base_styles) |style| {
-        Fabric.generateStyle(null, &style);
-        writer.writeByte('.') catch return null;
-        writer.writeAll(style.style_id.?) catch return null;
-        writer.writeAll(" {\n") catch return null;
-        writer.writeAll(StyleCompiler.style_style) catch return null;
-        writer.writeAll("}\n") catch return null;
-    }
-
-    const len: usize = @intCast(fbs.getPos() catch 0);
-    common_style_buffer[len] = 0;
-    common_style = common_style_buffer[0..len];
+    // var fbs = std.io.fixedBufferStream(&common_style_buffer);
+    // var writer = fbs.writer();
+    // const base_styles = UIContext.base_styles[0..UIContext.base_style_count];
+    // var start: usize = 0;
+    // var end: usize = 0;
+    // var writer: Writer = undefined;
+    // for (base_styles) |style| {
+    //     var buffer: [4096]u8 = undefined;
+    //     writer.init(buffer[0..]);
+    //     writer.writeByte('.') catch |err| {
+    //         Fabric.printlnSrcErr("{any}", .{err}, @src());
+    //         return null;
+    //     };
+    //     writer.write(style.style_id.?) catch |err| {
+    //         Fabric.printlnSrcErr("{any}", .{err}, @src());
+    //         return null;
+    //     };
+    //     writer.write(" {\n") catch |err| {
+    //         Fabric.printlnSrcErr("{any}", .{err}, @src());
+    //         return null;
+    //     };
+    //     StyleCompiler.generateStylePass(null, &style, &writer);
+    //     writer.write("}\n") catch |err| {
+    //         Fabric.printlnSrcErr("{any}", .{err}, @src());
+    //         return null;
+    //     };
+    //     end += writer.pos;
+    //     @memcpy(common_style_buffer[start..end], buffer[0..writer.pos]);
+    //     start += writer.pos;
+    // }
+    //
+    // common_style_buffer[end] = 0;
+    // common_style = common_style_buffer[0..end];
     return common_style.ptr;
 }
 
 pub export fn getBaseStylesLen() usize {
     return common_style.len;
+}
+
+var animations_str: []const u8 = "";
+pub export fn getAnimationsPtr() ?[*]const u8 {
+    var animations = Fabric.animations.iterator();
+    var writer: Writer = undefined;
+    var buffer: [4096]u8 = undefined;
+    writer.init(&buffer);
+    while (animations.next()) |entry| {
+        const animation = entry.value_ptr.*;
+        writer.write("@keyframes ") catch {};
+        writer.write(animation._name) catch {};
+        writer.writeByte(' ') catch {};
+        writer.write("{\n") catch {};
+        // From
+        writer.write("from { ") catch {};
+        writer.write("transform: ") catch {};
+        switch (animation._type) {
+            .scaleY => {
+                writer.write("scaleY(") catch {};
+                writer.writeF32(animation.from_value) catch {};
+            },
+            .scaleX => {
+                writer.write("scaleX(") catch {};
+                writer.writeF32(animation.from_value) catch {};
+            },
+            .translateX => {
+                writer.write("translateX(") catch {};
+                writer.writeF32(animation.from_value) catch {};
+                writer.write("px") catch {};
+            },
+            .translateY => {
+                writer.write("translateY(") catch {};
+                writer.writeF32(animation.from_value) catch {};
+                writer.write("px") catch {};
+            },
+            else => {},
+        }
+        writer.write(");") catch {};
+        writer.write("}\n") catch {};
+
+        writer.write("to { ") catch {};
+        writer.write("transform: ") catch {};
+        switch (animation._type) {
+            .scaleY => {
+                writer.write("scaleY(") catch {};
+                writer.writeF32(animation.to_value) catch {};
+            },
+            .scaleX => {
+                writer.write("scaleX(") catch {};
+                writer.writeF32(animation.to_value) catch {};
+            },
+            .translateX => {
+                writer.write("translateX(") catch {};
+                writer.writeF32(animation.to_value) catch {};
+                writer.write("px") catch {};
+            },
+            .translateY => {
+                writer.write("translateY(") catch {};
+                writer.writeF32(animation.to_value) catch {};
+                writer.write("px") catch {};
+            },
+            else => {},
+        }
+        writer.write(");") catch {};
+        writer.write("}\n") catch {};
+        writer.write("}\n") catch {};
+    }
+    const len: usize = writer.pos;
+    buffer[len] = 0;
+    animations_str = buffer[0..len];
+    return animations_str.ptr;
+}
+
+pub export fn getAnimationsLen() usize {
+    return animations_str.len;
+}
+
+pub export fn hasExitAnimation(node_ptr: *UINode) bool {
+    if (node_ptr.animation_exit != null) {
+        return true;
+    }
+    return false;
 }
 
 pub export fn pendingClassesToAdd() void {
@@ -244,7 +349,7 @@ export fn cleanUp() void {
 export fn timeOutCtxCallback(id_ptr: [*:0]u8) void {
     const id = std.mem.span(id_ptr);
     defer Fabric.allocator_global.free(id);
-    const node = Fabric.callback_registry.get(id) orelse return;
+    const node = Fabric.callback_registry.get(hashKey(id)) orelse return;
     @call(.auto, node.data.runFn, .{&node.data});
 }
 
@@ -263,4 +368,12 @@ export fn resumeExecution(callbackId: u32) void {
         // Call the continuation function
         func();
     }
+}
+
+export fn getCSS() ?[*]const u8 {
+    return Fabric.generator.buffer[0..Fabric.generator.end].ptr;
+}
+
+export fn getCSSLen() usize {
+    return Fabric.generator.end;
 }

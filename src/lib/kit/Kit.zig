@@ -1,6 +1,6 @@
 const std = @import("std");
-const isWasi = true;
 const Fabric = @import("../Fabric.zig");
+const isWasi = Fabric.isWasi;
 
 pub const Kit = @This();
 
@@ -260,7 +260,7 @@ pub fn setWindowLocation(url: []const u8) void {
     if (isWasi) {
         setWindowLocationWasm(url.ptr, url.len);
     } else {
-        Fabric.printlnSrc("Attempted to reroute, but not wasi", .{url}, @src());
+        Fabric.printlnSrc("Attempted to reroute, but not wasi {s}", .{url}, @src());
     }
 }
 
@@ -273,7 +273,7 @@ pub fn navigate(path: []const u8) void {
     if (isWasi) {
         navigateWasm(path.ptr, path.len);
     } else {
-        Fabric.printlnSrc("Attempted to reroute, but not wasi", .{path}, @src());
+        Fabric.printlnSrc("Attempted to reroute, but not wasi {s}", .{path}, @src());
     }
 }
 
@@ -286,14 +286,18 @@ pub fn routePush(path: []const u8) void {
     if (isWasi) {
         routePushWASM(path.ptr, path.len);
     } else {
-        Fabric.printlnSrc("Attempted to reroute, but not wasi", .{path}, @src());
+        Fabric.printlnSrc("Attempted to reroute, but not wasi {s}", .{path}, @src());
     }
 }
 
 extern fn getWindowInformationWasm() [*:0]u8;
 
 pub fn getWindowPath() []const u8 {
-    return std.mem.span(getWindowInformationWasm());
+    if (isWasi) {
+        return std.mem.span(getWindowInformationWasm());
+    } else {
+        return "";
+    }
 }
 
 extern fn getWindowParamsWasm() [*:0]u8;

@@ -2,20 +2,28 @@ const std = @import("std");
 const Fabric = @import("Fabric.zig");
 const UINode = @import("UITree.zig").UINode;
 const ElementType = @import("types.zig").ElementType;
+const Writer = @import("Writer.zig");
 
+var hasher = std.hash.Wyhash.init(5213);
+var buf_128: [128]u8 = undefined;
+var writer: Writer = undefined;
 pub const KeyGenerator = struct {
     // Thread-local call counter that resets each render cycle
-    threadlocal var call_counter: usize = 0;
+    var call_counter: usize = 0;
+    var component_index: usize = 0;
 
     // Call this at the beginning of each render cycle
     pub fn resetCounter() void {
         call_counter = 0;
     }
 
-
     // Call this at the beginning of each render cycle
     pub fn incrementCount() void {
         call_counter += 1;
+    }
+
+    pub fn incrementComponentCount() void {
+        component_index += 1;
     }
 
     // Call this at the beginning of each render cycle
@@ -23,13 +31,20 @@ pub const KeyGenerator = struct {
         return call_counter;
     }
 
+    pub fn getComponentCount() usize {
+        return component_index;
+    }
+
     // Call this at the beginning of each render cycle
     pub fn setCount(count: usize) void {
         call_counter = count;
     }
 
+    pub fn setComponentCount(count: usize) void {
+        component_index = count;
+    }
+
     pub fn generateCommonStyleKey(ids: []const []const u8, allocator: *std.mem.Allocator) []const u8 {
-        var hasher = std.hash.Wyhash.init(0);
 
         // Hash all the IDs in order
         for (ids) |id| {
@@ -41,7 +56,62 @@ pub const KeyGenerator = struct {
 
         // Convert to UUID-like string (128-bit represented as hex)
         const result = std.fmt.allocPrint(allocator.*, "common-{x:0>16}", .{hash}) catch |err| {
-            std.log.err("Could not allocate common style key: {any}", .{err});
+            Fabric.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
+            return "fallback-common-key";
+        };
+
+        return result;
+    }
+
+    pub fn generateStyleKey(tag: []const u8, ids: []const []const u8, allocator: *std.mem.Allocator) []const u8 {
+
+        // Hash all the IDs in order
+        for (ids) |id| {
+            hasher.update(id);
+        }
+
+        // Generate the final hash
+        const hash = hasher.final();
+
+        // Convert to UUID-like string (128-bit represented as hex)
+        const result = std.fmt.allocPrint(allocator.*, "{s}-{x:0>16}", .{ tag, hash }) catch |err| {
+            Fabric.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
+            return "fallback-common-key";
+        };
+
+        return result;
+    }
+
+    pub fn hashKey(key: []const u8) u32 {
+        var h: u32 = 5381;
+        for (key) |char| {
+            h = ((h << 5) +% h) +% char;
+        }
+        h = h *% 2654435761;
+        return h;
+    }
+
+    pub fn generateHashKey(
+        buf: []u8,
+        hash: u32,
+        tag: []const u8,
+    ) []const u8 {
+        writer.init(&buf_128);
+        writer.write(tag) catch "";
+        writer.writeByte('-') catch "";
+        writer.writeU32(hash) catch "";
+        const key = writer.buffer[0..writer.pos];
+        @memcpy(buf[0..key.len], key);
+        return buf[0..key.len];
+    }
+
+    pub fn generateHashKeyAlloc(
+        allocator: *std.mem.Allocator,
+        hash: u32,
+        tag: []const u8,
+    ) []const u8 {
+        const result = std.fmt.allocPrint(allocator.*, "{s}-{any}", .{ tag, hash }) catch |err| {
+            Fabric.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
             return "fallback-common-key";
         };
 
@@ -49,74 +119,30 @@ pub const KeyGenerator = struct {
     }
 
     pub fn generateKey(
+        uuid_buf: []u8,
         elem_type: ElementType,
         parent_key: []const u8,
-        props: anytype,
         index: ?usize,
-        node: *UINode,
-        allocator: *std.mem.Allocator,
     ) []const u8 {
-        // Increment call counter for each component creation
-        const current_count = call_counter;
-        call_counter += 1;
-
-        var hasher = std.hash.Wyhash.init(0);
-
-        // Include the type name in the hash
+        // call_counter += 1;
+        // component_index += 1;
+        writer.init(&buf_128);
         const tag_name = @tagName(elem_type);
-        hasher.update(tag_name);
-
-        // Include parent key in the hash for hierarchical stability
-        hasher.update(parent_key);
-
-        // Include the call counter position for this render cycle
-        var count_buf: [16]u8 = undefined;
-        const count_str = std.fmt.bufPrint(&count_buf, "{d}", .{current_count}) catch &count_buf;
-        hasher.update(count_str);
-
-        // If we have an index (for lists), include it
+        writer.write(tag_name) catch "";
+        writer.write(parent_key) catch "";
+        writer.writeUsize(call_counter) catch "";
         if (index) |idx| {
-            var buf: [16]u8 = undefined;
-            const idx_str = std.fmt.bufPrint(&buf, "{d}", .{idx}) catch &buf;
-            hasher.update(idx_str);
+            writer.writeUsize(idx) catch "";
         }
-
-        // Hash important prop values if available
-        if (props != null and @hasField(@TypeOf(props.?), "uuid")) {
-            if (@TypeOf(props.uuid) == []const u8) {
-                hasher.update(props.key);
-            } else {
-                // For numeric or other key types, convert to string first
-                var buf: [32]u8 = undefined;
-                const key_str = std.fmt.bufPrint(&buf, "{any}", .{props.uuid}) catch &buf;
-                hasher.update(key_str);
-            }
-        }
-
-        // Generate the final hash
-        const hash = hasher.final();
-
-        // Convert hash to a readable string
-        var buf: [48]u8 = undefined;
-        const key = std.fmt.bufPrint(&buf, "{x}_{s}_{d}", .{ hash, tag_name[0..@min(4, tag_name.len)], current_count }) catch &buf;
-
-        // Allocate permanent storage for the key
-        if (node.dynamic == .animation and node.style.?.animation != null) {
-            const result = std.fmt.allocPrint(allocator.*, "animation-{s}-genk", .{key}) catch |err| {
-                Fabric.println("Could not alloc new key {any}", .{err});
-                unreachable;
-            };
-            return result;
-        } else {
-            const result = std.fmt.allocPrint(allocator.*, "{s}-genk", .{key}) catch |err| {
-                Fabric.println("Could not alloc new key {any}", .{err});
-                unreachable;
-            };
-            return result;
-        }
-        // const result = allocator.alloc(u8, key.len) catch return "fallback_key";
-        // @memcpy(result, key);
-
+        const hash = hashKey(writer.buffer[0..writer.pos]);
+        writer.reset();
+        writer.writeU32(hash) catch "";
+        writer.writeByte('_') catch "";
+        writer.write(tag_name[0..@min(4, tag_name.len)]) catch "";
+        writer.write("-genk") catch "";
+        const key = writer.buffer[0..writer.pos];
+        @memcpy(uuid_buf[0..key.len], key);
+        return uuid_buf[0..key.len];
     }
 
     // Similar update for generateListItemKey
@@ -128,8 +154,6 @@ pub const KeyGenerator = struct {
         // Increment call counter for each component creation
         const current_count = call_counter;
         call_counter += 1;
-
-        var hasher = std.hash.Wyhash.init(0);
 
         // Include parent key in the hash
         hasher.update(parent_key);

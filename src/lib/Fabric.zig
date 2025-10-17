@@ -1,6 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
-pub const isWasi = true;
+pub const isWasi = builtin.target.cpu.arch == .wasm32;
+pub const debug = builtin.mode == .Debug;
+// We cant use bools since they get recompiled each time, hence we use the builtin target
+pub var isGenerated = !isWasi;
 const types = @import("types.zig");
 const UIContext = @import("UITree.zig");
 const PureTree = @import("PureTree.zig");
@@ -20,12 +23,15 @@ const getVisualStyle = @import("convertStyleCustomWriter.zig").getVisualStyle;
 const Bridge = @import("Bridge.zig");
 const Event = @import("Event.zig");
 const Canopy = @import("Canopy.zig");
+const CSSGenerator = @import("CSSGenerator.zig");
+const hashKey = utils.hashKey;
+const Pool = @import("Pool.zig");
 
 const DebugLevel = enum(u8) { all = 0, debug = 1, info = 2, warn = 3, none = 4 };
 
 pub const build_options = struct {
-    enable_debug: bool = true,
-    debug_level: DebugLevel = .all,
+    enable_debug: bool = debug,
+    debug_level: DebugLevel = .none,
 }{};
 // const getFocusStyle = @import("convertFocus.zig").getFocusStyle;
 // const getFocusWithinStyle = @import("convertFocusWithin.zig").getFocusWithinStyle;
@@ -49,9 +55,6 @@ const Debugger = @import("Debugger.zig");
 
 pub const Component = fn (void) void;
 
-const print = std.debug.print;
-pub const stdout = std.io.getStdOut().writer();
-
 const EventType = types.EventType;
 const Active = types.Active;
 pub const ElementDecl = types.ElementDeclaration;
@@ -59,17 +62,18 @@ const RenderCommand = types.RenderCommand;
 pub const ElementType = types.ElementType;
 const Hover = types.Hover;
 const Focus = types.Focus;
+pub var has_context: bool = false;
 pub var current_ctx: *UIContext = undefined;
 pub var pure_tree: PureTree = undefined;
 pub var error_tree: PureTree = undefined;
-pub var ctx_map: std.StringHashMap(*UIContext) = undefined;
-pub var page_map: std.StringHashMap(*const fn () void) = undefined;
+pub var ctx_map: std.AutoHashMap(u32, *UIContext) = undefined;
+pub var page_map: std.AutoHashMap(u32, void) = undefined;
 const LayoutItem = struct {
     reset: bool = false,
     call_fn: *const fn (*const fn () void) void,
 };
-pub var layout_map: std.StringHashMap(LayoutItem) = undefined;
-pub var page_deinit_map: std.StringHashMap(*const fn () void) = undefined;
+pub var layout_map: std.AutoHashMap(u32, LayoutItem) = undefined;
+pub var page_deinit_map: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var global_rerender: bool = false;
 pub var has_dirty: bool = false;
 pub var rerender_everything: bool = false;
@@ -77,6 +81,19 @@ pub var grain_rerender: bool = false;
 pub var grain_element_uuid: []const u8 = "";
 pub var current_depth_node_id: []const u8 = "";
 pub var router: Router = undefined;
+pub var packed_visuals: std.AutoHashMap(u32, *const types.PackedVisual) = undefined;
+pub var packed_layouts: std.AutoHashMap(u32, *const types.PackedLayout) = undefined;
+pub var packed_positions: std.AutoHashMap(u32, *const types.PackedPosition) = undefined;
+pub var packed_margins_paddings: std.AutoHashMap(u32, *const types.PackedMarginsPaddings) = undefined;
+pub var packed_animations: std.AutoHashMap(u32, *const types.PackedAnimations) = undefined;
+pub var packed_interactives: std.AutoHashMap(u32, *const types.PackedInteractive) = undefined;
+pub var packed_layouts_pool: std.heap.MemoryPool(types.PackedLayout) = undefined;
+pub var packed_positions_pool: std.heap.MemoryPool(types.PackedPosition) = undefined;
+pub var packed_margins_paddings_pool: std.heap.MemoryPool(types.PackedMarginsPaddings) = undefined;
+pub var packed_visuals_pool: std.heap.MemoryPool(types.PackedVisual) = undefined;
+pub var packed_animations_pool: std.heap.MemoryPool(types.PackedAnimations) = undefined;
+pub var packed_interactives_pool: std.heap.MemoryPool(types.PackedInteractive) = undefined;
+
 var serious_error: bool = false;
 
 const Fabric = @This();
@@ -106,7 +123,9 @@ pub fn getWindowPath() []const u8 {
 }
 
 pub fn setLocalStorageString(key: []const u8, value: []const u8) void {
-    Wasm.setLocalStorageStringWasm(key.ptr, key.len, value.ptr, value.len);
+    if (isWasi) {
+        Wasm.setLocalStorageStringWasm(key.ptr, key.len, value.ptr, value.len);
+    }
 }
 
 pub fn persist(key: []const u8, value: anytype) void {
@@ -124,47 +143,59 @@ pub fn getPersistBytes(key: []const u8) ?[]const u8 {
 }
 
 pub fn getPersist(comptime T: type, key: []const u8) ?T {
-    switch (T) {
-        i32 => return Wasm.getLocalStorageI32Wasm(key.ptr, key.len),
-        u32 => return Wasm.getLocalStorageU32Wasm(key.ptr, key.len),
-        usize => return Wasm.getLocalStorageUIntWasm(key.ptr, key.len),
-        f32 => return Wasm.getLocalStorageF32Wasm(key.ptr, key.len),
-        []const u8 => {
-            const value = Wasm.getLocalStorageStringWasm(key.ptr, key.len);
-            const value_string = std.mem.span(value);
-            if (std.mem.eql(u8, value_string, "null")) {
+    if (isWasi) {
+        switch (T) {
+            i32 => return Wasm.getLocalStorageI32Wasm(key.ptr, key.len),
+            u32 => return Wasm.getLocalStorageU32Wasm(key.ptr, key.len),
+            usize => return Wasm.getLocalStorageUIntWasm(key.ptr, key.len),
+            f32 => return Wasm.getLocalStorageF32Wasm(key.ptr, key.len),
+            []const u8 => {
+                const value = Wasm.getLocalStorageStringWasm(key.ptr, key.len);
+                const value_string = std.mem.span(value);
+                if (std.mem.eql(u8, value_string, "null")) {
+                    return null;
+                } else {
+                    return value_string;
+                }
+            },
+            else => {
+                Fabric.printlnErr("Cannot get non string or int float types", .{});
                 return null;
-            } else {
-                return value_string;
-            }
-        },
-        else => {
-            Fabric.printlnErr("Cannot get non string or int float types", .{});
-            return null;
-        },
+            },
+        }
     }
+    return null;
 }
 
 pub fn removePersist(key: []const u8) void {
-    Wasm.removeLocalStorageWasm(key.ptr, key.len);
-}
-
-pub fn getLocalStorageString(key: []const u8) ?[]const u8 {
-    const value = Wasm.getLocalStorageStringWasm(key.ptr, key.len);
-    const value_string = std.mem.span(value);
-    if (std.mem.eql(u8, value_string, "null")) {
-        return null;
-    } else {
-        return value_string;
+    if (isWasi) {
+        Wasm.removeLocalStorageWasm(key.ptr, key.len);
     }
 }
 
+pub fn getLocalStorageString(key: []const u8) ?[]const u8 {
+    if (isWasi) {
+        const value = Wasm.getLocalStorageStringWasm(key.ptr, key.len);
+        const value_string = std.mem.span(value);
+        if (std.mem.eql(u8, value_string, "null")) {
+            return null;
+        } else {
+            return value_string;
+        }
+    }
+    return null;
+}
+
 pub fn removeLocalStorage(key: []const u8) void {
-    Wasm.removeLocalStorageWasm(key.ptr, key.len);
+    if (isWasi) {
+        Wasm.removeLocalStorageWasm(key.ptr, key.len);
+    }
 }
 
 pub fn setLocalStorageNumber(key: []const u8, value: u32) void {
-    Wasm.setLocalStorageNumberWasm(key.ptr, key.len, value);
+    if (isWasi) {
+        Wasm.setLocalStorageNumberWasm(key.ptr, key.len, value);
+    }
 }
 
 pub const Action = struct {
@@ -177,16 +208,116 @@ pub const NodeProto = *const fn (*Node) void;
 
 pub const Node = struct { data: Action };
 
-pub var btn_registry: std.StringHashMap(*const fn () void) = undefined;
-pub var time_out_registry: std.StringHashMap(*const fn () void) = undefined;
-pub var ctx_registry: std.StringHashMap(*Node) = undefined;
+const UniformCallbackFn = fn (context: anyopaque) void;
+
+pub fn ArgsTuple(comptime Fn: type) type {
+    const out = std.meta.ArgsTuple(Fn);
+    return if (std.meta.fields(out).len == 0) @TypeOf(.{}) else out;
+}
+
+const Options = struct {
+    ArgsT: ?type = null,
+};
+
+const UniformClosure = struct {
+    // Func: type,
+    // ArgsT: type,
+    // /// If the function this signature represents is compile-time known,
+    // /// it can be held here.
+    // func_ptr: ?type = null,
+    //
+    // Pointer to the actual function to be called.
+    func: ?*anyopaque = null,
+    // Type-erased pointer to the arguments for that function.
+    context: *anyopaque,
+    // A function pointer to correctly deallocate the context.
+    // deinit_context_fn: fn (allocator: std.mem.Allocator, context: anyopaque) void,
+
+    // This is the single, non-generic run function.
+    pub fn run(self: *const UniformClosure) void {
+        @call(.auto, self.func, .{self.context});
+    }
+
+    // // Step 4
+    // // Here we pass the func and determine the args type
+    // // here we check if the Func passed is a type or a function itself
+    // pub fn init(comptime Func: anytype, options: Options) Signature {
+    //     const FuncT = if (@TypeOf(Func) == type) Func else @TypeOf(Func);
+    //     return .{
+    //         .Func = FuncT,
+    //         .YieldT = options.YieldT,
+    //         .InjectT = options.InjectT,
+    //         // ArgsT is the options if set, in our case options is .{}
+    //         // hence we set the type of ArgsT to FuncT arguments
+    //         .ArgsT = options.ArgsT orelse ArgsTuple(FuncT),
+    //         // Here we set the val to the Func itselft so pub "fn incr() void {}" for example
+    //         .func_ptr = if (@TypeOf(Func) == type) null else struct {
+    //             const val = Func;
+    //         },
+    //     };
+    // }
+};
+
+// This is the Node that will be stored in your registry.
+const CtxNode = struct {
+    // ... other node data
+    closure: UniformClosure,
+};
+
+// A generic function to register any callback.
+pub fn registerCallback(
+    // The UI element's ID (we'll change this to u32 later).
+    id: []const u8,
+    // The actual function the user wants to call.
+    comptime func: anytype,
+    // The arguments for that function.
+    args: anytype,
+) !void {
+    // 1. Define a type for the arguments' pointer.
+    const Args = @TypeOf(args);
+    const PtrArgs = *const Args;
+
+    // 2. Allocate memory for the arguments and copy them over.
+    const args_ptr = try Fabric.allocator_global.create(Args);
+    args_ptr.* = args;
+
+    // 3. Create the wrapper function that matches our uniform signature.
+    // This wrapper casts the `anyopaque` back to the correct type.
+    const wrapperFn = struct {
+        fn run(context: anyopaque) void {
+            const typed_context: PtrArgs = @ptrCast(@alignCast(context));
+            @call(.auto, func, typed_context.*);
+        }
+    }.run;
+
+    // 5. Create the UniformClosure instance.
+    const closure = UniformClosure{
+        .func = wrapperFn,
+        .context = args_ptr,
+    };
+
+    // 6. Create the FabricNode instance.
+    const node_with_closure = try Fabric.allocator_global.create(CtxNode);
+    node_with_closure.* = CtxNode{
+        .closure = closure,
+        // ... other node data
+    };
+
+    // Now you would create your FabricNode and put it in the registry.
+    try Fabric.ctx_registry.put(id, node_with_closure);
+    // ...
+}
+
+pub var btn_registry: std.AutoHashMap(u32, *const fn () void) = undefined;
+pub var time_out_registry: std.AutoHashMap(u32, *const fn () void) = undefined;
+pub var ctx_registry: std.AutoHashMap(u32, *Node) = undefined;
 pub var time_out_ctx_registry: std.AutoHashMap(usize, *Node) = undefined;
-pub var callback_registry: std.StringHashMap(*Node) = undefined;
+pub var callback_registry: std.AutoHashMap(u32, *Node) = undefined;
 pub var fetch_registry: std.AutoHashMap(u32, *Kit.FetchNode) = undefined;
 pub var events_callbacks: std.AutoHashMap(u32, *const fn (*Event) void) = undefined;
 pub var events_inst_callbacks: std.AutoHashMap(u32, *EvtInstNode) = undefined;
 pub var hooks_inst_callbacks: std.AutoHashMap(u32, *HookInstNode) = undefined;
-pub var mounted_funcs: std.StringHashMap(*const fn () void) = undefined;
+pub var mounted_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var mounted_ctx_funcs: std.array_list.Managed(*Node) = undefined;
 pub var created_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var updated_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
@@ -204,7 +335,7 @@ pub var classes_to_add: std.array_list.Managed(Class) = undefined;
 pub var classes_to_remove: std.array_list.Managed(Class) = undefined;
 pub var component_subscribers: std.array_list.Managed(*Rune.ComponentNode) = undefined;
 // pub var grain_subs: std.array_list.Managed(*GrainStruct.ComponentNode) = undefined;
-pub var motions: std.array_list.Managed(Animation.Motion) = undefined;
+pub var animations: std.StringHashMap(Animation) = undefined;
 // Define a type for continuation functions
 var callback_count: u32 = 0;
 const ContinuationFn = *const fn () void;
@@ -222,40 +353,48 @@ pub var frame_arena: FrameAllocator = undefined;
 pub const FabricConfig = struct {
     screen_width: f32,
     screen_height: f32,
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     page_node_count: usize = 256,
 };
 
-sw: f32,
-sh: f32,
-allocator: *std.mem.Allocator,
-
-pub fn init(target: *Fabric, config: FabricConfig) void {
+pub var pool: Pool = undefined;
+pub fn init(config: FabricConfig) void {
     // Init the frame allocator;
-    frame_arena = FrameAllocator.init(config.allocator.*);
+    // This adds 500B
+    frame_arena = FrameAllocator.init(config.allocator);
     // The persistent allocator is used for the Initialization of the registries as these persist over the lifetime of the program.
-    const allocator = frame_arena.persistentAllocator();
-    allocator_global = config.allocator.*;
+    var allocator = frame_arena.persistentAllocator();
+    allocator_global = config.allocator;
 
-    // Init Router
-    router.init(config.allocator) catch |err| {
+    // Init Router // This adds 1kb
+    router.init(&allocator) catch |err| {
         println("Could not init Router {any}\n", .{err});
     };
 
-    target.* = .{
-        .sw = config.screen_width,
-        .sh = config.screen_height,
-        .allocator = config.allocator,
-    };
     browser_width = config.screen_width;
     browser_height = config.screen_height;
     page_node_count = config.page_node_count;
 
+    // >1kb
+    initPackedData(allocator);
+    initPools(allocator);
+    // 20kb
     initRegistries(allocator);
+    // >1kb
     initCalls(allocator);
+    // >1kb
     initContextData(allocator);
 
-    motions = std.array_list.Managed(Animation.Motion).init(allocator);
+    UIContext.ui_nodes = allocator.alloc(UINode, config.page_node_count) catch unreachable;
+
+    // Init string pool
+    pool = Pool.init(allocator, 1024) catch |err| {
+        printlnErr("Could not init Pool {any}\n", .{err});
+        unreachable;
+    };
+    pool.initFreelist();
+
+    animations = std.StringHashMap(Animation).init(allocator);
     component_subscribers = std.array_list.Managed(*Rune.ComponentNode).init(allocator);
     removed_nodes = std.array_list.Managed(RemovedNode).init(allocator);
     // grain_subs = std.array_list.Managed(*GrainStruct.ComponentNode).init(allocator);
@@ -263,9 +402,9 @@ pub fn init(target: *Fabric, config: FabricConfig) void {
     classes_to_remove = std.array_list.Managed(Class).init(allocator);
 
     // Init Context Data
-    Reconciler.node_map = std.StringHashMap(usize).init(allocator);
+    Reconciler.node_map = std.AutoHashMap(u32, usize).init(allocator);
 
-    // Reconciliation styles dedupe
+    // Reconciliation styles dedupe // this is 2kb
     UIContext.nodes = allocator.alloc(*UINode, config.page_node_count) catch unreachable;
     UIContext.seen_nodes = allocator.alloc(bool, config.page_node_count) catch unreachable;
     UIContext.common_nodes = allocator.alloc(usize, config.page_node_count) catch unreachable;
@@ -274,15 +413,20 @@ pub fn init(target: *Fabric, config: FabricConfig) void {
     UIContext.common_size_uuids = allocator.alloc([]const u8, config.page_node_count) catch unreachable;
     UIContext.base_styles = allocator.alloc(Style, config.page_node_count) catch unreachable;
     @memset(UIContext.seen_nodes, false);
+    @memset(UIContext.base_styles, Style{});
     @memset(UIContext.common_nodes, 0);
 
+    // @memset(UIContext.common_nodes, 0);
     for (0..continuations.len) |i| {
         continuations[i] = null;
     }
 
+    // this adds 7kb
     _ = getStyle(null); // 16kb
     _ = getVisualStyle(null, 0); // 20kb
-    _ = Bridge.getRenderTreePtr();
+    if (isWasi) {
+        _ = Bridge.getRenderTreePtr();
+    }
     // _ = getFocusStyle(null); // 20kb
     // _ = getFocusWithinStyle(null); // 20kb
     // this adds 4kb
@@ -298,11 +442,11 @@ pub fn init(target: *Fabric, config: FabricConfig) void {
 }
 
 fn initRegistries(persistent_allocator: std.mem.Allocator) void {
-    btn_registry = std.StringHashMap(*const fn () void).init(persistent_allocator);
-    time_out_registry = std.StringHashMap(*const fn () void).init(persistent_allocator);
-    ctx_registry = std.StringHashMap(*Node).init(persistent_allocator); // this adds like 30kb
+    btn_registry = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
+    time_out_registry = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
+    ctx_registry = std.AutoHashMap(u32, *Node).init(persistent_allocator); // this adds like 30kb
     time_out_ctx_registry = std.AutoHashMap(usize, *Node).init(persistent_allocator);
-    callback_registry = std.StringHashMap(*Node).init(persistent_allocator);
+    callback_registry = std.AutoHashMap(u32, *Node).init(persistent_allocator);
     fetch_registry = std.AutoHashMap(u32, *Kit.FetchNode).init(persistent_allocator);
 }
 
@@ -310,7 +454,7 @@ fn initCalls(persistent_allocator: std.mem.Allocator) void {
     events_callbacks = std.AutoHashMap(u32, *const fn (*Event) void).init(persistent_allocator);
     events_inst_callbacks = std.AutoHashMap(u32, *EvtInstNode).init(persistent_allocator);
     hooks_inst_callbacks = std.AutoHashMap(u32, *HookInstNode).init(persistent_allocator);
-    mounted_funcs = std.StringHashMap(*const fn () void).init(persistent_allocator);
+    mounted_funcs = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
     mounted_ctx_funcs = std.array_list.Managed(*Node).initCapacity(persistent_allocator, 32) catch |err| {
         println("Could not init Ctx Hooks {any}\n", .{err});
         return;
@@ -321,18 +465,30 @@ fn initCalls(persistent_allocator: std.mem.Allocator) void {
 }
 
 fn initContextData(persistent_allocator: std.mem.Allocator) void {
-    ctx_map = std.StringHashMap(*UIContext).init(persistent_allocator);
-    page_map = std.StringHashMap(*const fn () void).init(persistent_allocator);
-    layout_map = std.StringHashMap(LayoutItem).init(persistent_allocator);
-    page_deinit_map = std.StringHashMap(*const fn () void).init(persistent_allocator);
-    UIContext.key_depth_map = std.StringHashMap(usize).init(persistent_allocator);
+    ctx_map = std.AutoHashMap(u32, *UIContext).init(persistent_allocator);
+    page_map = std.AutoHashMap(u32, void).init(persistent_allocator);
+    layout_map = std.AutoHashMap(u32, LayoutItem).init(persistent_allocator);
+    page_deinit_map = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
+    UIContext.key_depth_map = std.AutoHashMap(u32, usize).init(persistent_allocator);
+    UIContext.component_index_map = std.AutoHashMap(u32, usize).init(persistent_allocator);
 }
 
-pub fn deinit(_: *Fabric) void {
-    println("Deinitializeing\n", .{});
-    for (component_subscribers.items) |node| {
-        node.data.deinitFn(node);
-    }
+fn initPackedData(persistent_allocator: std.mem.Allocator) void {
+    packed_visuals = std.AutoHashMap(u32, *const types.PackedVisual).init(persistent_allocator);
+    packed_layouts = std.AutoHashMap(u32, *const types.PackedLayout).init(persistent_allocator);
+    packed_positions = std.AutoHashMap(u32, *const types.PackedPosition).init(persistent_allocator);
+    packed_margins_paddings = std.AutoHashMap(u32, *const types.PackedMarginsPaddings).init(persistent_allocator);
+    packed_animations = std.AutoHashMap(u32, *const types.PackedAnimations).init(persistent_allocator);
+    packed_interactives = std.AutoHashMap(u32, *const types.PackedInteractive).init(persistent_allocator);
+}
+
+fn initPools(persistent_allocator: std.mem.Allocator) void {
+    packed_layouts_pool = std.heap.MemoryPool(types.PackedLayout).init(persistent_allocator);
+    packed_positions_pool = std.heap.MemoryPool(types.PackedPosition).init(persistent_allocator);
+    packed_margins_paddings_pool = std.heap.MemoryPool(types.PackedMarginsPaddings).init(persistent_allocator);
+    packed_visuals_pool = std.heap.MemoryPool(types.PackedVisual).init(persistent_allocator);
+    packed_animations_pool = std.heap.MemoryPool(types.PackedAnimations).init(persistent_allocator);
+    packed_interactives_pool = std.heap.MemoryPool(types.PackedInteractive).init(persistent_allocator);
 }
 
 /// The LifeCycle struct
@@ -364,18 +520,18 @@ pub const LifeCycle = struct {
     }
 };
 
-var last_time: i64 = 0;
-/// throttle is used to throttle the render cycle
-/// we can pass a delay in ms, if the time since the last render cycle is less than the delay, we return true
-/// otherwise we return false
-pub fn throttle(delay: u32) bool {
-    const current_time = std.time.milliTimestamp();
-    if (current_time - last_time < delay) {
-        return true;
-    }
-    last_time = current_time;
-    return false;
-}
+// var last_time: i64 = 0;
+// /// throttle is used to throttle the render cycle
+// /// we can pass a delay in ms, if the time since the last render cycle is less than the delay, we return true
+// /// otherwise we return false
+// pub fn throttle(delay: u32) bool {
+//     const current_time = std.time.milliTimestamp();
+//     if (current_time - last_time < delay) {
+//         return true;
+//     }
+//     last_time = current_time;
+//     return false;
+// }
 
 /// Force rerender forces the entire dom tree to check props of all dynamic and pure components and rerender the ui
 /// since Fabric is built with zig and wasm, checking all props of 10000s of nodes and ui components is cheap
@@ -387,14 +543,14 @@ pub fn cycle() void {
     }
 }
 
-/// Force rerender forces the entire dom tree to check props of all dynamic and pure components and rerender the ui
-/// since Fabric is built with zig and wasm, checking all props of 10000s of nodes and ui components is cheap
-/// feel free to abuse force, its essentially a global signal
-pub fn cycleGrain() void {
-    Fabric.grain_rerender = true;
-    Fabric.println("Grain rerender", .{});
-    Wasm.requestRerenderWasm();
-}
+// /// Force rerender forces the entire dom tree to check props of all dynamic and pure components and rerender the ui
+// /// since Fabric is built with zig and wasm, checking all props of 10000s of nodes and ui components is cheap
+// /// feel free to abuse force, its essentially a global signal
+// pub fn cycleGrain() void {
+//     Fabric.grain_rerender = true;
+//     Fabric.println("Grain rerender", .{});
+//     Wasm.requestRerenderWasm();
+// }
 
 /// Force rerender forces the entire dom tree to check props and rerender the entire ui
 /// since Fabric is built with zig and wasm, checking all props of 10000s of nodes and ui components is cheap
@@ -423,19 +579,6 @@ pub fn addRoute(
     try router.addRoute(path, page);
     return;
 }
-const LayoutFn = *const fn (*const fn () void) void;
-pub const PageFn = *const fn () void;
-
-// Generic function to call nested layouts based on route segments
-const NestedCall = struct {
-    segments: []const []const u8,
-    page: PageFn,
-    call_fn: PageFn = @This().call,
-
-    pub fn call() void {
-        callNestedLayouts(@This().segments);
-    }
-};
 
 var route_segments: [][]const u8 = undefined;
 var deepest_reset_layout: ?LayoutItem = null;
@@ -446,7 +589,7 @@ fn findResetLayout() void {
     var potential_path: []const u8 = "";
     for (route_segments, 0..) |segment, i| {
         potential_path = std.fmt.allocPrint(allocator_global, "{s}/{s}", .{ potential_path, segment }) catch return;
-        const target_layout = layout_map.get(potential_path) orelse continue;
+        const target_layout = layout_map.get(hashKey(potential_path)) orelse continue;
         if (target_layout.reset) {
             deepest_reset_layout = target_layout;
             deepest_reset_layout_path = potential_path;
@@ -469,14 +612,18 @@ fn callNestedLayouts() void {
             deepest_reset_layout_path = "";
             layout_fn(render_page);
         } else {
+            // TODO: This is taking a lot of time we need to create a better hashmap system, currently the hashmap compare
+            // with the node is long and slow
+            // const time = nowMs();
             render_page();
+            // Fabric.println("Render time {any}", .{nowMs() - time});
         }
         return;
     }
 
     // Get the current layout
     next_layout_path_to_check = std.fmt.allocPrint(allocator_global, "{s}/{s}", .{ next_layout_path_to_check, route_segments[0] }) catch return;
-    if (layout_map.get(next_layout_path_to_check)) |entry| {
+    if (layout_map.get(hashKey(next_layout_path_to_check))) |entry| {
         const layout_path = next_layout_path_to_check; // "/root" or "/root/docs"
         const layout_fn = entry.call_fn;
         // We check if the layout path and current path are the same
@@ -498,19 +645,23 @@ fn callNestedLayouts() void {
 
 pub var clean_up_ctx: *UIContext = undefined;
 var current_route: []const u8 = "/root";
+var previous_route: []const u8 = "/root";
 var render_page: *const fn () void = undefined;
+pub var generator: CSSGenerator = undefined;
 pub fn renderCycle(route_ptr: [*:0]u8) void {
+    pool.resetFreeList();
+    // const time = nowMs();
     frame_arena.beginFrame(); // For double-buffered approach
     const route = std.mem.span(route_ptr);
     current_route = route;
     UIContext.key_depth_map.clearRetainingCapacity();
-    Fabric.btn_registry.clearRetainingCapacity();
+    // Fabric.btn_registry.clearRetainingCapacity();
     // Fabric.mounted_funcs.clearRetainingCapacity();
 
     var ctx_itr = ctx_registry.iterator();
     while (ctx_itr.next()) |entry| {
-        const node = entry.value_ptr.*;
-        node.data.deinitFn(node);
+        _ = entry.value_ptr.*;
+        // node.data.deinitFn(node);
     }
     ctx_registry.clearRetainingCapacity();
 
@@ -524,7 +675,7 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     const old_route = router.searchRoute(route) orelse {
         printlnWithColor("No Router found {s}\n", .{route}, "#FF3029", "ERROR");
         printlnWithColor("Loading Error Page\n", .{}, "#FF3029", "ERROR");
-        renderErrorPage(route);
+        // renderErrorPage(route);
         return;
     };
     render_page = old_route.page;
@@ -542,12 +693,12 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
         return;
     };
 
-    new_ctx.root.?.style = old_ctx.root.?.style;
+    // new_ctx.root.?.style = old_ctx.root.?.style;
     new_ctx.root.?.uuid = old_ctx.root.?.uuid;
 
     // Pure tree is attached to the traversal algo, ie itll be updated when the traversal algo is updated
-    pure_tree.init(new_ctx.root.?, &allocator_global) catch {};
-    error_tree.init(new_ctx.root.?, &allocator_global) catch {};
+    // pure_tree.init(new_ctx.root.?, &allocator_global) catch {};
+    // error_tree.init(new_ctx.root.?, &allocator_global) catch {};
     current_ctx = new_ctx;
     var route_itr = std.mem.tokenizeScalar(u8, route, '/');
     var count: usize = 0;
@@ -562,34 +713,49 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
         count += 1;
     }
 
+    // Init the generator
+    generator.init();
     next_layout_path_to_check = "";
     // We call the routes and nested layuts
+    // This finds the reset layout, if it exists
     findResetLayout();
-    callNestedLayouts();
+    // This calls the render tree, with render_page as the root function call
+    // First it traverses the layouts calling them in order, and then it calls the render_page
+    callNestedLayouts(); // 4.5ms
+    // Fabric.println("Traverse time {any}", .{nowMs() - time});
+
     // We reconcile the new dom
     // the reason the fabric-debugger gets remvoed is the new ui tree does not include it;
-    Reconciler.reconcile(old_ctx, new_ctx);
-    // We iterate over the new dom and generate our pure tree  !!! we need to imrpove this perf wise
-    iterateChildren(new_ctx.root.?);
-    // we call debugger to determine the nodes that were updated
-    Debugger.render();
-    if (Debugger.old_debugger_node == null and Debugger.show_debugger) {
-        // Here new_debugger_node is not null
-        markChildrenDirty(Debugger.new_debugger_node.?);
-        Debugger.old_debugger_node = Debugger.new_debugger_node;
-        Fabric.has_dirty = true;
-    } else if (!Debugger.show_debugger) {
-        // Here new_debugger_node is null
-        removed_nodes.append(.{ .uuid = "fabric-debugger", .index = 0 }) catch {};
-        Debugger.old_debugger_node = null;
-    } else if (Debugger.old_debugger_node != null and Debugger.new_debugger_node != null and !rerender_everything) {
-        Reconciler.reconcileDebug(Debugger.old_debugger_node.?, Debugger.new_debugger_node.?);
-        Debugger.old_debugger_node = Debugger.new_debugger_node;
-        // printUITree(Debugger.new_debugger_node.?);
-    }
+    // printUITree(old_ctx.root.?);
+    // printUITree(new_ctx.root.?);
+    Reconciler.reconcile(old_ctx, new_ctx); // 3kb
+    // // We iterate over the new dom and generate our pure tree  !!! we need to imrpove this perf wise
+    // iterateChildren(new_ctx.root.?);
+    // // we call debugger to determine the nodes that were updated
+    // Debugger.render();
+    // if (Debugger.old_debugger_node == null and Debugger.show_debugger) {
+    //     // Here new_debugger_node is not null
+    //     markChildrenDirty(Debugger.new_debugger_node.?);
+    //     Debugger.old_debugger_node = Debugger.new_debugger_node;
+    //     Fabric.has_dirty = true;
+    // } else if (!Debugger.show_debugger) {
+    //     // Here new_debugger_node is null
+    //     removed_nodes.append(.{ .uuid = "fabric-debugger", .index = 0 }) catch {};
+    //     Debugger.old_debugger_node = null;
+    // } else if (Debugger.old_debugger_node != null and Debugger.new_debugger_node != null and !rerender_everything) {
+    //     Reconciler.reconcileDebug(Debugger.old_debugger_node.?, Debugger.new_debugger_node.?);
+    //     Debugger.old_debugger_node = Debugger.new_debugger_node;
+    //     // printUITree(Debugger.new_debugger_node.?);
+    // }
 
     // We generate the render commands tree
     endPage(new_ctx);
+    if (!std.mem.eql(u8, previous_route, current_route)) {
+        Fabric.has_dirty = true;
+    }
+
+    // generator.traverse(new_ctx.root.?);
+    // generator.printCSS();
 
     // Replace old context with new context in the map
     clean_up_ctx = old_ctx;
@@ -604,6 +770,7 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     if (build_options.enable_debug and build_options.debug_level == .all) {
         frame_arena.printStats();
     }
+    previous_route = current_route;
     // Clean up the old context
 }
 
@@ -642,7 +809,7 @@ fn renderErrorPage(route: []const u8) void {
     endPage(new_ctx);
 
     // Reconcile between old and new
-    Reconciler.reconcile(old_ctx, new_ctx);
+    // Reconciler.reconcile(old_ctx, new_ctx);
 
     // Replace old context with new context in the map
     clean_up_ctx = old_ctx;
@@ -656,7 +823,10 @@ fn renderErrorPage(route: []const u8) void {
 
     allocator_global.free(route); // return host‑allocated buffer
 }
-pub fn createPage(style: ?*const Style, path: []const u8, page: fn () void, page_deinit: ?fn () void) !void {
+pub fn createPage(path: []const u8, page: fn () void, page_deinit: ?fn () void) !void {
+    if (isWasi) {
+        has_context = true;
+    }
     const path_ctx: *UIContext = try allocator_global.create(UIContext);
     // Initial render
     UIContext.initContext(path_ctx) catch |err| {
@@ -664,17 +834,20 @@ pub fn createPage(style: ?*const Style, path: []const u8, page: fn () void, page
         return;
     };
 
-    if (style) |s| {
-        path_ctx.stack.?.ptr.?.style = s.*;
-        path_ctx.root.?.style = s.*;
-        path_ctx.root.?.uuid = s.id orelse path_ctx.root.?.uuid;
-    }
+    // if (style) |s| {
+    //     // path_ctx.stack.?.ptr.?.style = s.*;
+    //     // path_ctx.root.?.style = s.*;
+    //     path_ctx.root.?.uuid = s.id orelse path_ctx.root.?.uuid;
+    // }
 
     current_ctx = path_ctx;
-    try pure_tree.init(path_ctx.root.?, &allocator_global);
-    try error_tree.init(path_ctx.root.?, &allocator_global);
+    // try pure_tree.init(path_ctx.root.?, &allocator_global);
+    // try error_tree.init(path_ctx.root.?, &allocator_global);
 
     router.addRoute(path, path_ctx, page) catch |err| {
+        println("Could not put route {any}\n", .{err});
+    };
+    page_map.put(hashKey(path), {}) catch |err| {
         println("Could not put route {any}\n", .{err});
     };
     if (page_deinit) |de| {
@@ -684,7 +857,14 @@ pub fn createPage(style: ?*const Style, path: []const u8, page: fn () void, page
     }
     return;
 }
-
+extern fn performance_now() f64; // imported from JS, for example
+pub fn nowMs() f64 {
+    if (isWasi) {
+        return performance_now();
+    } else {
+        return 0;
+    }
+}
 pub fn endPage(path_ctx: *UIContext) void {
     path_ctx.endContext();
     // TODO: We need to finish the layout engine for working with IOS
@@ -692,7 +872,15 @@ pub fn endPage(path_ctx: *UIContext) void {
     // Canopy.calcWidth(path_ctx);
     // printUITree(path_ctx.root.?);
 
-    // UIContext.reconcileStyles(path_ctx.root.?);
+    // This adds 2kb
+    // UIContext.reconcileStyles();
+    generator.writeAllStyles();
+    // @memset(UIContext.seen_nodes, false);
+    // UIContext.target_node_index = 0;
+    // UIContext.reconcileSizes(path_ctx.root.?);
+    // @memset(UIContext.seen_nodes, false);
+    // UIContext.target_node_index = 0;
+    // UIContext.reconcileVisuals(path_ctx.root.?);
     path_ctx.traverse();
 }
 
@@ -714,7 +902,7 @@ pub fn end(fabric: *Fabric) !void {
 
 // Okay so we need to change the node in the tree depending on the page route
 // for example we add the commads tree to the router tree
-pub inline fn Page(src: std.builtin.SourceLocation, page: fn () void, page_deinit: ?fn () void, style: ?*const Style) void {
+pub fn Page(src: std.builtin.SourceLocation, page: fn () void, page_deinit: ?fn () void) void {
     const allocator = std.heap.page_allocator;
     const full_route = src.file;
     var itr = std.mem.tokenizeScalar(u8, full_route[7..], '/');
@@ -755,7 +943,7 @@ pub inline fn Page(src: std.builtin.SourceLocation, page: fn () void, page_deini
         return;
     };
 
-    createPage(style, route, page, page_deinit) catch |err| {
+    createPage(route, page, page_deinit) catch |err| {
         println("Could not add page {any}\n", .{err});
         return;
     };
@@ -767,12 +955,12 @@ const LayoutOptions = struct {
 pub fn registerLayout(path: []const u8, layout: fn (*const fn () void) void, options: LayoutOptions) !void {
     if (std.mem.eql(u8, path, "/root")) return error.CannotRegisterRootPath;
     if (std.mem.eql(u8, path, "/")) {
-        layout_map.put("/root", .{ .call_fn = layout, .reset = options.reset }) catch |err| {
+        layout_map.put(hashKey("/root"), .{ .call_fn = layout, .reset = options.reset }) catch |err| {
             printlnSrcErr("Could not add layout to registry {}", .{err}, @src());
         };
     } else {
         const layout_route = std.fmt.allocPrint(allocator_global, "/root{s}", .{path}) catch return;
-        layout_map.put(layout_route, .{ .call_fn = layout, .reset = options.reset }) catch |err| {
+        layout_map.put(hashKey(layout_route), .{ .call_fn = layout, .reset = options.reset }) catch |err| {
             printlnSrcErr("Could not add layout to registry {}", .{err}, @src());
         };
     }
@@ -787,7 +975,9 @@ pub const HooksFuncs = struct {
 pub const HooksCtxFuncs = enum { mounted };
 
 pub fn toggleTheme() void {
-    Wasm.toggleThemeWasm();
+    if (isWasi) {
+        Wasm.toggleThemeWasm();
+    }
 }
 
 /// This function creates an eventListener on the element.
@@ -986,7 +1176,9 @@ pub inline fn eventListener(
     };
 
     const event_type_str: []const u8 = std.enums.tagName(types.EventType, event_type) orelse return;
-    Wasm.createEventListener(event_type_str.ptr, event_type_str.len, id);
+    if (isWasi) {
+        Wasm.createEventListener(event_type_str.ptr, event_type_str.len, id);
+    }
     return;
 }
 
@@ -995,6 +1187,7 @@ pub fn markChildrenDirty(node: *UINode) void {
     if (node.parent != null) {
         node.dirty = true;
     }
+    if (!node.can_have_children) return;
     for (node.children.items) |child| {
         markChildrenDirty(child);
     }
@@ -1004,25 +1197,188 @@ pub fn markChildrenNotDirty(node: *UINode) void {
     if (node.parent != null) {
         node.dirty = false;
     }
+    if (!node.can_have_children) return;
     for (node.children.items) |child| {
         markChildrenNotDirty(child);
     }
 }
 
-fn printUITree(node: *UINode) void {
-    println("UI: {any} {s}", .{ node.box_sizing.?.width, node.uuid });
+var buffer: [5_000_000]u8 = undefined;
+var writer: std.Io.Writer = undefined;
+var generated_file: std.fs.File = undefined;
+pub fn generateTextData() void {
+    generated_file = std.fs.cwd().createFile("dist/text_data.json", .{}) catch unreachable;
+    defer generated_file.close();
+    var page_itr = page_map.iterator();
+    _ = generated_file.write("{\n") catch unreachable;
+    while (page_itr.next()) |entry| {
+        writer = std.io.Writer.fixed(&buffer);
+        const route = entry.key_ptr.*;
+        const size = generated_file.getPos() catch unreachable;
+        if (size > 10) {
+            _ = writer.write(",\n") catch unreachable;
+        }
+        printUIRouteTree(route);
+        _ = generated_file.write(writer.buffer[0..writer.end]) catch unreachable;
+    }
+    _ = generated_file.write("}\n") catch unreachable;
+    // writer.flush() catch unreachable;
+    // isGenerated = true;
+}
+pub fn printUIRouteTree(route: u32) void {
+    frame_arena.beginFrame(); // For double-buffered approach
+    current_route = route;
+    UIContext.key_depth_map.clearRetainingCapacity();
+    // Fabric.btn_registry.clearRetainingCapacity();
+    // Fabric.mounted_funcs.clearRetainingCapacity();
+
+    ctx_registry.clearRetainingCapacity();
+
+    mounted_ctx_funcs.clearRetainingCapacity();
+
+    // Get the old context for current route
+    const old_route = router.searchRoute(route) orelse {
+        printlnWithColor("No Router found {s}\n", .{route}, "#FF3029", "ERROR");
+        printlnWithColor("Loading Error Page\n", .{}, "#FF3029", "ERROR");
+        return;
+    };
+    render_page = old_route.page;
+    const old_ctx = current_ctx;
+    // Create new context
+    const new_ctx: *UIContext = allocator_global.create(UIContext) catch {
+        println("Failed to allocate UIContext\n", .{});
+        return;
+    };
+
+    UIContext.initContext(new_ctx) catch |err| {
+        println("Allocator ran out of space {any}\n", .{err});
+        new_ctx.deinit();
+        allocator_global.destroy(new_ctx);
+        return;
+    };
+
+    new_ctx.root.?.style = old_ctx.root.?.style;
+    new_ctx.root.?.uuid = old_ctx.root.?.uuid;
+
+    // Pure tree is attached to the traversal algo, ie itll be updated when the traversal algo is updated
+    // pure_tree.init(new_ctx.root.?, &allocator_global) catch {};
+    // error_tree.init(new_ctx.root.?, &allocator_global) catch {};
+    // Here we set the current_ctx to the new_ctx
+    current_ctx = new_ctx;
+    var route_itr = std.mem.tokenizeScalar(u8, route, '/');
+    var count: usize = 0;
+    while (route_itr.next()) |_| {
+        count += 1;
+    }
+    route_segments = allocator_global.alloc([]const u8, count) catch return;
+    count = 0;
+    route_itr.reset();
+    while (route_itr.next()) |route_token| {
+        route_segments[count] = route_token;
+        count += 1;
+    }
+
+    next_layout_path_to_check = "";
+    // We call the routes and nested layuts
+    // This finds the reset layout, if it exists
+    findResetLayout();
+    // This calls the render tree, with render_page as the root function call
+    // First it traverses the layouts calling them in order, and then it calls the render_page
+    callNestedLayouts(); // 4.5ms
+
+    // We reconcile the new dom
+    // the reason the fabric-debugger gets remvoed is the new ui tree does not include it;
+
+    // const valid_route = replace_dash(current_route) catch unreachable;
+    // defer allocator_global.free(valid_route);
+
+    writer.print("\"{s}\":", .{current_route}) catch unreachable;
+    writer.writeAll("{\n") catch unreachable;
+    printStaticTextNode(new_ctx.root.?);
+    writer.writeAll("}\n") catch unreachable;
+}
+
+pub fn printUITree(node: *UINode) void {
+    if (node.dirty and std.mem.eql(u8, node.uuid, "3708577890_Html-genk")) {
+        println("UI: {s}", .{node.uuid});
+    }
     for (node.children.items) |child| {
         printUITree(child);
     }
 }
 
+pub fn escapeForJson(input: []const u8) ![]u8 {
+    var list = std.array_list.Managed(u8).init(allocator_global);
+
+    for (input) |c| {
+        switch (c) {
+            '"' => {
+                // Add backslash before quote: → \"
+                try list.append('\\');
+                try list.append('"');
+            },
+            '\\' => {
+                // Optional: also escape existing backslashes → \\
+                try list.append('\\');
+                try list.append('\\');
+            },
+            '\n' => {
+                // Optional: also escape existing backslashes → \\
+                continue;
+            },
+            else => {
+                try list.append(c);
+            },
+        }
+    }
+
+    return list.toOwnedSlice();
+}
+
+pub fn replace_dash(input: []const u8) ![]u8 {
+    var list = std.array_list.Managed(u8).init(allocator_global);
+
+    for (input) |c| {
+        switch (c) {
+            '/' => {
+                // Add backslash before quote: → \"
+                try list.append('-');
+            },
+            else => {
+                try list.append(c);
+            },
+        }
+    }
+
+    return list.toOwnedSlice();
+}
+
+fn printStaticTextNode(node: *UINode) void {
+    if (node.state_type == .static) blk: {
+        var valid_text: []const u8 = "";
+        if (node.text) |text| {
+            valid_text = escapeForJson(text) catch unreachable;
+        } else if (node.href) |href| {
+            valid_text = escapeForJson(href) catch unreachable;
+        } else break :blk;
+        defer allocator_global.free(valid_text);
+        if (writer.end > current_route.len + 10) {
+            _ = writer.write(",\n") catch unreachable;
+        }
+        writer.print("\"{s}\":\"{s}\"", .{ node.uuid, valid_text }) catch unreachable;
+    }
+    for (node.children.items) |child| {
+        printStaticTextNode(child);
+    }
+}
+
 fn iterateChildren(node: *UINode) void {
-    if (node.dynamic == .pure) {
+    if (node.state_type == .pure) {
         const pure_node = pure_tree.createNode(node) catch return;
         Fabric.pure_tree.openNode(pure_node) catch return;
     }
 
-    if (node.dynamic == .err) {
+    if (node.state_type == .err) {
         const error_node = error_tree.createNode(node) catch return;
         Fabric.error_tree.openNode(error_node) catch return;
     }
@@ -1030,10 +1386,10 @@ fn iterateChildren(node: *UINode) void {
     for (node.children.items) |child| {
         iterateChildren(child);
     }
-    if (node.dynamic == .pure and node.parent != null) {
+    if (node.state_type == .pure and node.parent != null) {
         _ = pure_tree.popStack();
     }
-    if (node.dynamic == .err and node.parent != null) {
+    if (node.state_type == .err and node.parent != null) {
         _ = error_tree.popStack();
     }
 }
@@ -1077,6 +1433,10 @@ pub var layout_info = packed struct {
     focus_within_size: u32,
     focus_within_offset: u32,
     render_type_offset: u32,
+    tooltip_size: u32,
+    tooltip_offset: u32,
+    changed_style_offset: u32,
+    changed_props_offset: u32,
 }{
     .render_command_size = @sizeOf(RenderCommand),
 
@@ -1103,44 +1463,27 @@ pub var layout_info = packed struct {
     .focus_within_offset = @offsetOf(RenderCommand, "focus_within"),
     .focus_within_size = @sizeOf(Focus),
     .render_type_offset = @offsetOf(RenderCommand, "render_type"),
+    .tooltip_size = @sizeOf(types.Tooltip),
+    .tooltip_offset = @offsetOf(RenderCommand, "tooltip"),
+    .changed_style_offset = @offsetOf(RenderCommand, "changed_style"),
+    .changed_props_offset = @offsetOf(RenderCommand, "changed_props"),
 };
 
-pub fn transparentize(hex_str: []const u8, alpha: u8) [4]u8 {
-    var rgba: [4]u8 = undefined;
-    // rgba = allocator.alloc(u8, 4) catch return .{ 0, 0, 0, 255 };
-
-    // Parse red component
-    const r = std.fmt.parseInt(u8, hex_str[1..3], 16) catch return .{ 0, 0, 0, 255 };
-    rgba[0] = r;
-
-    // Parse green component
-    const g = std.fmt.parseInt(u8, hex_str[3..5], 16) catch return .{ 0, 0, 0, 255 };
-    rgba[1] = g;
-
-    // Parse blue component
-    const b = std.fmt.parseInt(u8, hex_str[5..7], 16) catch return .{ 0, 0, 0, 255 };
-    rgba[2] = b;
-
-    // Set alpha to 1.0
-    rgba[3] = alpha;
-
-    return rgba;
-}
 // Make sure this function is not evaluated at compile time
-pub fn hexToRgba(hex_str: []const u8) [4]u8 {
-    if (hex_str.len < 7 or hex_str[0] != '#') return .{ 0, 0, 0, 255 };
+pub fn hexToRgba(hex_str: []const u8) [4]f32 {
+    if (hex_str.len < 7 or hex_str[0] != '#') return .{ 0, 0, 0, 1 };
 
     // Parse at runtime instead of compile-time
-    var r: u8 = 0;
-    var g: u8 = 0;
-    var b: u8 = 0;
+    var r: f32 = 0;
+    var g: f32 = 0;
+    var b: f32 = 0;
 
     // Manual hex parsing to avoid compile-time evaluation issues
-    r = parseHexByte(hex_str[1..3]) catch 0;
-    g = parseHexByte(hex_str[3..5]) catch 0;
-    b = parseHexByte(hex_str[5..7]) catch 0;
+    r = @floatFromInt(parseHexByte(hex_str[1..3]) catch 0);
+    g = @floatFromInt(parseHexByte(hex_str[3..5]) catch 0);
+    b = @floatFromInt(parseHexByte(hex_str[5..7]) catch 0);
 
-    return .{ r, g, b, 255 };
+    return .{ r, g, b, 1 };
 }
 
 fn parseHexByte(hex: []const u8) !u8 {
@@ -1180,15 +1523,15 @@ pub fn printlnErr(
     comptime fmt: []const u8,
     args: anytype,
 ) void {
-    const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
-    const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%cERROR%c] {s}", .{buf[0..]}) catch return;
     if (isWasi and build_options.enable_debug) {
+        const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
+        const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%cERROR%c] {s}", .{buf[0..]}) catch return;
         const style_1 = "color: #FF3029;";
         const style_2 = "";
         _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
+        allocator_global.free(buf_with_src);
+        allocator_global.free(buf);
     }
-    allocator_global.free(buf_with_src);
-    allocator_global.free(buf);
 }
 
 pub fn printlnSrcErr(
@@ -1196,15 +1539,15 @@ pub fn printlnSrcErr(
     args: anytype,
     src: std.builtin.SourceLocation,
 ) void {
-    const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
-    const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%c{s}:{d}%c]\n[Fabric] [ERROR] {s}", .{ src.file, src.line, buf[0..] }) catch return;
     if (isWasi and build_options.enable_debug) {
+        const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
+        const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%c{s}:{d}%c]\n[Fabric] [ERROR] {s}", .{ src.file, src.line, buf[0..] }) catch return;
         const style_1 = "color: #FF3029;";
         const style_2 = "";
         _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
+        allocator_global.free(buf_with_src);
+        allocator_global.free(buf);
     }
-    allocator_global.free(buf_with_src);
-    allocator_global.free(buf);
 }
 
 pub fn printlnWithColor(
@@ -1231,12 +1574,11 @@ fn convertColorToString(color: Types.Color) []const u8 {
 }
 
 fn rgbaToString(rgba: Types.Rgba) []const u8 {
-    const alpha = @as(f32, @floatFromInt(rgba.a)) / 255.0;
     return std.fmt.allocPrint(allocator_global, "rgba({d},{d},{d},{d})", .{
         rgba.r,
         rgba.g,
         rgba.b,
-        alpha,
+        rgba.a,
     }) catch return "";
 }
 
@@ -1245,16 +1587,16 @@ pub fn printlnColor(
     args: anytype,
     color: Types.Color,
 ) void {
-    const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
-    const color_buf = std.fmt.allocPrint(allocator_global, "color: {s};", .{convertColorToString(color)}) catch return;
-    const buf_with_src = std.fmt.allocPrint(allocator_global, "%c{s}%c", .{buf[0..]}) catch return;
-    const style_2 = "";
     if (isWasi and build_options.enable_debug) {
+        const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
+        const color_buf = std.fmt.allocPrint(allocator_global, "color: {s};", .{convertColorToString(color)}) catch return;
+        const buf_with_src = std.fmt.allocPrint(allocator_global, "%c{s}%c", .{buf[0..]}) catch return;
+        const style_2 = "";
         _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, color_buf[0..].ptr, color_buf.len, style_2[0..].ptr, style_2.len);
+        allocator_global.free(buf_with_src);
+        allocator_global.free(color_buf);
+        allocator_global.free(buf);
     }
-    allocator_global.free(buf_with_src);
-    allocator_global.free(color_buf);
-    allocator_global.free(buf);
 }
 
 pub fn printlnAllocation(
@@ -1275,27 +1617,30 @@ pub fn printlnSrc(
     args: anytype,
     src: std.builtin.SourceLocation,
 ) void {
-    const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
-    const buf_with_src = std.fmt.allocPrint(allocator_global, "[%c{s}:{d}%c]\n[MSG] {s}", .{ src.file, src.line, buf[0..] }) catch return;
-    const style_1 = "color: #3CE98A;";
-    const style_2 = "";
     if (isWasi and build_options.enable_debug) {
+        const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
+        const buf_with_src = std.fmt.allocPrint(allocator_global, "[%c{s}:{d}%c]\n[MSG] {s}", .{ src.file, src.line, buf[0..] }) catch return;
+        const style_1 = "color: #3CE98A;";
+        const style_2 = "";
         _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
+        allocator_global.free(buf_with_src);
+        allocator_global.free(buf);
     }
-    allocator_global.free(buf_with_src);
-    allocator_global.free(buf);
 }
 
 pub fn println(
     comptime fmt: []const u8,
     args: anytype,
 ) void {
-    const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
     if (isWasi and build_options.enable_debug) {
+        const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
         _ = Wasm.consoleLogWasm(buf.ptr, buf.len);
+        allocator_global.free(buf);
+    } else if (!isWasi) {
+        std.debug.print(fmt, args);
     }
-    allocator_global.free(buf);
 }
+
 pub fn addToClassesList(id: []const u8, style_id: []const u8) void {
     const clta = Class{ .element_id = id, .style_id = style_id };
     classes_to_add.append(clta) catch |err| {
@@ -1423,7 +1768,9 @@ pub fn createCallback(cb: *const fn () void) void {
 
 pub const Clipboard = struct {
     pub fn copy(text: []const u8) void {
-        Wasm.copyTextWasm(text.ptr, text.len);
+        if (isWasi) {
+            Wasm.copyTextWasm(text.ptr, text.len);
+        }
     }
     fn paste(_: []const u8) void {}
 };

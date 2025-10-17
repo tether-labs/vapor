@@ -12,7 +12,7 @@ const Fabric = @import("Fabric.zig");
 pub inline fn FlexBox(comptime T: type, signal: *Signal(T), style: Style) fn (void) void {
     const elem_decl = ElementDecl{
         .style = style,
-        .dynamic = .grain,
+        .state_type = .grain,
         .elem_type = .FlexBox,
     };
 
@@ -27,7 +27,7 @@ pub inline fn FlexBox(comptime T: type, signal: *Signal(T), style: Style) fn (vo
 pub inline fn Text(signal: *Signal([]const u8), style: Style) void {
     const elem_decl = ElementDecl{
         .style = style,
-        .dynamic = .grain,
+        .state_type = .grain,
         .elem_type = .Text,
         .text = signal.get(),
     };
@@ -48,7 +48,7 @@ pub inline fn Icon(grain_props: GrainProps, style: Style) void {
         .href = grain_props.signal.get(),
         .elem_type = .Icon,
         .style = style,
-        .dynamic = .grain,
+        .state_type = .grain,
     };
     const ui_node = LifeCycle.open(elem_decl) orelse return;
     LifeCycle.configure(elem_decl);

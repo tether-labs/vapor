@@ -12,6 +12,10 @@ const LifeCycle = Fabric.LifeCycle;
 const Static = @import("Static.zig");
 const Binded = @import("Binded.zig");
 const Types = @import("types.zig");
+const IconTokens = @import("user_config").IconTokens;
+const Color = types.Color;
+const utils = @import("utils.zig");
+const hashKey = utils.hashKey;
 
 const Style = types.Style;
 const EventType = types.EventType;
@@ -53,10 +57,10 @@ pub inline fn Icon(options: IconOptions) void {
     };
 
     const elem_decl = ElementDecl{
-        .href = options.icon_name,
+        ._href = options.icon_name,
         .elem_type = .Icon,
         .style = options.style,
-        .dynamic = .pure,
+        .state_type = .pure,
     };
 
     // if (style.style_id == null) {
@@ -84,9 +88,9 @@ pub inline fn Header(text: []const u8, size: HeaderSize, style: Style) void {
 
     var elem_decl = ElementDecl{
         .style = style,
-        .dynamic = .pure,
+        .state_type = .pure,
         .elem_type = .Header,
-        .text = text,
+        ._text = text,
     };
     // const dimensions = measureText(text, &elem_decl.style);
     // // Make sure this is the right order of ops
@@ -174,7 +178,7 @@ pub inline fn Draggable(element: *Element, style: Style) fn (void) void {
 
     var elem_decl = ElementDecl{
         .style = style,
-        .dynamic = .pure,
+        .state_type = .pure,
         .elem_type = .Draggable,
     };
 
@@ -462,21 +466,56 @@ pub fn VirtualList(comptime T: type) type {
 
 pub const ChainClose = struct {
     const Self = @This();
-    elem_type: Fabric.ElementType,
-    state_type: Types.StateType = .pure,
+    _elem_type: Fabric.ElementType,
+    _state_type: Types.StateType = .pure,
     _flex_type: FlexType = .Flex,
-    text: []const u8 = "",
-    href: []const u8 = "",
-    svg: []const u8 = "",
-    aria_label: ?[]const u8 = null,
+    _text: ?[]const u8 = null,
+    _href: ?[]const u8 = null,
+    _svg: []const u8 = "",
+    _aria_label: ?[]const u8 = null,
+    _options: ?ButtonOptions = null,
+    _input_params: ?*const InputParams = null,
+    _ui_node: ?*UINode = null,
+    _id: ?[]const u8 = null,
+    _style: ?*const Fabric.Style = null,
+
+    _animation_enter: ?*const Fabric.Animation = null,
+    _animation_exit: ?*const Fabric.Animation = null,
+
+    // Style props
+    _pos: ?types.Position = null,
+    _font_size: ?u8 = null,
+    _font_weight: ?usize = null,
+    _text_color: ?Color = null,
+    _padding: ?types.Padding = null,
+    _layout: ?types.Layout = null,
+    _background: ?types.Background = null,
+    _border: ?types.BorderGrouped = null,
+    _border_radius: ?types.BorderRadius = null,
+    _margin: ?types.Margin = null,
+    _size: ?types.Size = null,
+    _child_gap: ?u8 = null,
+    _text_decoration: ?types.TextDecoration = null,
+    _interactive: ?types.Interactive = null,
+    _transition: ?types.Transition = null,
+    _z_index: ?f32 = null,
+    _blur: ?u8 = null,
+    _direction: types.Direction = .row,
+    _list_style: ?types.ListStyle = null,
 
     pub fn Text(text: []const u8) Self {
-        return Self{ .elem_type = .Text, .text = text };
+        return Self{ .elem_type = .Text, ._text = if (Fabric.isGenerated) "" else text };
+    }
+
+    pub fn id(self: *const Self, element_id: []const u8) Self {
+        var new_self: Self = self.*;
+        new_self._id = element_id;
+        return new_self;
     }
 
     /// TextFmt takes a format string and a array of arguments and allocates a new string
     /// This string is handled by the Fabric engine and is not freed by the user
-    pub inline fn TextFmt(fmt: []const u8, args: anytype) Self {
+    pub fn TextFmt(comptime fmt: []const u8, args: anytype) Self {
         const allocator = Fabric.frame_arena.getFrameAllocator();
         const text = std.fmt.allocPrint(allocator, fmt, args) catch |err| {
             Fabric.printlnColor(
@@ -484,10 +523,10 @@ pub const ChainClose = struct {
                 \\FMT: {s}\n"
                 \\ARGS: {any}\n"
             , .{ err, fmt, args }, .hex("#FF3029"));
-            return Self{ .elem_type = .Text, .text = "ERROR", .state_type = .err };
+            return Self{ ._elem_type = .Text, ._text = "ERROR", ._state_type = .err };
         };
         Fabric.frame_arena.addBytesUsed(text.len);
-        return Self{ .elem_type = .TextFmt, .text = text };
+        return Self{ ._elem_type = .TextFmt, ._text = text };
     }
 
     /// TextFmt takes a format string and a array of arguments and allocates a new string
@@ -501,64 +540,325 @@ pub const ChainClose = struct {
             \\FMT: {s}
             \\ARGS: {any}
         , .{ error.CouldNotAllocate, fmt, args }, .hex("#FF3029"));
-        return Self{ .elem_type = .Text, .text = "ERROR", .state_type = .err };
+        return Self{ ._elem_type = .Text, ._text = "ERROR", ._state_type = .err };
         // };
         // Fabric.frame_arena.addBytesUsed(text.len);
-        // return Self{ .elem_type = .TextFmt, .text = text };
+        // return Self{ ._elem_type = .TextFmt, ._text = text };
+    }
+    pub fn Icon(token: *const IconTokens) Self {
+        if (Fabric.isWasi) {
+            return Self{ ._elem_type = .Icon, ._href = token.web orelse "" };
+        } else {
+            return Self{ ._elem_type = .Icon, ._href = token.svg orelse "" };
+        }
     }
 
-    pub fn Icon(name: []const u8) Self {
-        return Self{ .elem_type = .Icon, .href = name };
-    }
     pub fn Image(options: struct { src: []const u8 }) Self {
-        return Self{ .elem_type = .Image, .href = options.src };
+        return Self{ ._elem_type = .Image, ._href = options.src };
     }
 
     pub fn Svg(options: struct { svg: []const u8 }) Self {
-        return Self{ .elem_type = .Svg, .svg = options.svg };
+        return Self{ ._elem_type = .Svg, .svg = options.svg };
     }
 
-    pub inline fn style(self: *const Self, style_ptr: *const Fabric.Style) void {
-        const elem_decl = Fabric.ElementDecl{
-            .dynamic = self.state_type,
-            .elem_type = self.elem_type,
-            .text = self.text,
+    pub fn style(self: *const Self, style_ptr: *const Fabric.Style) void {
+        var elem_decl = Fabric.ElementDecl{
+            .state_type = self._state_type,
+            .elem_type = self._elem_type,
+            .text = self._text,
             .style = style_ptr,
-            .href = self.href,
-            .svg = self.svg,
-            .aria_label = self.aria_label,
+            .href = self._href,
+            .svg = self._svg,
+            .aria_label = self._aria_label,
         };
+
+        if (self._id) |_id| {
+            var mutable_style = style_ptr.*;
+            mutable_style.id = _id;
+            elem_decl.style = &mutable_style;
+        }
 
         _ = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
         Fabric.LifeCycle.configure(elem_decl);
         return Fabric.LifeCycle.close({});
     }
+
+    pub fn font(self: *const Self, font_size: i32, weight: ?u16, color: ?Color) Self {
+        var new_self: Self = self.*;
+        new_self._font_size = font_size;
+        new_self._font_weight = weight;
+        new_self._text_color = color;
+        return new_self;
+    }
+
+    pub fn pos(self: *const Self, position: types.Position) Self {
+        var new_self: Self = self.*;
+        new_self._pos = position;
+        return new_self;
+    }
+
+    pub fn zIndex(self: *const Self, z_index: ?f32) Self {
+        var new_self: Self = self.*;
+        new_self._z_index = z_index;
+        return new_self;
+    }
+
+    pub fn blur(self: *const Self, value: ?u32) Self {
+        var new_self: Self = self.*;
+        new_self._blur = value;
+        return new_self;
+    }
+
+    pub fn layout(self: *const Self, value: types.Layout) Self {
+        var new_self: Self = self.*;
+        new_self._layout = value;
+        return new_self;
+    }
+
+    pub fn background(self: *const Self, value: types.Background) Self {
+        var new_self: Self = self.*;
+        new_self._background = value;
+        return new_self;
+    }
+
+    pub fn textDecoration(self: *const Self, value: types.TextDecoration) Self {
+        var new_self: Self = self.*;
+        new_self._text_decoration = value;
+        return new_self;
+    }
+
+    pub fn hoverScale(self: *const Self) Self {
+        var new_self: Self = self.*;
+        new_self._interactive = .hover_scale();
+        return new_self;
+    }
+
+    pub fn hoverText(self: *const Self, color: Color) Self {
+        var new_self: Self = self.*;
+        new_self._interactive = .hover_text(color);
+        return new_self;
+    }
+
+    pub fn childGap(self: *const Self, value: u32) Self {
+        var new_self: Self = self.*;
+        new_self._child_gap = value;
+        return new_self;
+    }
+
+    pub fn padding(self: *const Self, value: types.Padding) Self {
+        var new_self: Self = self.*;
+        new_self._padding = value;
+        return new_self;
+    }
+
+    pub fn margin(self: *const Self, value: types.Margin) Self {
+        var new_self: Self = self.*;
+        new_self._margin = value;
+        return new_self;
+    }
+
+    pub fn size(self: *const Self, dim: types.Size) Self {
+        var new_self: Self = self.*;
+        new_self._size = dim;
+        return new_self;
+    }
+
+    pub fn width(self: *const Self, length: types.Sizing) Self {
+        var new_self: Self = self.*;
+        if (new_self._size == null) {
+            new_self._size = .{ .width = length };
+        } else {
+            new_self._size.?.width = length;
+        }
+        return new_self;
+    }
+
+    pub fn height(self: *const Self, length: types.Sizing) Self {
+        var new_self: Self = self.*;
+        if (new_self._size == null) {
+            new_self._size = .{ .height = length };
+        } else {
+            new_self._size.?.height = length;
+        }
+        return new_self;
+    }
+
+    pub fn border(self: *const Self, value: types.BorderGrouped) Self {
+        var new_self: Self = self.*;
+        new_self._border = value;
+        return new_self;
+    }
+
+    pub fn radius(self: *const Self, value: types.BorderRadius) Self {
+        var new_self: Self = self.*;
+        new_self._border_radius = value;
+        return new_self;
+    }
+
+    pub fn duration(self: *const Self, value: u32) Self {
+        var new_self: Self = self.*;
+        new_self._transition = .{ .duration = value };
+        return new_self;
+    }
+
+    pub fn direction(self: *const Self, value: types.Direction) Self {
+        var new_self: Self = self.*;
+        new_self._direction = value;
+        return new_self;
+    }
+
+    pub fn listStyle(self: *const Self, value: types.ListStyle) Self {
+        var new_self: Self = self.*;
+        new_self._list_style = value;
+        return new_self;
+    }
+
+    pub fn close(self: *const Self) void {
+        var mutable_style = Style{};
+        if (self._style) |style_ptr| {
+            mutable_style = style_ptr.*;
+        }
+        if (mutable_style.position == null) mutable_style.position = self._pos;
+        if (mutable_style.visual == null) mutable_style.visual = .{
+            .font_size = self._font_size,
+            .font_weight = self._font_weight,
+            .text_color = self._text_color,
+            .background = self._background,
+            .border = self._border,
+            .border_radius = self._border_radius,
+            .text_decoration = self._text_decoration,
+        };
+        if (mutable_style.interactive == null) mutable_style.interactive = self._interactive;
+        if (mutable_style.child_gap == null) mutable_style.child_gap = self._child_gap;
+        if (mutable_style.padding == null) mutable_style.padding = self._padding;
+        if (mutable_style.layout == null) mutable_style.layout = self._layout;
+        if (mutable_style.margin == null) mutable_style.margin = self._margin;
+        if (mutable_style.size == null) mutable_style.size = self._size;
+        if (mutable_style.transition == null) mutable_style.transition = self._transition;
+        if (mutable_style.z_index == null) mutable_style.z_index = self._z_index;
+        if (mutable_style.blur == null) mutable_style.blur = self._blur;
+        mutable_style.direction = self._direction;
+        mutable_style.list_style = self._list_style;
+
+        // if (self._tooltip) |_tooltip| {
+        //     elem_decl.tooltip = &_tooltip;
+        // }
+
+        if (self._flex_type == .Center) {
+            mutable_style.layout = .center;
+        } else if (self._flex_type == .Stack) {
+            mutable_style.direction = .column;
+        }
+
+        if (self._id) |_id| {
+            mutable_style.id = _id;
+        }
+
+        const elem_decl = Fabric.ElementDecl{
+            .elem_type = self._elem_type,
+            .state_type = self._state_type,
+            .text = self._text,
+            .style = &mutable_style,
+            .href = self._href,
+            .svg = self._svg,
+            .aria_label = self._aria_label,
+            .animation_enter = self._animation_enter,
+            .animation_exit = self._animation_exit,
+        };
+
+        if (self._elem_type != .CtxButton) {
+            const ui_node = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+            if (self._elem_type == .Button or self._elem_type == .ButtonCycle) {
+                if (self._options.?.on_press) |on_press| {
+                    Fabric.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
+                        println("Button Function Registry {any}\n", .{err});
+                    };
+                }
+            }
+        } else if (self._elem_type == .CtxButton) {
+            const ui_node = self._ui_node orelse unreachable;
+            if (elem_decl.style.?.style_id) |element_id| {
+                const kv = Fabric.ctx_registry.fetchRemove(hashKey(ui_node.uuid)) orelse unreachable;
+                Fabric.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
+                    println("Button Function Registry {any}\n", .{err});
+                    unreachable;
+                };
+            }
+        }
+
+        Fabric.LifeCycle.configure(elem_decl);
+        return Fabric.LifeCycle.close({});
+    }
+};
+
+const Tooltip = struct {
+    text: []const u8,
+    position: types.Position,
+    layout: types.Layout,
+    color: ?Fabric.Types.Color = null,
+    background: ?Fabric.Types.Background = null,
+    border: ?Fabric.Types.BorderGrouped = null,
+    delay: u32 = 300,
 };
 
 pub const Chain = struct {
     const Self = @This();
-    elem_type: Fabric.ElementType,
+    _elem_type: Fabric.ElementType,
     _flex_type: FlexType = .Flex,
-    text: []const u8 = "",
-    href: []const u8 = "",
-    svg: []const u8 = "",
-    aria_label: ?[]const u8 = null,
-    options: ?ButtonOptions = null,
+    _text: ?[]const u8 = null,
+    _href: ?[]const u8 = null,
+    _svg: []const u8 = "",
+    _aria_label: ?[]const u8 = null,
+    _options: ?ButtonOptions = null,
+    _input_params: ?*const InputParams = null,
     _ui_node: ?*UINode = null,
     _id: ?[]const u8 = null,
+    _style: ?*const Fabric.Style = null,
 
-    pub fn Icon(name: []const u8) Self {
-        return Self{ .elem_type = .Icon, .href = name };
+    _animation_enter: ?*const Fabric.Animation = null,
+    _animation_exit: ?*const Fabric.Animation = null,
+
+    // Style props
+    _pos: ?types.Position = null,
+    _font_size: ?u8 = null,
+    _font_weight: ?usize = null,
+    _text_color: ?Color = null,
+    _padding: ?types.Padding = null,
+    _layout: ?types.Layout = null,
+    _background: ?types.Background = null,
+    _border: ?types.BorderGrouped = null,
+    _border_radius: ?types.BorderRadius = null,
+    _margin: ?types.Margin = null,
+    _size: ?types.Size = null,
+    _child_gap: ?u8 = null,
+    _text_decoration: ?types.TextDecoration = null,
+    _interactive: ?types.Interactive = null,
+    _transition: ?types.Transition = null,
+    _z_index: ?i16 = null,
+    _blur: ?u32 = null,
+
+    // _tooltip: ?types.Tooltip = null,
+
+    pub fn TextArea(text: []const u8) Self {
+        return Self{ ._elem_type = .TextArea, ._text = text };
+    }
+
+    pub fn Label(text: []const u8, tag: []const u8) Self {
+        return Self{ ._elem_type = .Text, ._text = text, ._href = tag };
+    }
+
+    pub fn Input(params: InputParams) Self {
+        return Self{ ._elem_type = .Input, ._input_params = params, .style = style };
     }
 
     pub fn Button(options: ButtonOptions) Self {
-        return Self{ .elem_type = .Button, .aria_label = options.aria_label, .options = options };
+        return Self{ ._elem_type = .Button, ._aria_label = options.aria_label, ._options = options };
     }
 
     pub fn CtxButton(func: anytype, args: anytype) Self {
         const elem_decl = ElementDecl{
-            .dynamic = .pure,
-            .elem_type = .CtxButton,
+            .state_type = .static,
+            ._elem_type = .CtxButton,
         };
 
         const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
@@ -588,55 +888,161 @@ pub const Chain = struct {
             .arguments = args,
         };
 
-        Fabric.ctx_registry.put(ui_node.uuid, &closure.run_node) catch |err| {
+        Fabric.ctx_registry.put(hashKey(ui_node.uuid), &closure.run_node) catch |err| {
             println("Button Function Registry {any}\n", .{err});
             unreachable;
         };
 
-        return Self{ .elem_type = .CtxButton, ._ui_node = ui_node };
+        return Self{ ._elem_type = .CtxButton, ._ui_node = ui_node };
     }
 
     pub fn ButtonCycle(options: ButtonOptions) Self {
-        return Self{ .elem_type = .ButtonCycle, .aria_label = options.aria_label, .options = options };
+        return Self{ ._elem_type = .ButtonCycle, ._aria_label = options.aria_label, ._options = options };
     }
 
-    pub const Box = Self{ .elem_type = .FlexBox };
-    pub const Center = Self{ .elem_type = .FlexBox, ._flex_type = .Center };
-    pub const Stack = Self{ .elem_type = .FlexBox, ._flex_type = .Stack };
+    pub const Box = Self{ ._elem_type = .FlexBox };
+    pub const Center = Self{ ._elem_type = .FlexBox, ._flex_type = .Center };
+    pub const Stack = Self{ ._elem_type = .FlexBox, ._flex_type = .Stack };
+    pub const List = Self{ ._elem_type = .List };
+    pub const ListItem = Self{ ._elem_type = .ListItem };
 
     pub fn Link(options: struct { url: []const u8, aria_label: ?[]const u8 }) Self {
-        return Self{ .elem_type = .Link, .href = options.url, .aria_label = options.aria_label };
+        return Self{
+            ._elem_type = .Link,
+            ._aria_label = options.aria_label,
+            // ._href = options.url,
+            ._href = if (Fabric.isGenerated) "" else options.url,
+        };
+    }
+
+    pub fn RedirectLink(options: struct { url: []const u8, aria_label: ?[]const u8 }) Self {
+        return Self{
+            ._elem_type = .RedirectLink,
+            // ._href = options.url,
+            ._href = if (Fabric.isGenerated) "" else options.url,
+            ._aria_label = options.aria_label,
+        };
     }
 
     pub fn Image(options: struct { src: []const u8 }) Self {
-        return Self{ .elem_type = .Image, .href = options.src };
+        return Self{ ._elem_type = .Image, ._href = options.src };
     }
 
-    pub fn Svg(options: struct { svg: []const u8 }) Self {
-        return Self{ .elem_type = .Svg, .svg = options.svg };
-    }
-
-    pub inline fn id(self: *const Self, element_id: []const u8) Self {
+    pub fn id(self: *const Self, element_id: []const u8) Self {
         var new_self: Self = self.*;
         new_self._id = element_id;
         return new_self;
     }
 
-    pub inline fn bind(self: *const Self, element: *Element) *const Self {
+    pub fn bind(self: *const Self, element: *Element) *const Self {
         element._node_ptr = self._ui_node orelse unreachable;
         return self;
     }
 
-    pub inline fn style(self: *const Self, style_ptr: *const Fabric.Style) fn (void) void {
+    pub fn animationEnter(self: *const Self, animation_ptr: *const Fabric.Animation) Self {
+        var new_self: Self = self.*;
+        new_self._animation_enter = animation_ptr;
+        return new_self;
+    }
+
+    pub fn animationExit(self: *const Self, animation_ptr: *const Fabric.Animation) Self {
+        var new_self: Self = self.*;
+        new_self._animation_exit = animation_ptr;
+        return new_self;
+    }
+
+    // pub fn tooltip(self: *const Self, tool_tip: *const Tooltip) Self {
+    //     var new_self: Self = self.*;
+    //     var tooltip_style: Fabric.Style = .{
+    //         .layout = .center,
+    //         .position = .{ .type = .absolute },
+    //         .padding = .tblr(4, 4, 8, 8),
+    //         .visual = .{
+    //             .opacity = 0,
+    //             .font_size = 14,
+    //             .background = tool_tip.background,
+    //             ._text_color = tool_tip.color,
+    //             .border = tool_tip.border,
+    //         },
+    //         .transition = .{ .duration = tool_tip.delay, .properties = &.{.opacity} },
+    //         .white_space = .nowrap,
+    //     };
+    //
+    //     switch (tool_tip.position) {
+    //         .top => {
+    //             tooltip_style.position.?.bottom = .percent(100);
+    //             tooltip_style.margin = .b(8);
+    //             switch (tool_tip.layout) {
+    //                 .center => {
+    //                     tooltip_style.position.?.left = .percent(50);
+    //                     tooltip_style.visual.?.transform = .left_percent(-50); // Centers the tooltip horizontally
+    //                 },
+    //                 .start => {},
+    //                 .end => {},
+    //             }
+    //         },
+    //         .bottom => {
+    //             tooltip_style.position.?.top = .percent(125);
+    //         },
+    //         .left => {
+    //             tooltip_style.position.?.right = .percent(100);
+    //             tooltip_style.margin = .r(8);
+    //             switch (tool_tip.layout) {
+    //                 .center => {
+    //                     tooltip_style.position.?.top = .percent(50);
+    //                     tooltip_style.visual.?.transform = .top_percent(-50); // Centers the tooltip horizontally
+    //                 },
+    //                 .start => {},
+    //                 .end => {},
+    //             }
+    //         },
+    //         .right => {
+    //             tooltip_style.position.?.left = .percent(100);
+    //             tooltip_style.margin = .l(8);
+    //             switch (tool_tip.layout) {
+    //                 .center => {
+    //                     tooltip_style.position.?.top = .percent(50);
+    //                     tooltip_style.visual.?.transform = .top_percent(-50); // Centers the tooltip horizontally
+    //                 },
+    //                 .start => {},
+    //                 .end => {},
+    //             }
+    //         },
+    //     }
+    //
+    //     new_self._tooltip = types.Tooltip{
+    //         .text = tool_tip.text,
+    //         .style = tooltip_style,
+    //     };
+    //     return new_self;
+    // }
+
+    pub fn baseStyle(self: *const Self, style_ptr: *const Fabric.Style) Self {
+        var new_self: Self = self.*;
+        new_self._style = style_ptr;
+        return new_self;
+    }
+
+    /// This function takes a const pointer to a Style Struct, and returns the body function callback
+    /// This function is static, so any styles added via chaining methods will not be applied
+    /// Use baseStyle to keep all chained additions
+    pub fn style(self: *const Self, style_ptr: *const Fabric.Style) *const fn (void) void {
         var elem_decl = Fabric.ElementDecl{
-            .dynamic = .pure,
-            .elem_type = self.elem_type,
-            .text = self.text,
+            .state_type = .static,
+            .elem_type = self._elem_type,
+            .text = self._text,
             .style = style_ptr,
-            .href = self.href,
-            .svg = self.svg,
-            .aria_label = self.aria_label,
+            .href = self._href,
+            .svg = self._svg,
+            .aria_label = self._aria_label,
+            .input_params = self._input_params,
+            .animation_enter = self._animation_enter,
+            .animation_exit = self._animation_exit,
         };
+
+        // if (self._tooltip) |_tooltip| {
+        //     elem_decl.tooltip = &_tooltip;
+        // }
 
         if (self._flex_type == .Center) {
             // Create a mutable copy of the style struct
@@ -651,14 +1057,29 @@ pub const Chain = struct {
             elem_decl.style = &mutable_style;
         }
 
-        if (self.elem_type != .CtxButton) {
+        if (self._id) |_id| {
+            var mutable_style = style_ptr.*;
+            mutable_style.id = _id;
+            elem_decl.style = &mutable_style;
+        }
+
+        if (self._elem_type != .CtxButton) {
             const ui_node = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
-            if (self.elem_type == .Button or self.elem_type == .ButtonCycle) {
-                if (self.options.?.on_press) |on_press| {
-                    Fabric.btn_registry.put(ui_node.uuid, on_press) catch |err| {
+            if (self._elem_type == .Button or self._elem_type == .ButtonCycle) {
+                if (self._options.?.on_press) |on_press| {
+                    Fabric.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
                         println("Button Function Registry {any}\n", .{err});
                     };
                 }
+            }
+        } else if (self._elem_type == .CtxButton) {
+            const ui_node = self._ui_node orelse unreachable;
+            if (style_ptr.id) |element_id| {
+                const kv = Fabric.ctx_registry.fetchRemove(hashKey(ui_node.uuid)) orelse unreachable;
+                Fabric.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
+                    println("Button Function Registry {any}\n", .{err});
+                    unreachable;
+                };
             }
         }
 
@@ -666,503 +1087,207 @@ pub const Chain = struct {
         return Fabric.LifeCycle.close;
     }
 
-    pub inline fn plain(self: *const Self) void {
+    pub fn font(self: *const Self, font_size: u8, weight: ?u16, color: ?Color) Self {
+        var new_self: Self = self.*;
+        new_self._font_size = font_size;
+        new_self._font_weight = weight;
+        new_self._text_color = color;
+        return new_self;
+    }
+
+    pub fn pos(self: *const Self, position: types.Position) Self {
+        var new_self: Self = self.*;
+        new_self._pos = position;
+        return new_self;
+    }
+
+    pub fn zIndex(self: *const Self, z_index: ?f32) Self {
+        var new_self: Self = self.*;
+        new_self._z_index = z_index;
+        return new_self;
+    }
+
+    pub fn blur(self: *const Self, value: ?u32) Self {
+        var new_self: Self = self.*;
+        new_self._blur = value;
+        return new_self;
+    }
+
+    pub fn layout(self: *const Self, value: types.Layout) Self {
+        var new_self: Self = self.*;
+        new_self._layout = value;
+        return new_self;
+    }
+
+    pub fn background(self: *const Self, value: types.Background) Self {
+        var new_self: Self = self.*;
+        new_self._background = value;
+        return new_self;
+    }
+
+    pub fn textDecoration(self: *const Self, value: types.TextDecoration) Self {
+        var new_self: Self = self.*;
+        new_self._text_decoration = value;
+        return new_self;
+    }
+
+    pub fn hoverScale(self: *const Self) Self {
+        var new_self: Self = self.*;
+        new_self._interactive = .hover_scale();
+        return new_self;
+    }
+
+    pub fn hoverText(self: *const Self, color: Color) Self {
+        var new_self: Self = self.*;
+        new_self._interactive = .hover_text(color);
+        return new_self;
+    }
+
+    pub fn childGap(self: *const Self, value: u32) Self {
+        var new_self: Self = self.*;
+        new_self._child_gap = value;
+        return new_self;
+    }
+
+    pub fn padding(self: *const Self, value: types.Padding) Self {
+        var new_self: Self = self.*;
+        new_self._padding = value;
+        return new_self;
+    }
+
+    pub fn margin(self: *const Self, top: u32, bottom: u32, left: u32, right: u32) Self {
+        var new_self: Self = self.*;
+        new_self._margin = .tblr(top, bottom, left, right);
+        return new_self;
+    }
+
+    pub fn size(self: *const Self, dim: types.Size) Self {
+        var new_self: Self = self.*;
+        new_self._size = dim;
+        return new_self;
+    }
+
+    pub fn width(self: *const Self, length: types.Sizing) Self {
+        var new_self: Self = self.*;
+        if (new_self._size == null) {
+            new_self._size = .{ .width = length };
+        } else {
+            new_self._size.?.width = length;
+        }
+        return new_self;
+    }
+
+    pub fn height(self: *const Self, length: types.Sizing) Self {
+        var new_self: Self = self.*;
+        if (new_self._size == null) {
+            new_self._size = .{ .height = length };
+        } else {
+            new_self._size.?.height = length;
+        }
+        return new_self;
+    }
+
+    pub fn border(self: *const Self, value: types.BorderGrouped) Self {
+        var new_self: Self = self.*;
+        new_self._border = value;
+        return new_self;
+    }
+
+    pub fn radius(self: *const Self, value: types.BorderRadius) Self {
+        var new_self: Self = self.*;
+        new_self._border_radius = value;
+        return new_self;
+    }
+
+    pub fn duration(self: *const Self, value: u32) Self {
+        var new_self: Self = self.*;
+        new_self._transition = .{ .duration = value };
+        return new_self;
+    }
+
+    pub fn body(self: *const Self) *const fn (void) void {
+        var mutable_style = Style{};
+        if (self._style) |style_ptr| {
+            mutable_style = style_ptr.*;
+        }
+        if (mutable_style.position == null) mutable_style.position = self._pos;
+        if (mutable_style.visual == null) mutable_style.visual = .{
+            .font_size = self._font_size,
+            .font_weight = self._font_weight,
+            .text_color = self._text_color,
+            .background = self._background,
+            .border = self._border,
+            .border_radius = self._border_radius,
+            .text_decoration = self._text_decoration,
+        };
+        if (mutable_style.interactive == null) mutable_style.interactive = self._interactive;
+        if (mutable_style.child_gap == null) mutable_style.child_gap = self._child_gap;
+        if (mutable_style.padding == null) mutable_style.padding = self._padding;
+        if (mutable_style.layout == null) mutable_style.layout = self._layout;
+        if (mutable_style.margin == null) mutable_style.margin = self._margin;
+        if (mutable_style.size == null) mutable_style.size = self._size;
+        if (mutable_style.transition == null) mutable_style.transition = self._transition;
+        if (mutable_style.z_index == null) mutable_style.z_index = self._z_index;
+        if (mutable_style.blur == null) mutable_style.blur = self._blur;
+
+        // if (self._tooltip) |_tooltip| {
+        //     elem_decl.tooltip = &_tooltip;
+        // }
+
+        if (self._flex_type == .Center) {
+            mutable_style.layout = .center;
+        } else if (self._flex_type == .Stack) {
+            mutable_style.direction = .column;
+        }
+
+        if (self._id) |_id| {
+            mutable_style.id = _id;
+        }
+
         const elem_decl = Fabric.ElementDecl{
-            .dynamic = .static,
-            .elem_type = self.elem_type,
-            .text = self.text,
+            .state_type = .static,
+            ._elem_type = self._elem_type,
+            ._text = self._text,
+            .style = &mutable_style,
+            ._href = self._href,
+            .svg = self._svg,
+            .aria_label = self._aria_label,
+            .animation_enter = self._animation_enter,
+            .animation_exit = self._animation_exit,
+        };
+
+        if (self._elem_type != .CtxButton) {
+            const ui_node = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+            if (self._elem_type == .Button or self._elem_type == .ButtonCycle) {
+                if (self._options.?.on_press) |on_press| {
+                    Fabric.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
+                        println("Button Function Registry {any}\n", .{err});
+                    };
+                }
+            }
+        } else if (self._elem_type == .CtxButton) {
+            const ui_node = self._ui_node orelse unreachable;
+            if (elem_decl.style.?.style_id) |element_id| {
+                const kv = Fabric.ctx_registry.fetchRemove(hashKey(ui_node.uuid)) orelse unreachable;
+                Fabric.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
+                    println("Button Function Registry {any}\n", .{err});
+                    unreachable;
+                };
+            }
+        }
+
+        Fabric.LifeCycle.configure(elem_decl);
+        return Fabric.LifeCycle.close;
+    }
+
+    pub fn plain(self: *const Self) void {
+        const elem_decl = Fabric.ElementDecl{
+            ._state_type = self._state_type,
+            ._elem_type = self._elem_type,
+            ._text = self._text,
         };
         _ = Fabric.LifeCycle.open(elem_decl);
         Fabric.LifeCycle.configure(elem_decl);
         Fabric.LifeCycle.close({});
     }
 };
-
-pub inline fn Text(text: []const u8, style: Style) void {
-    const local = struct {
-        fn CloseElement() void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            // CloseElement();
-            return;
-        }
-    };
-
-    var elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .Text,
-        .text = text,
-    };
-    elem_decl.style.width.type = .elastic;
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-    };
-    _ = local.ConfigureElement(elem_decl);
-    _ = local.CloseElement();
-    return;
-}
-
-pub inline fn TextArea(text: []const u8, style: Style) void {
-    const local = struct {
-        fn CloseElement() void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            // CloseElement();
-            return;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .TextArea,
-        .text = text,
-    };
-    // const dimensions = measureText(text, &elem_decl.style);
-    // Make sure this is the right order of ops
-    // elem_decl.style.width = dimensions.width;
-    // elem_decl.style.height = dimensions.height;
-    // println("Min: {}\n", .{elem_decl.style.width.size.minmax.min});
-    // println("Max: {}\n", .{elem_decl.style.width.size.minmax.max});
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-    };
-    _ = local.ConfigureElement(elem_decl);
-    _ = local.CloseElement();
-    return;
-}
-pub inline fn Box(style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .Box,
-    };
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-    };
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-
-pub inline fn Svg(svg: []const u8, style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .svg = svg,
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .Svg,
-    };
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-    };
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-
-const CtxButtonOptions = struct {
-    style: ?*const Style = null,
-};
-
-pub inline fn CtxButton(func: anytype, args: anytype, options: CtxButtonOptions) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .style = options.style,
-        .dynamic = .pure,
-        .elem_type = .CtxButton,
-    };
-
-    const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-        unreachable;
-    };
-
-    const Args = @TypeOf(args);
-    const Closure = struct {
-        arguments: Args,
-        run_node: Fabric.Node = .{ .data = .{ .runFn = runFn, .deinitFn = deinitFn } },
-        //
-        fn runFn(action: *Fabric.Action) void {
-            const run_node: *Fabric.Node = @fieldParentPtr("data", action);
-            const closure: *@This() = @alignCast(@fieldParentPtr("run_node", run_node));
-            @call(.auto, func, closure.arguments);
-        }
-        //
-        fn deinitFn(node: *Fabric.Node) void {
-            const closure: *@This() = @alignCast(@fieldParentPtr("run_node", node));
-            Fabric.allocator_global.destroy(closure);
-        }
-    };
-
-    const closure = Fabric.allocator_global.create(Closure) catch |err| {
-        println("Error could not create closure {any}\n ", .{err});
-        unreachable;
-    };
-    closure.* = .{
-        .arguments = args,
-    };
-
-    Fabric.ctx_registry.put(ui_node.uuid, &closure.run_node) catch |err| {
-        println("Button Function Registry {any}\n", .{err});
-        unreachable;
-    };
-
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-pub const BtnProps = struct {
-    onPress: ?*const fn () void = null,
-    onRelease: ?*const fn () void = null,
-    aria_label: ?[]const u8 = null,
-};
-
-pub inline fn Select(style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .Select,
-    };
-    _ = Fabric.current_ctx.open(elem_decl) catch {};
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-
-pub inline fn SelectItem(style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .SelectItem,
-    };
-    _ = Fabric.current_ctx.open(elem_decl) catch {};
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-const ListOptions = struct {
-    style: ?*const Style = null,
-};
-
-pub inline fn List(options: ListOptions) fn (void) void {
-    const elem_decl = ElementDecl{
-        .style = options.style,
-        .dynamic = .pure,
-        .elem_type = .List,
-    };
-    _ = LifeCycle.open(elem_decl);
-    _ = LifeCycle.configure(elem_decl);
-    return LifeCycle.close;
-}
-
-const ListItemOptions = struct {
-    style: ?*const Style = null,
-};
-
-pub inline fn ListItem(options: ListItemOptions) fn (void) void {
-    const elem_decl = ElementDecl{
-        .style = options.style,
-        .dynamic = .pure,
-        .elem_type = .ListItem,
-    };
-
-    _ = LifeCycle.open(elem_decl);
-    LifeCycle.configure(elem_decl);
-    return LifeCycle.close;
-}
-
-pub inline fn Circle(style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    var elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .Block,
-    };
-    elem_decl.style.border_radius = .all(99);
-
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-        unreachable;
-    };
-    // if (style.active) |act| {
-    //     act.signal_ptr.subscribe(ui_node);
-    // }
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-
-pub inline fn Bind(element: *Element, style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *UINode {
-            return Fabric.current_ctx.configure(elem_decl);
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .Bind,
-    };
-
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-        unreachable;
-    };
-    // ui_node.uuid = .{'1'} ** 36;
-    // if (style.active) |act| {
-    //     act.signal_ptr.subscribe(ui_node);
-    // }
-    const ui_node = local.ConfigureElement(elem_decl);
-    element.uuid = ui_node.uuid;
-    return local.CloseElement;
-}
-
-pub inline fn Input(params: InputParams, style: Style) void {
-    const local = struct {
-        fn CloseElement() void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .Input,
-        .input_params = params,
-    };
-
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-        unreachable;
-    };
-    // if (style.active) |act| {
-    //     act.signal_ptr.subscribe(ui_node);
-    // }
-    local.ConfigureElement(elem_decl);
-    local.CloseElement();
-    return;
-}
-
-pub inline fn Block(style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .Block,
-    };
-
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-        unreachable;
-    };
-    // if (style.active) |act| {
-    //     act.signal_ptr.subscribe(ui_node);
-    // }
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-
-pub inline fn FlexBox(style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .style = style,
-        .dynamic = .pure,
-        .elem_type = .FlexBox,
-    };
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-    };
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-
-pub inline fn EmbedLink(link: []const u8) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .href = link,
-        .elem_type = .EmbedLink,
-    };
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-    };
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-
-pub inline fn RedirectLink(url: []const u8, style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .href = url,
-        .elem_type = .RedirectLink,
-        .style = style,
-        .dynamic = .pure,
-    };
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-    };
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-
-pub inline fn Link(url: []const u8, style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .href = url,
-        .elem_type = .Link,
-        .style = style,
-        .dynamic = .pure,
-    };
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-    };
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}
-
-pub inline fn Dialog(style: Style) fn (void) void {
-    const local = struct {
-        fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
-            return;
-        }
-        fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
-            return CloseElement;
-        }
-    };
-
-    const elem_decl = ElementDecl{
-        .elem_type = .Dialog,
-        .style = style,
-        .dynamic = .pure,
-    };
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-        println("{any}\n", .{err});
-    };
-    _ = local.ConfigureElement(elem_decl);
-    return local.CloseElement;
-}

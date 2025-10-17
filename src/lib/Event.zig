@@ -30,7 +30,9 @@ pub fn text(evt: *Event) []const u8 {
     return std.mem.span(resp);
 }
 pub fn preventDefault(evt: *Event) void {
-    Wasm.eventPreventDefault(evt.id);
+    if (isWasi) {
+        Wasm.eventPreventDefault(evt.id);
+    }
 }
 
 pub fn clientX(evt: *Event) f32 {
@@ -97,5 +99,3 @@ pub fn getEventDataNumber(id: u32, ptr: [*]const u8, len: u32) f32 {
         return 0.0;
     }
 }
-
-

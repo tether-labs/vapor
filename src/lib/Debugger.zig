@@ -15,7 +15,7 @@ const Static = @import("Static.zig");
 
 pub var old_debugger_node: ?*UINode = null;
 pub var new_debugger_node: ?*UINode = null;
-pub var show_debugger: bool = false;
+pub var show_debugger: bool = true;
 
 pub const Debug = struct {
     const Self = @This();

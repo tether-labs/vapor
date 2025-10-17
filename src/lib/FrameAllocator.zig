@@ -7,6 +7,7 @@ const printlnColor = @import("Fabric.zig").printlnColor;
 const Fabric = @import("Fabric.zig");
 const Types = @import("types.zig");
 const Wasm = @import("wasm");
+const isWasi = Fabric.isWasi;
 
 // The FrameAllocator is a simple allocator that allocates memory per render cycle.
 // It is used to allocate memory for the render commands and the UI tree, text, and styles, etc.
@@ -98,12 +99,11 @@ fn convertColorToString(color: Types.Color) []const u8 {
 }
 
 fn rgbaToString(rgba: Types.Rgba) []const u8 {
-    const alpha = @as(f32, @floatFromInt(rgba.a)) / 255.0;
     return std.fmt.allocPrint(Fabric.allocator_global, "rgba({d},{d},{d},{d})", .{
         rgba.r,
         rgba.g,
         rgba.b,
-        alpha,
+        rgba.a,
     }) catch return "";
 }
 
@@ -124,7 +124,11 @@ pub fn printPrevStats(self: *FrameAllocator) void {
     writer.print("╚══════════════════════════════╝\n", .{}) catch return;
     writer.print("%c", .{}) catch return;
     const style_2 = "";
-    _ = Wasm.consoleLogColoredWasm(buffer[0..writer.end].ptr, buffer[0..writer.end].len, color_buf[0..].ptr, color_buf.len, style_2[0..].ptr, style_2.len);
+    if (isWasi) {
+        _ = Wasm.consoleLogColoredWasm(buffer[0..writer.end].ptr, buffer[0..writer.end].len, color_buf[0..].ptr, color_buf.len, style_2[0..].ptr, style_2.len);
+    } else {
+        // std.debug.print("{s}\n", .{buffer[0..writer.end]});
+    }
 }
 
 pub fn printStats(self: *FrameAllocator) void {
@@ -145,5 +149,9 @@ pub fn printStats(self: *FrameAllocator) void {
     writer.print("╚══════════════════════════════╝\n", .{}) catch return;
     writer.print("%c", .{}) catch return;
     const style_2 = "";
-    _ = Wasm.consoleLogColoredWasm(buffer[0..writer.end].ptr, buffer[0..writer.end].len, color_buf[0..].ptr, color_buf.len, style_2[0..].ptr, style_2.len);
+    if (isWasi) {
+        _ = Wasm.consoleLogColoredWasm(buffer[0..writer.end].ptr, buffer[0..writer.end].len, color_buf[0..].ptr, color_buf.len, style_2[0..].ptr, style_2.len);
+    } else {
+        // std.debug.print("{s}\n", .{buffer[0..writer.end]});
+    }
 }

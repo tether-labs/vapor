@@ -356,7 +356,7 @@ pub fn mutateDomElement(
         if (comptime std.debug.runtime_safety) {
             const id = id_ptr[0..id_len];
             const attr = attribute[0..attribute_len];
-            std.debug.print("DOM: Would set element '{s}' attribute '{s}' to {d}\n", .{ id, attr, value });
+            Fabric.println("DOM: Would set element '{s}' attribute '{s}' to {d}\n", .{ id, attr, value });
         }
         // No-op in non-WASM environments
     }
@@ -376,7 +376,7 @@ pub fn mutateDomElementStyle(
         if (comptime std.debug.runtime_safety) {
             const id = id_ptr[0..id_len];
             const attr = attribute[0..attribute_len];
-            std.debug.print("DOM: Would set element '{s}' style '{s}' to {d:.2}\n", .{ id, attr, value });
+            Fabric.println("DOM: Would set element '{s}' style '{s}' to {d:.2}\n", .{ id, attr, value });
         }
         // No-op in non-WASM environments
     }
@@ -398,7 +398,7 @@ pub fn mutateDomElementStyleString(
             const id = id_ptr[0..id_len];
             const attr = attribute[0..attribute_len];
             const value = value_ptr[0..value_len];
-            std.debug.print("DOM: Would set element '{s}' style '{s}' to '{s}'\n", .{ id, attr, value });
+            Fabric.println("DOM: Would set element '{s}' style '{s}' to '{s}'\n", .{ id, attr, value });
         }
         // No-op in non-WASM environments
     }
