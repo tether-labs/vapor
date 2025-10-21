@@ -52,6 +52,7 @@ pub const setGlobalStyleVariables = @import("convertStyleCustomWriter.zig").setG
 pub const ThemeType = @import("convertStyleCustomWriter.zig").ThemeType;
 const Theme = @import("theme");
 const Debugger = @import("Debugger.zig");
+const NodePool = @import("NodePool.zig");
 
 pub const Component = fn (void) void;
 
@@ -359,21 +360,21 @@ pub const FabricConfig = struct {
 
 pub var pool: Pool = undefined;
 pub fn init(config: FabricConfig) void {
+    browser_width = config.screen_width;
+    browser_height = config.screen_height;
+    page_node_count = config.page_node_count;
+    allocator_global = config.allocator;
+
     // Init the frame allocator;
     // This adds 500B
-    frame_arena = FrameAllocator.init(config.allocator);
+    frame_arena = FrameAllocator.init(config.allocator, page_node_count);
     // The persistent allocator is used for the Initialization of the registries as these persist over the lifetime of the program.
     var allocator = frame_arena.persistentAllocator();
-    allocator_global = config.allocator;
 
     // Init Router // This adds 1kb
     router.init(&allocator) catch |err| {
         println("Could not init Router {any}\n", .{err});
     };
-
-    browser_width = config.screen_width;
-    browser_height = config.screen_height;
-    page_node_count = config.page_node_count;
 
     // >1kb
     initPackedData(allocator);
@@ -384,15 +385,18 @@ pub fn init(config: FabricConfig) void {
     initCalls(allocator);
     // >1kb
     initContextData(allocator);
+    UIContext.class_map = std.StringHashMap(Pool.StringData).init(allocator);
 
-    UIContext.ui_nodes = allocator.alloc(UINode, config.page_node_count) catch unreachable;
+    // UIContext.ui_nodes = allocator.alloc(UINode, config.page_node_count) catch unreachable;
 
     // Init string pool
-    pool = Pool.init(allocator, 1024) catch |err| {
+    pool = Pool.init(allocator, page_node_count) catch |err| {
         printlnErr("Could not init Pool {any}\n", .{err});
         unreachable;
     };
     pool.initFreelist();
+    KeyGenerator.initWriter();
+    // UIContext.debugPrintUINodeLayout();
 
     animations = std.StringHashMap(Animation).init(allocator);
     component_subscribers = std.array_list.Managed(*Rune.ComponentNode).init(allocator);
@@ -402,19 +406,10 @@ pub fn init(config: FabricConfig) void {
     classes_to_remove = std.array_list.Managed(Class).init(allocator);
 
     // Init Context Data
-    Reconciler.node_map = std.AutoHashMap(u32, usize).init(allocator);
+    // Reconciler.node_map = std.StringHashMap(usize).init(allocator);
 
     // Reconciliation styles dedupe // this is 2kb
-    UIContext.nodes = allocator.alloc(*UINode, config.page_node_count) catch unreachable;
-    UIContext.seen_nodes = allocator.alloc(bool, config.page_node_count) catch unreachable;
-    UIContext.common_nodes = allocator.alloc(usize, config.page_node_count) catch unreachable;
-    UIContext.common_size_nodes = allocator.alloc(usize, config.page_node_count) catch unreachable;
-    UIContext.common_uuids = allocator.alloc([]const u8, config.page_node_count) catch unreachable;
-    UIContext.common_size_uuids = allocator.alloc([]const u8, config.page_node_count) catch unreachable;
-    UIContext.base_styles = allocator.alloc(Style, config.page_node_count) catch unreachable;
-    @memset(UIContext.seen_nodes, false);
-    @memset(UIContext.base_styles, Style{});
-    @memset(UIContext.common_nodes, 0);
+    // UIContext.nodes = allocator.alloc(*UINode, config.page_node_count) catch unreachable;
 
     // @memset(UIContext.common_nodes, 0);
     for (0..continuations.len) |i| {
@@ -469,8 +464,6 @@ fn initContextData(persistent_allocator: std.mem.Allocator) void {
     page_map = std.AutoHashMap(u32, void).init(persistent_allocator);
     layout_map = std.AutoHashMap(u32, LayoutItem).init(persistent_allocator);
     page_deinit_map = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
-    UIContext.key_depth_map = std.AutoHashMap(u32, usize).init(persistent_allocator);
-    UIContext.component_index_map = std.AutoHashMap(u32, usize).init(persistent_allocator);
 }
 
 fn initPackedData(persistent_allocator: std.mem.Allocator) void {
@@ -614,9 +607,9 @@ fn callNestedLayouts() void {
         } else {
             // TODO: This is taking a lot of time we need to create a better hashmap system, currently the hashmap compare
             // with the node is long and slow
-            // const time = nowMs();
+            const time = nowMs();
             render_page();
-            // Fabric.println("Render time {any}", .{nowMs() - time});
+            Fabric.println("Render time {any}", .{nowMs() - time});
         }
         return;
     }
@@ -649,12 +642,18 @@ var previous_route: []const u8 = "/root";
 var render_page: *const fn () void = undefined;
 pub var generator: CSSGenerator = undefined;
 pub fn renderCycle(route_ptr: [*:0]u8) void {
-    pool.resetFreeList();
+    // pool.resetFreeList();
     // const time = nowMs();
     frame_arena.beginFrame(); // For double-buffered approach
     const route = std.mem.span(route_ptr);
     current_route = route;
-    UIContext.key_depth_map.clearRetainingCapacity();
+    // packed_animations.clearRetainingCapacity();
+    // packed_layouts.clearRetainingCapacity();
+    // packed_positions.clearRetainingCapacity();
+    // packed_margins_paddings.clearRetainingCapacity();
+    // packed_visuals.clearRetainingCapacity();
+    // packed_interactives.clearRetainingCapacity();
+    removed_nodes.clearRetainingCapacity();
     // Fabric.btn_registry.clearRetainingCapacity();
     // Fabric.mounted_funcs.clearRetainingCapacity();
 
@@ -722,13 +721,16 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     // This calls the render tree, with render_page as the root function call
     // First it traverses the layouts calling them in order, and then it calls the render_page
     callNestedLayouts(); // 4.5ms
-    // Fabric.println("Traverse time {any}", .{nowMs() - time});
+    // Fabric.println("Traverse time {any}", .{nowMs() - UIContext.total_time});
 
     // We reconcile the new dom
     // the reason the fabric-debugger gets remvoed is the new ui tree does not include it;
     // printUITree(old_ctx.root.?);
     // printUITree(new_ctx.root.?);
+    // const time = nowMs();
     Reconciler.reconcile(old_ctx, new_ctx); // 3kb
+    // printUITree(new_ctx.root.?);
+    // Fabric.println("Reconcile time {any}", .{nowMs() - time});
     // // We iterate over the new dom and generate our pure tree  !!! we need to imrpove this perf wise
     // iterateChildren(new_ctx.root.?);
     // // we call debugger to determine the nodes that were updated
@@ -750,6 +752,7 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
 
     // We generate the render commands tree
     endPage(new_ctx);
+    // Fabric.println("Total {d}", .{frame_arena.queryBytesUsed()});
     if (!std.mem.eql(u8, previous_route, current_route)) {
         Fabric.has_dirty = true;
     }
@@ -1187,9 +1190,10 @@ pub fn markChildrenDirty(node: *UINode) void {
     if (node.parent != null) {
         node.dirty = true;
     }
-    if (!node.can_have_children) return;
-    for (node.children.items) |child| {
-        markChildrenDirty(child);
+    if (node.children) |children| {
+        for (children.items) |child| {
+            markChildrenDirty(child);
+        }
     }
 }
 // The first node needs to be marked as false always
@@ -1197,9 +1201,10 @@ pub fn markChildrenNotDirty(node: *UINode) void {
     if (node.parent != null) {
         node.dirty = false;
     }
-    if (!node.can_have_children) return;
-    for (node.children.items) |child| {
-        markChildrenNotDirty(child);
+    if (node.children) |children| {
+        for (children.items) |child| {
+            markChildrenNotDirty(child);
+        }
     }
 }
 
@@ -1228,7 +1233,6 @@ pub fn generateTextData() void {
 pub fn printUIRouteTree(route: u32) void {
     frame_arena.beginFrame(); // For double-buffered approach
     current_route = route;
-    UIContext.key_depth_map.clearRetainingCapacity();
     // Fabric.btn_registry.clearRetainingCapacity();
     // Fabric.mounted_funcs.clearRetainingCapacity();
 
@@ -1299,11 +1303,13 @@ pub fn printUIRouteTree(route: u32) void {
 }
 
 pub fn printUITree(node: *UINode) void {
-    if (node.dirty and std.mem.eql(u8, node.uuid, "3708577890_Html-genk")) {
+    if (node.dirty) {
         println("UI: {s}", .{node.uuid});
     }
-    for (node.children.items) |child| {
-        printUITree(child);
+    if (node.children) |children| {
+        for (children.items) |child| {
+            printUITree(child);
+        }
     }
 }
 
@@ -1435,8 +1441,7 @@ pub var layout_info = packed struct {
     render_type_offset: u32,
     tooltip_size: u32,
     tooltip_offset: u32,
-    changed_style_offset: u32,
-    changed_props_offset: u32,
+    has_children_offset: u32,
 }{
     .render_command_size = @sizeOf(RenderCommand),
 
@@ -1465,8 +1470,7 @@ pub var layout_info = packed struct {
     .render_type_offset = @offsetOf(RenderCommand, "render_type"),
     .tooltip_size = @sizeOf(types.Tooltip),
     .tooltip_offset = @offsetOf(RenderCommand, "tooltip"),
-    .changed_style_offset = @offsetOf(RenderCommand, "changed_style"),
-    .changed_props_offset = @offsetOf(RenderCommand, "changed_props"),
+    .has_children_offset = @offsetOf(RenderCommand, "has_children"),
 };
 
 // Make sure this function is not evaluated at compile time

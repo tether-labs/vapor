@@ -8,6 +8,10 @@ const Fabric = @import("Fabric.zig");
 const Types = @import("types.zig");
 const Wasm = @import("wasm");
 const isWasi = Fabric.isWasi;
+const NodePool = @import("NodePool.zig");
+const UINode = @import("UITree.zig").UINode;
+const RenderCommand = @import("types.zig").RenderCommand;
+const TreeNode = @import("UITree.zig").CommandsTree;
 
 // The FrameAllocator is a simple allocator that allocates memory per render cycle.
 // It is used to allocate memory for the render commands and the UI tree, text, and styles, etc.
@@ -20,11 +24,15 @@ const isWasi = Fabric.isWasi;
 const FrameData = struct {
     arena: std.heap.ArenaAllocator,
     stats: Stats = .{},
+    // node_pool: NodePool,
 
     const Stats = struct {
         nodes_allocated: usize = 0,
+        tree_memory: usize = 0,
+        command_memory: usize = 0,
         commands_allocated: usize = 0,
         bytes_used: usize = 0,
+        nodes_memory: usize = 0,
     };
 };
 
@@ -33,11 +41,34 @@ frames: [2]FrameData,
 current_frame: usize = 0,
 persistent_arena: Arena,
 
-pub fn init(backing_allocator: std.mem.Allocator) FrameAllocator {
+pub fn init(backing_allocator: std.mem.Allocator, _: usize) FrameAllocator {
+    // Fabric.println("Node count {d}", .{node_count});
+    // const frame_node_pool_1 = NodePool.init(backing_allocator, node_count) catch |err| {
+    //     Fabric.printlnErr("Could not init NodePool {any}\n", .{err});
+    //     unreachable;
+    // };
+    // const frame_node_pool_2 = NodePool.init(backing_allocator, node_count) catch |err| {
+    //     Fabric.printlnErr("Could not init NodePool {any}\n", .{err});
+    //     unreachable;
+    // };
+    //
+
+    const frame1_arena = std.heap.ArenaAllocator.init(backing_allocator);
+    const frame2_arena = std.heap.ArenaAllocator.init(backing_allocator);
+
+    // "Priming" the arenas.
+    // This pre-allocates the first block to be large enough
+    // to hold 'node_count' nodes. This makes the *first*
+    // 'node_count' allocations guaranteed fast, with no
+    // growth/syscalls.
+    // const initial_bytes = node_count * @sizeOf(UINode);
+    // try frame1_arena.ensureTotalCapacity(initial_bytes);
+    // try frame2_arena.ensureTotalCapacity(initial_bytes);
+
     return .{
         .frames = [_]FrameData{
-            .{ .arena = std.heap.ArenaAllocator.init(backing_allocator) },
-            .{ .arena = std.heap.ArenaAllocator.init(backing_allocator) },
+            .{ .arena = frame1_arena },
+            .{ .arena = frame2_arena },
         },
         .persistent_arena = std.heap.ArenaAllocator.init(backing_allocator),
     };
@@ -54,15 +85,37 @@ pub fn getFrameAllocator(self: *FrameAllocator) std.mem.Allocator {
 }
 
 pub fn incrementNodeCount(self: *FrameAllocator) void {
+    self.frames[self.current_frame].stats.nodes_memory += @sizeOf(UINode);
     self.frames[self.current_frame].stats.nodes_allocated += 1;
 }
 
 pub fn incrementCommandCount(self: *FrameAllocator) void {
+    self.frames[self.current_frame].stats.command_memory += @sizeOf(RenderCommand);
     self.frames[self.current_frame].stats.commands_allocated += 1;
 }
 
 pub fn addBytesUsed(self: *FrameAllocator, bytes: usize) void {
     self.frames[self.current_frame].stats.bytes_used += bytes;
+}
+
+pub fn uuidAlloc(self: *FrameAllocator) ?*[]u8 {
+    self.frames[self.current_frame].stats.bytes_used += 16;
+    var slice = self.frames[self.current_frame].arena.allocator().alloc(u8, 16) catch {
+        Fabric.printlnSrcErr("UUID Alloc Failed\n", .{}, @src());
+        // or the backing allocator fails.
+        return null;
+    };
+    return &slice;
+}
+
+pub fn queryBytesUsed(self: *FrameAllocator) usize {
+    const total = self.frames[self.current_frame].arena.queryCapacity();
+    Fabric.println("String Bytes {d}", .{self.frames[self.current_frame].stats.bytes_used});
+    Fabric.println("Nodes {d}", .{self.frames[self.current_frame].stats.nodes_memory});
+    Fabric.println("Commands {d}", .{self.frames[self.current_frame].stats.command_memory});
+    Fabric.println("Tree {d}", .{self.frames[self.current_frame].stats.tree_memory});
+    Fabric.println("Other {d}", .{total - self.frames[self.current_frame].stats.bytes_used - self.frames[self.current_frame].stats.nodes_memory - self.frames[self.current_frame].stats.tree_memory - self.frames[self.current_frame].stats.command_memory});
+    return total;
 }
 
 /// Get allocator for data that should persist across frames
@@ -81,9 +134,56 @@ pub fn beginFrame(self: *FrameAllocator) void {
 
     // Clear the frame we're about to use
     _ = self.frames[next_frame].arena.reset(.retain_capacity);
+    // _ = self.frames[next_frame].node_pool.resetFreeList();
     self.frames[next_frame].stats = .{};
 
     self.current_frame = next_frame;
+}
+
+// pub fn nodeAlloc(self: *FrameAllocator) ?*UINode {
+//     return self.frames[self.current_frame].node_pool.alloc();
+// }
+/// This is now just a simple, fast create() from the arena
+pub fn commandAlloc(self: *FrameAllocator) ?*RenderCommand {
+    // This is just a fast pointer bump
+    const command = self.frames[self.current_frame].arena.allocator().create(RenderCommand) catch {
+        // This will only fail if you run out of memory (OOM)
+        // or the backing allocator fails.
+        return null;
+    };
+    // You could even initialize the command here if needed
+    // command.* = UINode{ ... };
+    return command;
+}
+
+/// This is now just a simple, fast create() from the arena
+pub fn treeNodeAlloc(self: *FrameAllocator) ?*TreeNode {
+    // This is just a fast pointer bump
+    self.frames[self.current_frame].stats.tree_memory += @sizeOf(TreeNode);
+    const tree_node = self.frames[self.current_frame].arena.allocator().create(TreeNode) catch {
+        // This will only fail if you run out of memory (OOM)
+        // or the backing allocator fails.
+        return null;
+    };
+    // You could even initialize the command here if needed
+    // command.* = UINode{ ... };
+    return tree_node;
+}
+
+// pub fn nodeAlloc(self: *FrameAllocator) ?*UINode {
+//     return self.frames[self.current_frame].node_pool.alloc();
+// }
+/// This is now just a simple, fast create() from the arena
+pub fn nodeAlloc(self: *FrameAllocator) ?*UINode {
+    // This is just a fast pointer bump
+    const node = self.frames[self.current_frame].arena.allocator().create(UINode) catch {
+        // This will only fail if you run out of memory (OOM)
+        // or the backing allocator fails.
+        return null;
+    };
+    // You could even initialize the node here if needed
+    // node.* = UINode{ ... };
+    return node;
 }
 
 /// Get stats for current frame

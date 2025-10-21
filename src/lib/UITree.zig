@@ -31,8 +31,6 @@ const PackedFieldPtrs = struct {
     interactive_ptr: ?*const types.PackedInteractive = null,
 };
 
-pub var key_depth_map: std.AutoHashMap(u32, usize) = undefined;
-pub var component_index_map: std.AutoHashMap(u32, usize) = undefined;
 pub var ui_nodes: []UINode = undefined;
 pub const UIContext = @This();
 root: ?*UINode = null,
@@ -48,23 +46,24 @@ ui_tree: ?*CommandsTree = null,
 
 pub const CommandsTree = struct {
     node: *RenderCommand,
-    children: std.array_list.Managed(*CommandsTree),
+    children: std.ArrayListUnmanaged(*CommandsTree) = undefined,
 };
 
-pub const BoxSizing = struct {
-    x: f32 = 0,
-    y: f32 = 0,
-    width: f32 = 0,
-    height: f32 = 0,
-};
+pub fn debugPrintUINodeLayout() void {
+    inline for (@typeInfo(UINode).@"struct".fields) |field| {
+        const field_type = field.type;
+        const size = @sizeOf(field_type);
+        Fabric.println("{s:20} | size: {d:3} bytes |\n", .{ field.name, size });
+    }
 
-// pub var styles: std.array_list.Managed(*Style) = undefined;
+    Fabric.println("\nTotal struct size: {d} bytes\n", .{@sizeOf(UINode)});
+}
 
 pub const UINode = struct {
     dirty: bool = false,
     parent: ?*UINode = null,
     type: EType = EType.FlexBox,
-    children: std.ArrayListUnmanaged(*UINode) = undefined,
+    children: ?std.ArrayListUnmanaged(*UINode) = null,
     text: ?[]const u8 = null,
     uuid: []const u8 = "",
     uuid_buf: [64]u8 = undefined,
@@ -78,12 +77,10 @@ pub const UINode = struct {
     class: ?[]const u8 = null,
     animation_enter: ?*const Fabric.Animation = null,
     animation_exit: ?*const Fabric.Animation = null,
-    style_hash: u32 = 0,
-    props_hash: u32 = 0,
-    changed_style: bool = true,
-    changed_props: bool = true,
-    packed_field_ptrs: ?PackedFieldPtrs = null,
+    packed_field_ptrs: ?PackedFieldPtrs = null, // TODO: This is 28 bytes
     can_have_children: bool = true,
+    children_count: usize = 0,
+    finger_print: u32 = 0,
 
     // nodes_flat_index: usize = 0,
     // tooltip: ?types.Tooltip = null,
@@ -93,22 +90,26 @@ pub const UINode = struct {
     }
 
     pub fn addChild(parent: *UINode, child: *UINode) !void {
-        if (parent.children.items.len >= Fabric.page_node_count) return error.BufferOverflowIncreasePageNodeCount;
-        parent.children.appendBounded(child) catch {
+        if (parent.children == null) return error.AttemptedToAddChildToNonContainer;
+        if (parent.children.?.items.len >= Fabric.page_node_count) return error.BufferOverflowIncreasePageNodeCount;
+        parent.children_count += 1;
+        try parent.children.?.ensureUnusedCapacity(Fabric.frame_arena.getFrameAllocator(), 4);
+        parent.children.?.appendBounded(child) catch {
             return error.BufferOverflowIncreasePageNodeCount;
         };
     }
 };
 
-pub fn init(ui_ctx: *UIContext, parent: ?*UINode, etype: EType) !*UINode {
-    const node = try ui_ctx.node_pool.create();
-    // Fabric.frame_arena.incrementNodeCount();
+pub fn init(_: *UIContext, parent: ?*UINode, etype: EType) !*UINode {
+    const node = Fabric.frame_arena.nodeAlloc() orelse return error.NodeAllocFailed;
+    // const node = try ui_ctx.node_pool.create();
+    Fabric.frame_arena.incrementNodeCount();
     node.* = .{
         .parent = parent,
         .type = etype,
     };
     if (etype != .Text and etype != .TextFmt) {
-        node.children = try std.ArrayListUnmanaged(*UINode).initCapacity(Fabric.frame_arena.getFrameAllocator(), Fabric.page_node_count);
+        node.children = try std.ArrayListUnmanaged(*UINode).initCapacity(Fabric.frame_arena.getFrameAllocator(), 4);
     } else {
         node.can_have_children = false;
     }
@@ -137,15 +138,15 @@ pub fn initContext(ui_ctx: *UIContext) !void {
     };
     ui_ctx.root_stack_ptr = item;
     ui_ctx.stack = item;
-    node_count = 0;
-    if (node_count >= nodes.len) {
-        Fabric.printlnErr("Page Node count is too small {d}", .{node_count});
-    } else {
-        nodes[node_count] = ui_ctx.root.?;
-        // ui_ctx.root.?.nodes_flat_index = node_count;
-        seen_nodes[node_count] = true;
-    }
-    node_count += 1;
+    // node_count = 0;
+    // if (node_count >= nodes.len) {
+    //     Fabric.printlnErr("Page Node count is too small {d}", .{node_count});
+    // } else {
+    //     // nodes[node_count] = ui_ctx.root.?;
+    //     // ui_ctx.root.?.nodes_flat_index = node_count;
+    //     // seen_nodes[node_count] = true;
+    // }
+    // node_count += 1;
 
     packed_position = std.mem.zeroes(types.PackedPosition);
     packed_layout = std.mem.zeroes(types.PackedLayout);
@@ -153,6 +154,12 @@ pub fn initContext(ui_ctx: *UIContext) !void {
     packed_visual = std.mem.zeroes(types.PackedVisual);
     packed_animations = .{};
     packed_interactive = std.mem.zeroes(types.PackedInteractive);
+    // Fabric.println("Size Position: {any}", .{@bitSizeOf(types.PackedPosition)});
+    // Fabric.println("Size Layout: {any}", .{@bitSizeOf(types.PackedLayout)});
+    // Fabric.println("Size Margins Paddings: {any}", .{@bitSizeOf(types.PackedMarginsPaddings)});
+    // Fabric.println("Size Visual: {any}", .{@bitSizeOf(types.PackedVisual)});
+    // Fabric.println("Size Animations: {any}", .{@bitSizeOf(types.PackedAnimations)});
+    // Fabric.println("Size Interactive: {any}", .{@bitSizeOf(types.PackedInteractive)});
 }
 
 pub fn deinit(ui_ctx: *UIContext) void {
@@ -184,32 +191,40 @@ pub var uuid_depth: usize = 0;
 var current_tree: usize = 0;
 fn setUUID(parent: *UINode, child: *UINode) void {
     uuid_depth += 1;
-    const count = key_depth_map.get(hashKey(parent.uuid)) orelse blk: {
-        break :blk 0;
-    };
+    // const count = key_depth_map.get(hashKey(parent.uuid)) orelse blk: {
+    //     break :blk 0;
+    // };
 
-    const component_count = component_index_map.get(hashKey(parent.uuid)) orelse blk: {
-        break :blk 0;
-    };
+    // const component_count = component_index_map.get(hashKey(parent.uuid)) orelse blk: {
+    //     break :blk 0;
+    // };
 
     // Set the keyGenerator count
-    KeyGenerator.setCount(count);
-    KeyGenerator.setComponentCount(component_count);
+    // KeyGenerator.setCount(count);
+    // KeyGenerator.setComponentCount(component_count);
     // KeyGenerator.resetCounter();
-    const index: usize = uuid_depth;
+    const index: usize = parent.children_count;
     if (child.uuid.len > 0) {
         KeyGenerator.incrementComponentCount();
         // KeyGenerator.incrementCount();
         child.index = KeyGenerator.getComponentCount();
     } else {
         KeyGenerator.incrementComponentCount();
-        KeyGenerator.incrementCount();
-        child.uuid = KeyGenerator.generateKey(
+        // KeyGenerator.incrementCount();
+
+        // const buf: *[]u8 = Fabric.frame_arena.uuidAlloc() orelse unreachable;
+        const key = KeyGenerator.generateKey(
             &child.uuid_buf,
             child.type,
             parent.uuid,
             index,
+            uuid_depth,
         );
+        // const string_data = Fabric.pool.createString(key) catch |err| {
+        //     Fabric.printlnErr("Could not create string {any}\n", .{err});
+        //     unreachable;
+        // };
+        child.uuid = key;
         child.index = KeyGenerator.getComponentCount();
         // we add this so that animations are sepeate, we need to be careful though since
         // if a user does not specifc a id for a class, and the  rerender tree has the same id
@@ -217,12 +232,12 @@ fn setUUID(parent: *UINode, child: *UINode) void {
         // applied to the new parent since it has the same class name and styling
     }
     // Put the new keygenerator count in to the key_dpeht_map;
-    key_depth_map.put(hashKey(parent.uuid), KeyGenerator.getCount()) catch |err| {
-        Fabric.printlnSrcErr("{any}", .{err}, @src());
-    };
-    component_index_map.put(hashKey(parent.uuid), KeyGenerator.getComponentCount()) catch |err| {
-        Fabric.printlnSrcErr("{any}", .{err}, @src());
-    };
+    // key_depth_map.put(hashKey(parent.uuid), KeyGenerator.getCount()) catch |err| {
+    //     Fabric.printlnSrcErr("{any}", .{err}, @src());
+    // };
+    // component_index_map.put(hashKey(parent.uuid), KeyGenerator.getComponentCount()) catch |err| {
+    //     Fabric.printlnSrcErr("{any}", .{err}, @src());
+    // };
 }
 
 // Open takes a current stack and adds the elements depth first search
@@ -235,8 +250,14 @@ pub fn open(ui_ctx: *UIContext, elem_decl: ElemDecl) !*UINode {
     const current_open = stack.ptr orelse unreachable;
     var node = try ui_ctx.init(current_open, elem_decl.elem_type);
 
-    try current_open.addChild(node);
-    try ui_ctx.stackRegister(node);
+    current_open.addChild(node) catch |err| {
+        Fabric.printlnSrcErr("Could not add child {any}", .{err}, @src());
+        return err;
+    };
+    ui_ctx.stackRegister(node) catch |err| {
+        Fabric.printlnSrcErr("Could not register node {any}", .{err}, @src());
+        return err;
+    };
 
     const style = elem_decl.style;
     if (style != null and style.?.id != null) {
@@ -245,13 +266,13 @@ pub fn open(ui_ctx: *UIContext, elem_decl: ElemDecl) !*UINode {
 
     setUUID(current_open, node);
 
-    if (node_count >= nodes.len) {
-        Fabric.printlnErr("Page Node count is too small {d}", .{node_count});
-    } else {
-        // node.nodes_flat_index = node_count;
-        nodes[node_count] = node;
-        node_count += 1;
-    }
+    // if (node_count >= nodes.len) {
+    //     Fabric.printlnErr("Page Node count is too small {d}", .{node_count});
+    // } else {
+    //     // node.nodes_flat_index = node_count;
+    //     nodes[node_count] = node;
+    //     node_count += 1;
+    // }
 
     // Fabric.println("Open time {any}", .{Fabric.nowMs() - time});
     return node;
@@ -259,8 +280,13 @@ pub fn open(ui_ctx: *UIContext, elem_decl: ElemDecl) !*UINode {
 
 // This function was already DRY, no changes needed.
 pub fn structToBytes(struct_ptr: anytype) u32 {
-    const bytes = std.mem.asBytes(struct_ptr);
-    return hashKey(bytes);
+    return std.hash.XxHash32.hash(0, std.mem.asBytes(struct_ptr));
+    // const bytes = std.mem.asBytes(struct_ptr);
+    // return hashKey(bytes);
+}
+
+pub fn structToInt(struct_ptr: anytype) u32 {
+    return @as(u32, @bitCast(struct_ptr));
 }
 
 // -----------------------------------------------------------------------------
@@ -400,16 +426,7 @@ var packed_animations: types.PackedAnimations = .{};
 var packed_interactive: types.PackedInteractive = .{};
 var packed_transition: types.PackedTransition = .{};
 
-fn setClass(current_open: *UINode, hash: u32, tag: []const u8) void {
-    var allocator = Fabric.frame_arena.getFrameAllocator();
-    const common = KeyGenerator.generateHashKeyAlloc(&allocator, hash, tag);
-    if (current_open.class) |class| {
-        current_open.class = std.fmt.allocPrint(Fabric.allocator_global, "{s} {s}", .{ class, common }) catch return;
-    } else {
-        current_open.class = common;
-    }
-}
-
+pub var class_map: std.StringHashMap(StringData) = undefined;
 fn buildClassString(
     field_ptrs: *const PackedFieldPtrs,
     current_open: *UINode,
@@ -431,47 +448,54 @@ fn buildClassString(
 
     if (field_ptrs.layout_ptr) |_| {
         var buf: [128]u8 = undefined;
-        const common = KeyGenerator.generateHashKey(&buf, hash_l, "cl");
+        const common = KeyGenerator.generateHashKey(&buf, hash_l, "lay");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
     }
 
     if (field_ptrs.position_ptr) |_| {
         var buf: [128]u8 = undefined;
-        const common = KeyGenerator.generateHashKey(&buf, hash_p, "cp");
+        const common = KeyGenerator.generateHashKey(&buf, hash_p, "pos");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
     }
 
     if (field_ptrs.margins_paddings_ptr) |_| {
         var buf: [128]u8 = undefined;
-        const common = KeyGenerator.generateHashKey(&buf, hash_m, "cmp");
+        const common = KeyGenerator.generateHashKey(&buf, hash_m, "mapa");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
     }
 
     if (field_ptrs.visual_ptr) |_| {
         var buf: [128]u8 = undefined;
-        const common = KeyGenerator.generateHashKey(&buf, hash_v, "cv");
+        const common = KeyGenerator.generateHashKey(&buf, hash_v, "vis");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
     }
 
     if (field_ptrs.animations_ptr) |_| {
         var buf: [128]u8 = undefined;
-        const common = KeyGenerator.generateHashKey(&buf, hash_a, "ca");
+        const common = KeyGenerator.generateHashKey(&buf, hash_a, "anim");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
     }
 
     if (field_ptrs.interactive_ptr) |_| {
         var buf: [128]u8 = undefined;
-        const common = KeyGenerator.generateHashKey(&buf, hash_i, "ci");
+        const common = KeyGenerator.generateHashKey(&buf, hash_i, "intr");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
     }
 
-    const string_data = Fabric.pool.createString(writer.buffer[0..writer.pos]) catch return error.PoolCouldNotAllocate;
+    const string_data = class_map.get(writer.buffer[0..writer.pos]) orelse blk: {
+        const string_data = Fabric.pool.createString(writer.buffer[0..writer.pos]) catch |err| {
+            Fabric.printlnErr("Could not create string {any}\n", .{err});
+            return error.PoolCouldNotAllocate;
+        };
+        class_map.put(string_data.asSlice(), string_data) catch return error.PoolCouldNotAllocate;
+        break :blk string_data;
+    };
     current_open.class = string_data.asSlice();
 }
 
@@ -479,14 +503,6 @@ fn buildClassString(
 // running a comparison on each st.mem.bytes is expensive
 
 pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
-    // packed_position = std.mem.zeroes(types.PackedPosition);
-    // packed_layout = std.mem.zeroes(types.PackedLayout);
-    // packed_margins_paddings = std.mem.zeroes(types.PackedMarginsPaddings);
-    // packed_visual = std.mem.zeroes(types.PackedVisual);
-    // packed_animations = .{};
-    // packed_interactive = std.mem.zeroes(types.PackedInteractive);
-    // packed_transition = std.mem.zeroes(types.PackedTransition);
-
     const stack = ui_ctx.stack orelse unreachable;
     const current_open = stack.ptr orelse unreachable;
     const style = elem_decl.style;
@@ -509,23 +525,24 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
     var hash_a: u32 = 0;
     var hash_i: u32 = 0;
 
+    current_open.finger_print +%= @intFromEnum(current_open.type);
     if (elem_decl.elem_type == .Svg) {
         current_open.text = elem_decl.svg;
-        current_open.props_hash +%= hashKey(elem_decl.svg);
+        current_open.finger_print +%= hashKey(elem_decl.svg);
     } else if (elem_decl.elem_type == .Input) {
         current_open.input_params = elem_decl.input_params.?;
         current_open.text = elem_decl.text orelse "";
-        current_open.props_hash +%= hashKey(current_open.text.?);
+        current_open.finger_print +%= hashKey(current_open.text.?);
     } else if (elem_decl.text) |text| {
         current_open.text = text;
-        current_open.props_hash +%= hashKey(text);
+        current_open.finger_print +%= hashKey(text);
     }
 
     current_open.href = elem_decl.href;
     current_open.type = elem_decl.elem_type;
 
     if (current_open.href) |href| {
-        current_open.props_hash +%= hashKey(href);
+        current_open.finger_print +%= hashKey(href);
     }
 
     if (style) |s| {
@@ -555,10 +572,9 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
             if (s.flex_wrap) |flex_wrap| packed_layout.flex_wrap = flex_wrap;
             if (s.scroll) |scroll| packed_layout.scroll = scroll;
 
-            hash_l = hashKey(std.mem.asBytes(&packed_layout));
-
+            hash_l = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_layout));
             if (!hash_id) {
-                // setClass(current_open, hash, "c-l");
+                // These add a 1.5ms for 10000 nodes
                 current_open.packed_field_ptrs.?.layout_ptr = getOrPutAndUpdateHash(
                     hash_l,
                     packed_layout,
@@ -584,10 +600,9 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
             }
             if (s.z_index) |z_index| packed_position.z_index = z_index;
 
-            hash_p = hashKey(std.mem.asBytes(&packed_position));
+            hash_p = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_position));
 
             if (!hash_id) {
-                // setClass(current_open, hash, "c-p");
                 current_open.packed_field_ptrs.?.position_ptr = getOrPutAndUpdateHash(
                     hash_p,
                     packed_position,
@@ -607,9 +622,9 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
             if (s.padding) |padding| packed_margins_paddings.padding = padding;
             if (s.margin) |margin| packed_margins_paddings.margin = margin;
 
-            hash_mp = hashKey(std.mem.asBytes(&packed_margins_paddings));
+            // This is an expensive operation, since the the visual hash is quite large
+            hash_mp = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_margins_paddings));
             if (!hash_id) {
-                // setClass(current_open, hash, "c-mp");
                 current_open.packed_field_ptrs.?.margins_paddings_ptr = getOrPutAndUpdateHash(
                     hash_mp,
                     packed_margins_paddings,
@@ -624,7 +639,7 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
         }
 
         // ** Packed Visual **
-        if (s.visual != null) {
+        if (s.visual != null or s.list_style != null) {
             // packed_visual = .{};
             if (s.font_family) |font_family| {
                 hash_v +%= hashKey(font_family);
@@ -656,7 +671,7 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                 }
             }
 
-            hash_v = hashKey(std.mem.asBytes(&packed_visual));
+            hash_v = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_visual));
 
             if (s.transition) |transition| {
                 packed_transition.set(&transition);
@@ -672,7 +687,6 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
             }
 
             if (!hash_id) {
-                // setClass(current_open, hash, "c-v");
                 current_open.packed_field_ptrs.?.visual_ptr = getOrPutAndUpdateHash(
                     hash_v,
                     packed_visual,
@@ -725,10 +739,9 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                     packed_interactive.focus = packed_focus;
                 }
 
-                hash_i = hashKey(std.mem.asBytes(&packed_interactive));
+                hash_i = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_interactive));
 
                 if (!hash_id) {
-                    // setClass(current_open, hash, "c-h");
                     current_open.packed_field_ptrs.?.interactive_ptr = getOrPutAndUpdateHash(
                         hash_i,
                         packed_interactive,
@@ -738,7 +751,7 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                 }
             }
 
-            hash_a = hashKey(std.mem.asBytes(&packed_animations));
+            hash_a = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_animations));
 
             if (s.interactive) |interactive| {
                 if (interactive.hover) |hover| {
@@ -751,7 +764,6 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
             }
 
             if (!hash_id) {
-                // setClass(current_open, hash, "c-a");
                 if (packed_animations.has_transform) {
                     current_open.packed_field_ptrs.?.animations_ptr = getOrPutAndUpdateHash(
                         hash_a,
@@ -763,19 +775,19 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
             }
         }
 
-        current_open.style_hash +%= hash_l;
-        current_open.style_hash +%= hash_p;
-        current_open.style_hash +%= hash_mp;
-        current_open.style_hash +%= hash_v;
-        current_open.style_hash +%= hash_a;
-        current_open.style_hash +%= hash_i;
+        current_open.finger_print +%= hash_l;
+        current_open.finger_print +%= hash_p;
+        current_open.finger_print +%= hash_mp;
+        current_open.finger_print +%= hash_v;
+        current_open.finger_print +%= hash_a;
+        current_open.finger_print +%= hash_i;
         if (s.style_id != null) {
             Fabric.generator.writeNodeStyle(current_open);
         } else {
-            // const class = std.fmt.allocPrint(Fabric.frame_arena.getFrameAllocator(), "{s}", .{elem_decl.href.?}) catch "";
             if (current_open.type == .Icon) {
                 current_open.class = elem_decl.href.?;
             }
+            // This adds 2ms for 10000 nodes
             buildClassString(
                 &current_open.packed_field_ptrs.?,
                 current_open,
@@ -832,13 +844,17 @@ pub fn endContext(ui_ctx: *UIContext) void {
         .node_ptr = root,
         .id = root.uuid,
         .index = 0,
+        .has_children = true,
     };
     root.dirty = false;
 
     const tree: *CommandsTree = ui_ctx.tree_memory_pool.create() catch unreachable;
     tree.* = .{
         .node = render_cmd,
-        .children = std.array_list.Managed(*CommandsTree).init(Fabric.frame_arena.getFrameAllocator()),
+        .children = std.ArrayListUnmanaged(*CommandsTree).initCapacity(Fabric.frame_arena.getFrameAllocator(), 4) catch |err| {
+            Fabric.printlnSrcErr("Could not ensure capacity {any}\n", .{err}, @src());
+            unreachable;
+        },
     };
     ui_ctx.ui_tree = tree;
 }
@@ -868,14 +884,17 @@ pub fn createStack(ui_ctx: *UIContext, parent: *UINode) void {
 // Breadth first search
 // This calcualtes the positions;
 var depth: usize = 0;
-pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent: *CommandsTree) void {
+pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent: *CommandsTree) !void {
     if (parent_op) |parent| {
-        if (!parent.can_have_children) return;
-        if (parent.children.items.len > 0) {
-            ui_tree_parent.children = std.array_list.Managed(*CommandsTree).init(Fabric.frame_arena.getFrameAllocator());
+        const parent_children = parent.children orelse return;
+        if (parent_children.items.len > 0) {
+            ui_tree_parent.children = std.ArrayListUnmanaged(*CommandsTree).initCapacity(Fabric.frame_arena.getFrameAllocator(), 4) catch |err| {
+                Fabric.printlnSrcErr("Could not ensure capacity {any}\n", .{err}, @src());
+                unreachable;
+            };
             depth += 1;
-            for (parent.children.items) |child| {
-                const render_cmd: *RenderCommand = ui_ctx.render_cmd_memory_pool.create() catch unreachable;
+            for (parent_children.items) |child| {
+                const render_cmd: *RenderCommand = Fabric.frame_arena.commandAlloc() orelse return error.CommandAllocFailed;
                 Fabric.frame_arena.incrementCommandCount();
                 render_cmd.* = .{
                     .elem_type = child.type,
@@ -886,8 +905,7 @@ pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent:
                     .hooks = child.hooks,
                     .node_ptr = child,
                     .render_type = child.state_type,
-                    .changed_style = child.changed_style,
-                    .changed_props = child.changed_props,
+                    .has_children = child.children != null,
                     // .tooltip = child.tooltip,
                 };
 
@@ -901,305 +919,35 @@ pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent:
                         render_cmd.class = id;
                     }
                 }
-                const tree: *CommandsTree = ui_ctx.tree_memory_pool.create() catch unreachable;
+                const tree: *CommandsTree = Fabric.frame_arena.treeNodeAlloc() orelse return error.TreeNodeAllocFailed;
                 tree.* = .{
                     .node = render_cmd,
-                    .children = std.array_list.Managed(*CommandsTree).init(Fabric.frame_arena.getFrameAllocator()),
+                    .children = std.ArrayListUnmanaged(*CommandsTree).initCapacity(Fabric.frame_arena.getFrameAllocator(), 4) catch |err| {
+                        Fabric.printlnSrcErr("Could not ensure capacity {any}\n", .{err}, @src());
+                        unreachable;
+                    },
                 };
-                ui_tree_parent.children.append(tree) catch unreachable;
+                ui_tree_parent.children.ensureUnusedCapacity(Fabric.frame_arena.getFrameAllocator(), 4) catch |err| {
+                    Fabric.printlnSrcErr("Could not ensure capacity {any}\n", .{err}, @src());
+                    unreachable;
+                };
+                ui_tree_parent.children.appendBounded(tree) catch unreachable;
                 // if (child.state_type == .animation) {
                 //     const class_name = child.style.?.child_styles.?[0].style_id;
                 //     Fabric.addToClassesList(child.uuid, class_name);
                 // }
             }
-            for (parent.children.items, 0..) |child, j| {
-                ui_ctx.traverseChildren(child, ui_tree_parent.children.items[j]);
+            for (parent_children.items, 0..) |child, j| {
+                try ui_ctx.traverseChildren(child, ui_tree_parent.children.items[j]);
             }
             depth -= 1;
         }
     }
 }
 pub fn traverse(ui_ctx: *UIContext) void {
-    ui_ctx.traverseChildren(ui_ctx.root, ui_ctx.ui_tree.?);
-}
-
-pub var nodes: []*UINode = undefined;
-var node_count: usize = 0;
-var seen_count: usize = 0;
-
-pub var common_nodes: []usize = undefined;
-pub var common_size_nodes: []usize = undefined;
-pub var common_visual_nodes: []usize = undefined;
-
-pub var seen_nodes: []bool = undefined;
-
-pub var common_uuids: [][]const u8 = undefined;
-pub var common_size_uuids: [][]const u8 = undefined;
-pub var common_visual_uuids: [][]const u8 = undefined;
-
-var common_count: usize = 0;
-var common_size_count: usize = 0;
-var common_visual_count: usize = 0;
-
-pub var target_node_index: usize = 0;
-pub var base_styles: []Style = undefined;
-pub var base_style_count: usize = 0;
-var common_size_style: ?Style = null;
-var common_visual_style: ?Style = null;
-
-// pub fn reconcileStyles() void {
-//     var layout_itr = Fabric.packed_layouts.iterator();
-//     var allocator = Fabric.frame_arena.getFrameAllocator();
-//     while (layout_itr.next()) |entry| {
-//         const hash = entry.key_ptr.*;
-//         const buf = allocator.alloc(u8, 128) catch unreachable;
-//         const common = KeyGenerator.generateCommonHashKey(buf, hash, "c-l");
-//         const packed_layout = entry.value_ptr.*;
-//         for (packed_layout.nodes.items) |node| {
-//             if (node.class) |class| {
-//                 node.class = std.fmt.allocPrint(allocator, "{s} {s}", .{ class, common }) catch return;
-//             } else {
-//                 node.class = common;
-//             }
-//         }
-//     }
-//     // Make sure seen_nodes is initialized to all false
-//     // @memset(seen_nodes, false);
-//     //
-//     // var i: usize = 0;
-//     // while (i < node_count) : (i += 1) {
-//     //     // 1. Skip if already processed or has no style
-//     //     if (seen_nodes[i]) continue;
-//     //     const target_node = nodes[i];
-//     //     _ = target_node.compact_style orelse continue;
-//     //
-//     //     // 2. This is a new potential target, start a new common group
-//     //     common_count = 0;
-//     //     common_nodes[common_count] = i;
-//     //     common_uuids[common_count] = target_node.uuid;
-//     //     common_count += 1;
-//     //     // Mark self as seen, though it's implicitly handled by the outer loop
-//     //     seen_nodes[i] = true;
-//     //
-//     //     // 3. Find all other matching nodes
-//     //     var j: usize = i + 1;
-//     //     while (j < node_count) : (j += 1) {
-//     //         if (seen_nodes[j]) continue;
-//     //         const other_node = nodes[j];
-//     //         _ = other_node.compact_style orelse continue;
-//     //
-//     //         // Your existing style comparison logic is good, just adapt it
-//     //         // if (stylesAreTheSame(target_style, other_style)) {
-//     //         //     common_nodes[common_count] = j;
-//     //         //     common_uuids[common_count] = other_node.uuid;
-//     //         //     common_count += 1;
-//     //         //     seen_nodes[j] = true; // Mark the duplicate as handled
-//     //         // }
-//     //     }
-//     //
-//     //     // 4. If we found at least one duplicate, apply the common class
-//     //     if (common_count > 1) {
-//     //         const common_key = KeyGenerator.generateCommonStyleKey(common_uuids[0..common_count], &Fabric.allocator_global);
-//     //         for (common_nodes[0..common_count]) |node_index| {
-//     //             const c_node = nodes[node_index];
-//     //             if (c_node.class) |class| {
-//     //                 c_node.class = std.fmt.allocPrint(Fabric.allocator_global, "{s} {s}", .{ class, common_key }) catch return;
-//     //             } else {
-//     //                 c_node.class = common_key;
-//     //             }
-//     //         }
-//     //     }
-//     // }
-// }
-
-// Helper function to contain your comparison logic
-// fn stylesAreTheSame(style_a: *CompactStyle, style_b: *CompactStyle) bool {
-//     var same_basic: bool = false;
-//     if (style_a.basic != null and style_b.basic != null) {
-//         // same_basic = std.meta.eql(style_a.basic.?.*, style_b.basic.?.*);
-//     } else if (style_a.basic == null and style_b.basic == null) {
-//         same_basic = true;
-//     }
-//
-//     var same_visual: bool = false;
-//     if (style_a.visual != null and style_b.visual != null) {
-//         same_visual = std.meta.eql(style_a.visual.?.*, style_b.visual.?.*);
-//     } else if (style_a.visual == null and style_b.visual == null) {
-//         same_visual = true;
-//     }
-//
-//     var same_interactive: bool = false;
-//     if (style_a.interactive != null and style_b.interactive != null) {
-//         same_interactive = std.meta.eql(style_a.interactive.?.*, style_b.interactive.?.*);
-//     } else if (style_a.interactive == null and style_b.interactive == null) {
-//         same_interactive = true;
-//     }
-//
-//     return same_basic and same_visual and same_interactive;
-// }
-
-pub fn deduplicateStyles(target_node: *UINode) void {
-    common_count = 0;
-    common_nodes[common_count] = target_node_index;
-    common_uuids[common_count] = target_node.uuid;
-    // Set the target node as seen
-    seen_nodes[target_node_index] = true;
-    common_count += 1;
-    // if no style then return
-    if (target_node.compact_style == null) return;
-    const target_style = target_node.compact_style orelse return;
-    // if the style id is set then we dont want to gen a common style
-    if (target_node.class != null) return;
-    // Fabric.println("-----------------------------Target :{s} ============", .{target_node.uuid});
-
-    for (nodes[0..node_count], 0..) |node, i| {
-        if (seen_nodes[i]) continue;
-        if (std.mem.eql(u8, node.uuid, target_node.uuid)) continue;
-        const node_style = node.compact_style orelse continue;
-
-        var same_basic: bool = false;
-        var same_visual: bool = false;
-        var same_interactive: bool = false;
-        if (node_style.basic != null and target_style.basic != null) {
-            same_basic = std.meta.eql(target_style.basic.?.*, node_style.basic.?.*);
-        } else if (node_style.basic == null and target_style.basic == null) {
-            same_basic = true;
-        }
-
-        if (node_style.visual != null and target_style.visual != null) {
-            same_visual = std.meta.eql(target_style.visual.?.*, node_style.visual.?.*);
-        } else if (node_style.visual == null and target_style.visual == null) {
-            same_visual = true;
-        }
-
-        if (node_style.interactive != null and target_style.interactive != null) {
-            same_interactive = std.meta.eql(target_style.interactive.?.*, node_style.interactive.?.*);
-        } else if (node_style.interactive == null and target_style.interactive == null) {
-            same_interactive = true;
-        }
-
-        // We first check if the whole style is the same
-        if (same_basic and same_visual and same_interactive) {
-            Fabric.println("Same Style {s} {s} {any}", .{ target_node.uuid, node.uuid, same_interactive });
-            common_nodes[common_count] = i;
-            common_uuids[common_count] = node.uuid;
-            common_count += 1;
-            seen_nodes[i] = true;
-            continue;
-        }
-    }
-}
-
-pub fn reconcileSizes(node: *UINode) void {
-    if (node.style != null) {
-        // We only incrment the target node index if the node has a style
-        deduplicateSizes(node);
-        if (common_count > 1) {
-            const common = KeyGenerator.generateStyleKey("size", common_uuids[0..common_count], &Fabric.allocator_global);
-            // base_styles[base_style_count] = Style{};
-            // base_styles[base_style_count].visual = node.style.?.visual.?;
-            // base_styles[base_style_count].style_id = common;
-            // base_style_count += 1;
-            for (common_nodes[0..common_count]) |node_index| {
-                const c_node = nodes[node_index];
-                if (c_node.class) |class| {
-                    c_node.class = std.fmt.allocPrint(Fabric.allocator_global, "{s} {s}", .{ class, common }) catch return;
-                } else {
-                    c_node.class = std.fmt.allocPrint(Fabric.allocator_global, "{s} {s}", .{ c_node.uuid, common }) catch return;
-                }
-                c_node.style.?.style_id = c_node.class;
-            }
-        }
-        target_node_index += 1;
-    }
-    for (node.children.items) |child| {
-        reconcileSizes(child);
-    }
-}
-
-pub fn deduplicateSizes(target_node: *UINode) void {
-    common_count = 0;
-    common_nodes[common_count] = target_node_index;
-    common_uuids[common_count] = target_node.uuid;
-    // Set the target node as seen
-    seen_nodes[target_node_index] = true;
-    common_count += 1;
-    // if no style then return
-    if (target_node.style == null) return;
-    const target_style = target_node.style orelse return;
-    const style_id = target_style.style_id orelse return;
-    if (indexOf(style_id, "size")) |_| return;
-    for (nodes[0..node_count], 0..) |node, i| {
-        if (seen_nodes[i]) continue;
-
-        const node_style = node.style orelse continue;
-        const node_size = node_style.size orelse continue;
-        const target_size = target_style.size orelse continue;
-        if (std.meta.eql(target_size, node_size)) {
-            common_nodes[common_count] = i;
-            common_uuids[common_count] = node.uuid;
-            common_count += 1;
-            seen_nodes[i] = true;
-        }
-    }
-}
-
-pub fn reconcileVisuals(node: *UINode) void {
-    if (node.style != null) {
-        // We only incrment the target node index if the node has a style
-        deduplicateVisuals(node);
-        if (common_count > 1) {
-            const common = KeyGenerator.generateStyleKey("visual", common_uuids[0..common_count], &Fabric.allocator_global);
-            // base_styles[base_style_count] = Style{};
-            // base_styles[base_style_count].visual = node.style.?.visual.?;
-            // base_styles[base_style_count].style_id = std.fmt.allocPrint(Fabric.allocator_global, "{s}", .{common}) catch return;
-            // base_style_count += 1;
-            for (common_nodes[0..common_count]) |node_index| {
-                const c_node = nodes[node_index];
-                if (c_node.class) |class| {
-                    c_node.class = std.fmt.allocPrint(Fabric.allocator_global, "{s} {s}", .{ class, common }) catch return;
-                } else {
-                    c_node.class = std.fmt.allocPrint(Fabric.allocator_global, "{s} {s}", .{ c_node.uuid, common }) catch return;
-                }
-                c_node.style.?.style_id = c_node.class;
-                // c_node.style.?.visual = null;
-            }
-        }
-        target_node_index += 1;
-    }
-    for (node.children.items) |child| {
-        reconcileVisuals(child);
-    }
-}
-
-pub fn deduplicateVisuals(target_node: *UINode) void {
-    common_count = 0;
-    common_nodes[common_count] = target_node_index;
-    common_uuids[common_count] = target_node.uuid;
-    // Set the target node as seen
-    seen_nodes[target_node_index] = true;
-    common_count += 1;
-    // if no style then return
-    if (target_node.style == null) return;
-    const target_style = target_node.style orelse return;
-    // If the style id is not set then it doesnt have anything in common
-    const style_id = target_style.style_id orelse return;
-    // If it does have something in common then return
-    if (indexOf(style_id, "visual")) |_| return;
-    for (nodes[0..node_count], 0..) |node, i| {
-        if (seen_nodes[i]) continue;
-
-        const node_style = node.style orelse continue;
-        const node_visual = node_style.visual orelse continue;
-        const target_visual = target_style.visual orelse continue;
-        if (std.meta.eql(target_visual, node_visual)) {
-            common_nodes[common_count] = i;
-            common_uuids[common_count] = node.uuid;
-            common_count += 1;
-            seen_nodes[i] = true;
-            // node.style.?.visual = null;
-        }
-    }
+    ui_ctx.traverseChildren(ui_ctx.root, ui_ctx.ui_tree.?) catch |err| {
+        Fabric.printlnSrcErr("Could not traverse children {any}", .{err}, @src());
+    };
 }
 
 /// Finds the first index of a `needle` within a `haystack` using SIMD acceleration.

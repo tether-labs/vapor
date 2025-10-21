@@ -57,7 +57,8 @@ export fn getTreeNodeChildrenCount(tree: *CommandsTree) usize {
 }
 
 export fn getUiNodeChildrenCount(tree: *CommandsTree) usize {
-    return tree.node.node_ptr.children.items.len;
+    if (tree.node.node_ptr.children == null) return 0;
+    return tree.node.node_ptr.children.?.items.len;
 }
 
 export fn getTreeNodeChild(tree: *CommandsTree, index: usize) *CommandsTree {
@@ -66,7 +67,8 @@ export fn getTreeNodeChild(tree: *CommandsTree, index: usize) *CommandsTree {
 }
 
 export fn getCtxNodeChild(tree: *CommandsTree, index: usize) ?*CommandsTree {
-    const ui_node = tree.node.node_ptr.children.items[index];
+    if (tree.node.node_ptr.children == null) return null;
+    const ui_node = tree.node.node_ptr.children.?.items[index];
     for (tree.children.items, 0..) |item, i| {
         if (std.mem.eql(u8, ui_node.uuid, item.node.id)) {
             return tree.children.items[i];
@@ -126,6 +128,7 @@ export fn getRemovedNodeLength(index: usize) usize {
 
 /// Calling route renderCycle will mark eveything as dirty
 export fn callRouteRenderCycle(ptr: [*:0]u8) void {
+    UIContext.class_map.clearRetainingCapacity();
     Fabric.renderCycle(ptr);
     Fabric.markChildrenDirty(Fabric.current_ctx.root.?);
     return;

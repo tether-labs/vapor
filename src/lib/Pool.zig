@@ -304,42 +304,42 @@ pub fn free_1024(pool: *Pool, ptr: *[1024]u8) void {
 pub fn createString(pool: *Pool, data: []const u8) !StringData {
     if (!pool.did_init) return error.FreeListPoolNotInitialized;
     if (data.len <= 32) {
-        const ptr = pool.alloc_32() orelse return error.AllocFailed;
+        const ptr = pool.alloc_32() orelse return error.ListEmpty;
         @memcpy(ptr[0..data.len], data);
         return StringData{ .pool_ptr_32 = .{
             .ptr = ptr,
             .len = @intCast(data.len),
         } };
     } else if (data.len <= 64) {
-        const ptr = pool.alloc_64() orelse return error.AllocFailed;
+        const ptr = pool.alloc_64() orelse return error.ListEmpty;
         @memcpy(ptr[0..data.len], data);
         return StringData{ .pool_ptr_64 = .{
             .ptr = ptr,
             .len = @intCast(data.len),
         } };
     } else if (data.len <= 128) {
-        const ptr = pool.alloc_128() orelse return error.AllocFailed;
+        const ptr = pool.alloc_128() orelse return error.ListEmpty;
         @memcpy(ptr[0..data.len], data);
         return StringData{ .pool_ptr_128 = .{
             .ptr = ptr,
             .len = @intCast(data.len),
         } };
     } else if (data.len <= 256) {
-        const ptr = pool.alloc_256() orelse return error.AllocFailed;
+        const ptr = pool.alloc_256() orelse return error.ListEmpty;
         @memcpy(ptr[0..data.len], data);
         return StringData{ .pool_ptr_256 = .{
             .ptr = ptr,
             .len = @intCast(data.len),
         } };
     } else if (data.len <= 512) {
-        const ptr = pool.alloc_512() orelse return error.AllocFailed;
+        const ptr = pool.alloc_512() orelse return error.ListEmpty;
         @memcpy(ptr[0..data.len], data);
         return StringData{ .pool_ptr_512 = .{
             .ptr = ptr,
             .len = @intCast(data.len),
         } };
     } else if (data.len <= 1024) {
-        const ptr = pool.alloc_1024() orelse return error.AllocFailed;
+        const ptr = pool.alloc_1024() orelse return error.ListEmpty;
         @memcpy(ptr[0..data.len], data);
         return StringData{ .pool_ptr_1024 = .{
             .ptr = ptr,

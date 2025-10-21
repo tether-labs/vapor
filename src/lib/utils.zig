@@ -30,14 +30,7 @@ pub fn isMobile() bool {
 }
 
 pub fn hashKey(key: []const u8) u32 {
-    return std.hash.Fnv1a_32.hash(key);
-    // return @as(u32, @intCast((full ^ (full >> 32))));
-    // var h: u32 = 5381;
-    // for (key) |char| {
-    //     h = ((h << 5) +% h) +% char;
-    // }
-    // h = h *% 2654435761;
-    // return h;
+    return std.hash.XxHash32.hash(0, key);
 }
 
 pub fn compareStyles(a: *const Fabric.Style, b: *const Fabric.Style) bool {

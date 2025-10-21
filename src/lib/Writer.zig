@@ -22,9 +22,6 @@ pub fn writeByte(self: *Writer, byte: u8) !void {
 }
 
 pub fn writeU8Num(self: *Writer, byte: u8) !void {
-    // const remaining_buffer = self.buffer[self.pos..];
-    // const formatted = try std.fmt.bufPrint(remaining_buffer, "{d}", .{byte});
-    // self.pos += formatted.len;
     const u32_string = fastLargeIntToString(byte);
     @memcpy(self.buffer[self.pos .. self.pos + u32_string.len], u32_string);
     self.pos += u32_string.len;
@@ -35,30 +32,13 @@ pub fn write(self: *Writer, value: []const u8) !void {
     self.pos += value.len;
 }
 
-// pub fn writeF32(self: *Writer, value: f32) !void {
-//     // Check bounds before writing
-//     if (self.pos + 4 > self.buffer.len) {
-//         return error.BufferOverflow;
-//     }
-//
-//     const byte_slice: []const u8 = std.mem.asBytes(&value);
-//     @memcpy(self.buffer[self.pos .. self.pos + 4], byte_slice);
-//     self.pos += 4;
-// }
-
 pub fn writeF32(self: *Writer, value: f32) !void {
-    // const remaining_buffer = self.buffer[self.pos..];
-    // const formatted = try std.fmt.bufPrint(remaining_buffer, "{d}", .{value});
-    // self.pos += formatted.len;
     const f32_string = fastFloatToString(value);
     @memcpy(self.buffer[self.pos .. self.pos + f32_string.len], f32_string);
     self.pos += f32_string.len;
 }
 
 pub fn writeF16(self: *Writer, value: f16) !void {
-    // const remaining_buffer = self.buffer[self.pos..];
-    // const formatted = try std.fmt.bufPrint(remaining_buffer, "{d}", .{value});
-    // self.pos += formatted.len;
     const f16_string = fastFloatToString(value);
     @memcpy(self.buffer[self.pos .. self.pos + f16_string.len], f16_string);
     self.pos += f16_string.len;
@@ -212,33 +192,21 @@ pub fn writeI32(self: *Writer, value: i32) !void {
     const remaining_buffer = self.buffer[self.pos..];
     const formatted = try std.fmt.bufPrint(remaining_buffer, "{d}", .{value});
     self.pos += formatted.len;
-    // const u32_string = fastLargeIntToString(value);
-    // @memcpy(self.buffer[self.pos .. self.pos + u32_string.len], u32_string);
-    // self.pos += u32_string.len;
 }
 
 pub fn writeI16(self: *Writer, value: i16) !void {
     const remaining_buffer = self.buffer[self.pos..];
     const formatted = try std.fmt.bufPrint(remaining_buffer, "{d}", .{value});
     self.pos += formatted.len;
-    // const u32_string = fastLargeIntToString(value);
-    // @memcpy(self.buffer[self.pos .. self.pos + u32_string.len], u32_string);
-    // self.pos += u32_string.len;
 }
 
 pub fn writeU16(self: *Writer, value: u16) !void {
-    // const remaining_buffer = self.buffer[self.pos..];
-    // const formatted = try std.fmt.bufPrint(remaining_buffer, "{d}", .{value});
-    // self.pos += formatted.len;
     const u32_string = fastLargeIntToString(value);
     @memcpy(self.buffer[self.pos .. self.pos + u32_string.len], u32_string);
     self.pos += u32_string.len;
 }
 
 pub fn writeUsize(self: *Writer, value: usize) !void {
-    // const remaining_buffer = self.buffer[self.pos..];
-    // const formatted = try std.fmt.bufPrint(remaining_buffer, "{d}", .{value});
-    // self.pos += formatted.len;
     const u32_string = fastLargeIntToString(value);
     @memcpy(self.buffer[self.pos .. self.pos + u32_string.len], u32_string);
     self.pos += u32_string.len;
@@ -261,6 +229,9 @@ fn fastLargeIntToString(value: anytype) []const u8 {
     return large_int_buffer[buf_idx..];
 }
 
+
+
+
 fn fastLargeF32ToString(value: f32) []const u8 {
     if (value == 0) return "0";
 
@@ -281,10 +252,6 @@ pub fn writeU32(self: *Writer, value: u32) !void {
     const u32_string = fastLargeIntToString(value);
     @memcpy(self.buffer[self.pos .. self.pos + u32_string.len], u32_string);
     self.pos += u32_string.len;
-
-    // const remaining_buffer = self.buffer[self.pos..];
-    // const formatted = try std.fmt.bufPrint(remaining_buffer, "{d}", .{value});
-    // self.pos += formatted.len;
 }
 
 pub fn print(self: *Writer) !void {

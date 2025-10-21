@@ -207,13 +207,13 @@ pub const Sizing = packed struct {
     //     } } };
     // }
     //
-    // pub fn min_max_vp(min: f32, max: f32) Sizing {
-    //     return .{ .type = .min_max_vp, .size = .{ .min_max_vp = .{
-    //         .min = min,
-    //         .max = max,
-    //     } } };
-    // }
-    //
+    pub fn min_max_vp(min: f32, max: f32) Sizing {
+        return .{ .type = .min_max_vp, .size = .{
+            .min = min,
+            .max = max,
+        } };
+    }
+
     pub fn mobile_desktop_percent(mobile: f32, desktop: f32) Sizing {
         if (isMobile()) {
             return .{ .type = .percent, .size = .{
@@ -1395,11 +1395,11 @@ pub const BorderGrouped = struct {
         return .{ .thickness = .b(1), .color = color };
     }
 
-    pub fn l(thickness: f32, color: Color) BorderGrouped {
+    pub fn l(thickness: u8, color: Color) BorderGrouped {
         return .{ .thickness = .l(thickness), .color = color };
     }
 
-    pub fn r(thickness: f32, color: Color) BorderGrouped {
+    pub fn r(thickness: u8, color: Color) BorderGrouped {
         return .{ .thickness = .l(thickness), .color = color };
     }
 
@@ -2206,9 +2206,8 @@ pub const RenderCommand = struct {
     focus_within: bool = false,
     class: ?[]const u8 = null,
     render_type: StateType = .static,
-    tooltip: ?Tooltip = null,
-    changed_style: bool = false,
-    changed_props: bool = false,
+    tooltip: ?*Tooltip = null,
+    has_children: bool = true,
 };
 
 pub const EventType = enum(u8) {

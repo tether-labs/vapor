@@ -145,14 +145,14 @@ pub fn writeAllStyles(gen: *Generator) void {
     const allocator = Fabric.frame_arena.getFrameAllocator();
     var key_buf: [128]u8 = undefined; // Shared buffer for key generation
 
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_layouts, "cl", &key_buf, writeLayout, null);
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_visuals, "cv", &key_buf, writeVisual, null);
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_positions, "cp", &key_buf, writePos, null);
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_margins_paddings, "cmp", &key_buf, writeMarginPaddings, null);
+    writeCommonStyleGroup(gen, allocator, &Fabric.packed_layouts, "lay", &key_buf, writeLayout, null);
+    writeCommonStyleGroup(gen, allocator, &Fabric.packed_visuals, "vis", &key_buf, writeVisual, null);
+    writeCommonStyleGroup(gen, allocator, &Fabric.packed_positions, "pos", &key_buf, writePos, null);
+    writeCommonStyleGroup(gen, allocator, &Fabric.packed_margins_paddings, "mapa", &key_buf, writeMarginPaddings, null);
 
     // Special cases with ":hover"
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_interactives, "ci", &key_buf, writeInteractive, ":hover");
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_animations, "ca", &key_buf, writeAnimation, ":hover");
+    writeCommonStyleGroup(gen, allocator, &Fabric.packed_interactives, "intr", &key_buf, writeInteractive, ":hover");
+    writeCommonStyleGroup(gen, allocator, &Fabric.packed_animations, "anim", &key_buf, writeAnimation, ":hover");
 }
 
 /// REFACTORED: Now uses the `writeFullNodeRule` helper.

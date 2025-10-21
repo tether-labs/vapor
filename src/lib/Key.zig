@@ -44,6 +44,10 @@ pub const KeyGenerator = struct {
         component_index = count;
     }
 
+    pub fn initWriter() void {
+        writer.init(&buf_128);
+    }
+
     pub fn generateCommonStyleKey(ids: []const []const u8, allocator: *std.mem.Allocator) []const u8 {
 
         // Hash all the IDs in order
@@ -96,9 +100,10 @@ pub const KeyGenerator = struct {
         hash: u32,
         tag: []const u8,
     ) []const u8 {
-        writer.init(&buf_128);
+        // writer.init(&buf_128);
+        writer.reset();
         writer.write(tag) catch "";
-        writer.writeByte('-') catch "";
+        writer.writeByte('_') catch "";
         writer.writeU32(hash) catch "";
         const key = writer.buffer[0..writer.pos];
         @memcpy(buf[0..key.len], key);
@@ -118,11 +123,89 @@ pub const KeyGenerator = struct {
         return result;
     }
 
+    pub fn generateKey_(
+        uuid_buf: []u8,
+        elem_type: ElementType,
+        parent_type: ElementType,
+        index: usize,
+        depth: usize,
+    ) []const u8 {
+
+        // const key = std.fmt.bufPrint(uuid_buf, "{s}-{d}-{d}-genk", .{
+        //     @tagName(elem_type),
+        //     call_counter,
+        //     index orelse 0
+        // }) catch |err| {
+        //     // This will fail if uuid_buf is too small.
+        //     // For a UI, you might want to panic() in debug
+        //     // or return a default key.
+        //     Fabric.println("Failed to generate key: {any}\n", .{err});
+        //     return "";
+        // };
+        // return key;
+
+        // call_counter += 1;
+        // component_index += 1;
+        writer.reset();
+        const tag_name: usize = @intFromEnum(elem_type);
+        const tag_parent: usize = @intFromEnum(parent_type);
+        // writer.write(tag_name) catch unreachable;
+        // writer.write(parent_key) catch "";
+        // writer.write(tag_parent[0..@min(4, tag_parent.len)]) catch "";
+        writer.writeUsize(tag_parent) catch unreachable;
+        writer.writeUsize(tag_name) catch unreachable;
+        // writer.writeByte('_') catch unreachable;
+        writer.writeUsize(depth) catch unreachable;
+        // writer.writeByte('_') catch unreachable;
+        writer.writeUsize(index) catch unreachable;
+        // const hash = std.hash.XxHash32.hash(0, writer.buffer[0..writer.pos]);
+        // writer.reset();
+        // writer.writeU32(43644629) catch "";
+        // writer.writeByte('_') catch "";
+        // writer.write(tag_name[0..@min(4, tag_name.len)]) catch "";
+        // writer.write("-genk") catch "";
+        const key = writer.buffer[0..writer.pos];
+        @memcpy(uuid_buf[0..key.len], key);
+        return uuid_buf[0..key.len];
+    }
+
+    pub fn u32ToBase36(value: u32, buffer: []u8) []u8 {
+        // Maximum length for u32 in base36 is 7 characters (36^7 > 2^32).
+        // Ensure buffer has at least 8 bytes (7 chars + null terminator).
+        if (buffer.len < 8) @panic("Buffer too small for base36 u32");
+
+        var v = value;
+        var i: usize = buffer.len - 1;
+
+        // Null-terminate
+        buffer[i] = 0;
+
+        // Handle zero explicitly
+        if (v == 0) {
+            i -= 1;
+            buffer[i] = '0';
+            return buffer[i..];
+        }
+
+        while (v > 0) {
+            i -= 1;
+            const digit = v % 36;
+            v /= 36;
+            buffer[i] = if (digit < 10)
+                @as(u8, @intCast('0' + digit))
+            else
+                @as(u8, @intCast('a' + (digit - 10)));
+        }
+
+        return buffer[i..];
+    }
+
     pub fn generateKey(
         uuid_buf: []u8,
         elem_type: ElementType,
         parent_key: []const u8,
-        index: ?usize,
+        index: usize,
+        depth: usize,
     ) []const u8 {
         // call_counter += 1;
         // component_index += 1;
@@ -130,10 +213,8 @@ pub const KeyGenerator = struct {
         const tag_name = @tagName(elem_type);
         writer.write(tag_name) catch "";
         writer.write(parent_key) catch "";
-        writer.writeUsize(call_counter) catch "";
-        if (index) |idx| {
-            writer.writeUsize(idx) catch "";
-        }
+        writer.writeUsize(depth) catch "";
+        writer.writeUsize(index) catch "";
         const hash = hashKey(writer.buffer[0..writer.pos]);
         writer.reset();
         writer.writeU32(hash) catch "";
