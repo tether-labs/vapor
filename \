@@ -8,7 +8,6 @@ const Wasm = @import("wasm");
 const Event = @import("Event.zig");
 const utils = @import("utils.zig");
 const hashKey = utils.hashKey;
-const Style = @import("types.zig").Style;
 
 const Rect = struct {
     top: f32,
@@ -160,42 +159,25 @@ pub const Element = struct {
         return Fabric.destroyElementInstEventListener(id, event_type, cb_idx);
     }
 
-    pub fn mutateStyle(self: *Element, style: *const Style) void {
+    pub fn mutateStyle(self: *Element, comptime attribute: []const u8, value: AttributeType) void {
         const id = self._get_id() orelse {
             Fabric.printlnSrc("Id is null", .{}, @src());
             return;
         };
-
-        const fields = @typeInfo(Style).@"struct".fields;
-        inline for (fields) |field| {
-            const field_value = @field(style, field.name);
-            const field_name = field.name;
-            const field_type = field.type;
-            switch (field_type) {
-                []const u8 => {
-                    mutateDomElementStyleString(
-                        id.ptr,
-                        id.len,
-                        field_name.ptr,
-                        field_name.len,
-                        field_value.ptr,
-                        field_value.len,
-                    );
-                },
-                // Color => {
-                //     mutateDomElementStyle(
-                //         id.ptr,
-                //         id.len,
-                //         field_name.ptr,
-                //         field_name.len,
-                //         field_value.Literal.r,
-                //         field_value.Literal.g,
-                //         field_value.Literal.b,
-                //         field_value.Literal.a,
-                //     );
-                // },
-                else => {},
-            }
+        switch (value) {
+            .number => |v| {
+                mutateDomElementStyle(id.ptr, id.len, attribute.ptr, attribute.len, v);
+            },
+            .string => |v| {
+                mutateDomElementStyleString(
+                    id.ptr,
+                    id.len,
+                    attribute.ptr,
+                    attribute.len,
+                    v.ptr,
+                    v.len,
+                );
+            },
         }
     }
 
@@ -317,25 +299,17 @@ pub const Element = struct {
         Fabric.addChild(id.ptr, id.len, childId.ptr, childId.len);
     }
 
-    pub fn focus(self: *Element) void {
+    pub fn focus(self: *Element) ?void {
         const id = self._get_id() orelse {
             Fabric.printlnSrc("Id is null", .{}, @src());
             return;
         };
-        if (self.element_type != .TextField) {
-            Fabric.println("Can only focus on TextField Element, add element Type Input\n", .{});
-            return;
+        if (self.element_type != .Input) {
+            Fabric.println("Can only focus on Input Element, add element Type Input\n", .{});
+            return null;
         }
         // Fabric.addClass(id.ptr, id.len, classId.ptr, classId.len);
         Fabric.focus(id);
-    }
-
-    pub fn focused(self: *Element) bool {
-        const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
-            return false;
-        };
-        return Fabric.focused(id);
     }
 
     pub fn addClass(self: *Element, classId: []const u8) void {
@@ -438,34 +412,12 @@ pub fn mutateDomElementStyleString(
     }
 }
 
-pub export fn getOnFocusCallback(self: *Element) u32 {
-    const uuid = self._get_id() orelse {
-        Fabric.printlnSrcErr("Id is null", .{}, @src());
-        unreachable;
-    };
-    var onid = hashKey(uuid);
-    onid +%= hashKey(Fabric.on_focus_hash);
-    return onid;
-}
-
 pub export fn getOnChangeCallback(self: *Element) u32 {
     const uuid = self._get_id() orelse {
         Fabric.printlnSrcErr("Id is null", .{}, @src());
         unreachable;
     };
-    var onid = hashKey(uuid);
-    onid +%= hashKey(Fabric.on_change_hash);
-    return onid;
-}
-
-pub export fn getOnBlurCallback(self: *Element) u32 {
-    const uuid = self._get_id() orelse {
-        Fabric.printlnSrcErr("Id is null", .{}, @src());
-        unreachable;
-    };
-    var onid = hashKey(uuid);
-    onid +%= hashKey(Fabric.on_blur_hash);
-    return onid;
+    return hashKey(uuid) + hashKey(Fabric.on_change_hash);
 }
 
 var dummy_float_buffer: [8]f32 = undefined;

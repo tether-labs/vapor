@@ -795,6 +795,7 @@ pub const Alignment = enum(u8) {
     end,
     between,
     even,
+    in_line,
 };
 
 pub const BoundingBox = struct {
@@ -1187,9 +1188,9 @@ pub const Outline = enum(u8) {
 pub const FlexType = enum(u8) {
     default,
     flex, // "flex"
+    flow, // "inline"
     center,
     stack, // "inline-flex"
-    flow, // "inherit"
     none, // "centers the child content"
     center_stack, // "centers the child content"
 };
@@ -1330,6 +1331,7 @@ pub const TransformOrigin = enum(u8) {
 pub const Layout = packed struct {
     x: Alignment = .none,
     y: Alignment = .none,
+    pub const in_line = Layout{ .x = .in_line, .y = .in_line };
     pub const flex = Layout{};
     pub const center = Layout{ .x = .center, .y = .center };
     pub const top_center = Layout{ .x = .center, .y = .start };
@@ -1462,6 +1464,8 @@ const FontParams = struct {
     }
 };
 
+pub const FontStyle = enum(u8) { default, normal, italic };
+
 pub const Visual = struct {
     /// Color color as RGBA array [red, green, blue, alpha] (0-255 each)
     /// Default: transparent black
@@ -1478,6 +1482,9 @@ pub const Visual = struct {
 
     /// Font weight (100-900, where 400 is normal, 700 is bold)
     font_weight: ?u16 = null,
+
+    /// Font style (normal, italic)
+    font_style: ?FontStyle = null,
 
     /// Border radius configuration for rounded corners
     border_radius: ?BorderRadius = null,
@@ -1692,6 +1699,7 @@ pub const PackedVisual = packed struct {
     font_size: u8 = 0,
     font_weight: u16 = 0,
     text_color: PackedColor = .{},
+    font_style: FontStyle = .default,
     has_opacity: bool = false,
     opacity: f16 = 1,
     text_decoration: TextDecoration = .none,
@@ -2142,15 +2150,27 @@ const InputParamsFile = struct {
     disabled: ?bool = null,
 };
 
-pub const InputParams = union(enum) {
-    int: InputParamsInt,
-    float: InputParamsFloat,
-    string: InputParamsStr,
-    checkbox: InputParamsCheckBox,
-    radio: InputParamsRadio,
-    password: InputParamsPassword,
-    email: InputParamsEmail,
-    file: InputParamsFile,
+pub const InputTypes = enum(u8) {
+    int,
+    float,
+    string,
+    checkbox,
+    radio,
+    password,
+    email,
+    file,
+};
+
+pub const InputParams = struct {
+    // int: InputParamsInt,
+    // float: InputParamsFloat,
+    type: InputTypes,
+    // on_change: ?*const fn (event: *Event) void = null,
+    // checkbox: InputParamsCheckBox,
+    // radio: InputParamsRadio,
+    // password: InputParamsPassword,
+    // email: InputParamsEmail,
+    // file: InputParamsFile,
 };
 
 pub const StateType = enum {

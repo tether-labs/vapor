@@ -89,49 +89,34 @@ pub inline fn CtxHooks(hooks: Fabric.HooksCtxFuncs, func: anytype, args: anytype
     return LifeCycle.close;
 }
 
-const HooksOptions = struct {
-    hooks: Fabric.HooksFuncs,
-    style: ?*const Style = null,
-};
-
-pub inline fn Hooks(options: HooksOptions) fn (void) void {
+pub inline fn Hooks(hooks: Fabric.HooksFuncs) fn (void) void {
     var elem_decl = ElementDecl{
         .state_type = .static,
-        .style = options.style,
         .elem_type = .Hooks,
     };
 
-    const hooks = options.hooks;
     const ui_node = LifeCycle.open(elem_decl) orelse unreachable;
     if (hooks.mounted) |f| {
         elem_decl.hooks.mounted_id = 1;
-        const uuid_alloc = Fabric.allocator_global.alloc(u8, ui_node.uuid.len) catch |err| {
-            println("Allocator ran out of space {any}\n", .{err});
-            unreachable;
-        };
-        @memcpy(uuid_alloc, ui_node.uuid);
-        Fabric.mounted_funcs.put(uuid_alloc, f) catch |err| {
+        Fabric.mounted_funcs.put(hashKey(ui_node.uuid), f) catch |err| {
             println("Mount Function Registry {any}\n", .{err});
         };
     }
     if (hooks.created) |f| {
-        const id = Fabric.created_funcs.count();
-        elem_decl.hooks.created_id += id + 1;
-        Fabric.created_funcs.put(elem_decl.hooks.created_id, f) catch |err| {
+        elem_decl.hooks.created_id += 1;
+        Fabric.created_funcs.put(hashKey(ui_node.uuid), f) catch |err| {
             println("Mount Function Registry {any}\n", .{err});
         };
     }
     if (hooks.updated) |f| {
-        const id = Fabric.updated_funcs.count();
-        elem_decl.hooks.updated_id += id + 1;
-        Fabric.updated_funcs.put(elem_decl.hooks.updated_id, f) catch |err| {
+        elem_decl.hooks.updated_id += 1;
+        Fabric.updated_funcs.put(hashKey(ui_node.uuid), f) catch |err| {
             println("Mount Function Registry {any}\n", .{err});
         };
     }
     if (hooks.destroy) |f| {
-        const id = Fabric.destroy_funcs.count();
-        elem_decl.hooks.destroy_id += id + 1;
-        Fabric.destroy_funcs.put(elem_decl.hooks.destroy_id, f) catch |err| {
+        elem_decl.hooks.destroy_id += 1;
+        Fabric.destroy_funcs.put(hashKey(ui_node.uuid), f) catch |err| {
             println("Mount Function Registry {any}\n", .{err});
         };
     }
@@ -217,6 +202,28 @@ const FlexType = enum(u8) {
     None = 4, // "centers the child content"
 };
 
+const TextInput = struct {
+    value: []const u8,
+};
+
+pub const Input = union(enum) {
+    // int: InputParamsInt,
+    // float: InputParamsFloat,
+    text: TextInput,
+    // checkbox: InputParamsCheckBox,
+    // radio: InputParamsRadio,
+    // password: InputParamsPassword,
+    // email: InputParamsEmail,
+
+    pub fn onSubmit(self: *const Input, cb: anytype) void {
+        switch (self.*) {
+            .text => |text| {
+                text.onInput = cb;
+            },
+        }
+    }
+};
+
 pub const ChainClose = struct {
     const Self = @This();
     elem_type: Fabric.ElementType,
@@ -238,12 +245,34 @@ pub const ChainClose = struct {
     _border_radius: ?types.BorderRadius = null,
     _margin: ?types.Margin = null,
     _size: ?types.Size = null,
+    _input: ?Input = null,
+    _ui_node: ?*UINode = null,
+    _element: ?*Element = null,
 
     pub fn Text(text: []const u8) Self {
         return Self{
             .elem_type = .Text,
             .text = if (Fabric.isGenerated) "" else text,
         };
+    }
+    
+    pub fn Code(text: []const u8) Self {
+        return Self{
+            .elem_type = .Code,
+            .text = if (Fabric.isGenerated) "" else text,
+        };
+    }
+
+    pub fn Heading(level: u8, text: []const u8) Self {
+        switch (level) {
+            1 => return Self{ .elem_type = .Heading1, .text = text },
+            2 => return Self{ .elem_type = .Heading2, .text = text },
+            3 => return Self{ .elem_type = .Heading3, .text = text },
+            4 => return Self{ .elem_type = .Heading4, .text = text },
+            5 => return Self{ .elem_type = .Heading5, .text = text },
+            6 => return Self{ .elem_type = .Heading6, .text = text },
+            else => return Self{ .elem_type = .Heading1, .text = text },
+        }
     }
 
     pub fn TextFmt(comptime fmt: []const u8, args: anytype) Self {
@@ -258,6 +287,100 @@ pub const ChainClose = struct {
         };
         Fabric.frame_arena.addBytesUsed(text.len);
         return Self{ .elem_type = .TextFmt, .text = if (Fabric.isGenerated) "" else text };
+    }
+
+    pub fn TextField(textfield_type: types.InputTypes) Self {
+        const elem_decl = ElementDecl{
+            .state_type = .static,
+            .elem_type = .TextField,
+        };
+        const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
+            println("{any}\n", .{err});
+            unreachable;
+        };
+
+        switch (textfield_type) {
+            .string => {
+                return Self{
+                    .elem_type = .TextField,
+                    ._ui_node = ui_node,
+                };
+            },
+            else => {
+                unreachable;
+                // @compileError("TextField only accepts []const u8 or TextInput");
+            },
+        }
+    }
+
+    pub fn bind(self: *const Self, element: *Element) Self {
+        var new_self: Self = self.*;
+        element.element_type = .TextField;
+        new_self._element = element;
+        element._node_ptr = self._ui_node orelse {
+            Fabric.printlnSrcErr("Node is null", .{}, @src());
+            unreachable;
+        };
+        const uuid = element._get_id() orelse {
+            Fabric.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        Fabric.element_registry.put(hashKey(uuid), element) catch unreachable;
+        return new_self;
+    }
+
+    pub fn onFocus(self: *const Self, cb: fn (*Fabric.Event) void) *const Self {
+        var element = self._element orelse {
+            Fabric.printlnSrcErr("Element is null must bind() first, before setting onChange", .{}, @src());
+            unreachable;
+        };
+        const uuid = element._get_id() orelse {
+            Fabric.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        var onid = hashKey(uuid);
+        onid +%= hashKey(Fabric.on_change_hash);
+        element.on_focus = cb;
+        Fabric.events_callbacks.put(onid, cb) catch |err| {
+            Fabric.println("Event Callback Error: {any}\n", .{err});
+        };
+        return self;
+    }
+
+    pub fn onBlur(self: *const Self, cb: fn (*Fabric.Event) void) *const Self {
+        var element = self._element orelse {
+            Fabric.printlnSrcErr("Element is null must bind() first, before setting onBlur", .{}, @src());
+            unreachable;
+        };
+        const uuid = element._get_id() orelse {
+            Fabric.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        var onid = hashKey(uuid);
+        onid +%= hashKey(Fabric.on_blur_hash);
+        element.on_blur = cb;
+        Fabric.events_callbacks.put(onid, cb) catch |err| {
+            Fabric.println("Event Callback Error: {any}\n", .{err});
+        };
+        return self;
+    }
+
+    pub fn onChange(self: *const Self, cb: fn (*Fabric.Event) void) *const Self {
+        var element = self._element orelse {
+            Fabric.printlnSrcErr("Element is null must bind() first, before setting onChange", .{}, @src());
+            unreachable;
+        };
+        const uuid = element._get_id() orelse {
+            Fabric.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        var onid = hashKey(uuid);
+        onid +%= hashKey(Fabric.on_change_hash);
+        element.on_change = cb;
+        Fabric.events_callbacks.put(onid, cb) catch |err| {
+            Fabric.println("Event Callback Error: {any}\n", .{err});
+        };
+        return self;
     }
 
     /// Graphic takes a url to a svg file, during client side rendering it will be fetched and inlined
@@ -387,7 +510,9 @@ pub const ChainClose = struct {
             elem_decl.style = &mutable_style;
         }
 
-        _ = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+        if (self.elem_type != .TextField) {
+            _ = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+        }
         Fabric.LifeCycle.configure(elem_decl);
         return Fabric.LifeCycle.close({});
     }
@@ -415,12 +540,14 @@ pub const ChainClose = struct {
             elem_decl.style = &mutable_style;
         }
 
-        _ = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+        if (self.elem_type != .TextField) {
+            _ = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+        }
         Fabric.LifeCycle.configure(elem_decl);
         return Fabric.LifeCycle.close({});
     }
 
-    pub inline fn plain(self: *const Self) void {
+    pub fn plain(self: *const Self) void {
         const elem_decl = Fabric.ElementDecl{
             .state_type = self._state_type,
             .elem_type = self.elem_type,
@@ -429,7 +556,9 @@ pub const ChainClose = struct {
             .svg = self.svg,
             .aria_label = self.aria_label,
         };
-        _ = Fabric.LifeCycle.open(elem_decl);
+        if (self.elem_type != .TextField) {
+            _ = Fabric.LifeCycle.open(elem_decl);
+        }
         Fabric.LifeCycle.configure(elem_decl);
         Fabric.LifeCycle.close({});
     }
@@ -467,7 +596,6 @@ pub const Chain = struct {
     _svg: []const u8 = "",
     _aria_label: ?[]const u8 = null,
     _options: ?ButtonOptions = null,
-    _input_params: ?*const InputParams = null,
     _ui_node: ?*UINode = null,
     _id: ?[]const u8 = null,
     _style: ?*const Fabric.Style = null,
@@ -498,10 +626,6 @@ pub const Chain = struct {
 
     pub fn Label(text: []const u8, tag: []const u8) Self {
         return Self{ .elem_type = .Text, .text = text, .href = tag };
-    }
-
-    pub fn Input(params: InputParams) Self {
-        return Self{ .elem_type = .Input, ._input_params = params, .style = style };
     }
 
     pub fn Button(options: ButtonOptions) Self {
@@ -554,6 +678,7 @@ pub const Chain = struct {
     }
 
     pub const Box = Self{ ._elem_type = .FlexBox };
+    pub const Section = Self{ ._elem_type = .Intersection };
     pub const Center = Self{ ._elem_type = .FlexBox, ._flex_type = .Center };
     pub const Stack = Self{ ._elem_type = .FlexBox, ._flex_type = .Stack };
     pub const List = Self{ ._elem_type = .List };
@@ -688,7 +813,6 @@ pub const Chain = struct {
             .href = self._href,
             .svg = self._svg,
             .aria_label = self._aria_label,
-            .input_params = self._input_params,
             .animation_enter = self._animation_enter,
             .animation_exit = self._animation_exit,
         };

@@ -126,6 +126,21 @@ export fn getRemovedNodeLength(index: usize) usize {
     return Fabric.removed_nodes.items[index].uuid.len;
 }
 
+export fn inputCallback(id_ptr: [*:0]u8) void {
+    const id = std.mem.span(id_ptr);
+    defer Fabric.allocator_global.free(id);
+    const element = Fabric.element_registry.get(hashKey(id)) orelse return;
+    const text = element.getInputValue() orelse unreachable;
+    element.text = text;
+}
+
+export fn getElementPtr(id_ptr: [*:0]u8) ?*Fabric.Element {
+    const id = std.mem.span(id_ptr);
+    defer Fabric.allocator_global.free(id);
+    const element = Fabric.element_registry.get(hashKey(id)) orelse return null;
+    return element;
+}
+
 /// Calling route renderCycle will mark eveything as dirty
 export fn callRouteRenderCycle(ptr: [*:0]u8) void {
     UIContext.class_map.clearRetainingCapacity();
@@ -354,6 +369,16 @@ export fn timeOutCtxCallback(id_ptr: [*:0]u8) void {
     defer Fabric.allocator_global.free(id);
     const node = Fabric.callback_registry.get(hashKey(id)) orelse return;
     @call(.auto, node.data.runFn, .{&node.data});
+}
+
+export fn callbackCtx(callback_ptr: [*:0]u8, data_ptr: [*:0]u8, is_in_view: bool) void {
+    const callback_name = std.mem.span(callback_ptr);
+    const data = std.mem.span(data_ptr);
+    // defer Fabric.allocator_global.free(callback_name);
+    // defer Fabric.allocator_global.free(data);
+    const opaque_node = Fabric.opaque_registry.get(hashKey(callback_name)) orelse return;
+    var target = struct { url : []const u8, is_in_view : bool } { .url = data, .is_in_view = is_in_view };
+    @call(.auto, opaque_node.data.runFn, .{@as(*anyopaque, @ptrCast(&target))});
 }
 
 export fn timeoutCtxCallBackId(id: usize) void {

@@ -204,9 +204,9 @@ pub const KeyGenerator = struct {
         uuid_buf: []u8,
         elem_type: ElementType,
         parent_key: []const u8,
-        index: usize,
         depth: usize,
     ) []const u8 {
+        const index = getComponentCount();
         // call_counter += 1;
         // component_index += 1;
         writer.init(&buf_128);

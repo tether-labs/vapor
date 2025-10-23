@@ -67,6 +67,7 @@ const PropValue = struct {
         flex_type,
         string_literal, // For values like "flex", "center", etc.
         opacity,
+        font_style,
     };
 
     // Union to hold the actual data
@@ -97,6 +98,7 @@ const PropValue = struct {
         flex_type: Types.FlexType,
         string_literal: []const u8,
         opacity: f32,
+        font_style: Types.FontStyle,
     };
 };
 
@@ -111,6 +113,7 @@ fn writePropValue(prop: []const u8, value: PropValue, writer: writer_t) void {
         .position_type => positionTypeToCSS(value.data.position_type, writer) catch {},
         .direction => directionToCSS(value.data.direction, writer) catch {},
         .sizing => sizingTypeToCSS(value.data.sizing, writer) catch {},
+        .font_style => fontStyleToCSS(value.data.font_style, writer) catch {},
         .padding => {
             writer.writeU8Num(value.data.padding.top) catch {};
             writer.write("px ") catch {};
@@ -264,7 +267,7 @@ fn writePropValue(prop: []const u8, value: PropValue, writer: writer_t) void {
 
 // Maps for simple enum-to-string conversions
 const direction_map = [_][]const u8{ "column", "row" };
-const alignment_map = [_][]const u8{ "none", "center", "flex-start", "flex-end", "flex-start", "flex-end", "space-between", "space-evenly" };
+const alignment_map = [_][]const u8{ "none", "center", "flex-start", "flex-end", "flex-start", "flex-end", "space-between", "space-evenly", "flex-start" };
 const position_type_map = [_][]const u8{ "none", "relative", "absolute", "fixed", "sticky" };
 const float_type_map = [_][]const u8{ "top", "bottom", "left", "right" };
 const transform_origin_map = [_][]const u8{ "top", "bottom", "right", "left" };
@@ -276,9 +279,10 @@ const box_sizing_map = [_][]const u8{ "content-box", "border-box", "padding-box"
 const list_style_map = [_][]const u8{ "default", "none", "disc", "circle", "square", "decimal", "decimal-leading-zero", "lower-roman", "upper-roman", "lower-alpha", "upper-alpha", "lower-greek", "armenian", "georgian", "inherit", "initial", "revert", "unset" };
 const flex_wrap_map = [_][]const u8{ "none", "nowrap", "wrap", "wrap-reverse", "inherit", "initial", "revert", "unset" };
 const white_space_map = [_][]const u8{ "default", "normal", "nowrap", "pre", "pre-wrap", "pre-line", "break-spaces", "inherit", "initial", "revert", "unset" };
-const flex_type_map = [_][]const u8{ "default", "flex", "inline-flex", "block", "inline-block" };
+const flex_type_map = [_][]const u8{ "default", "flex", "inline", "block", "inline-block" };
 const timing_function_map = [_][]const u8{ "ease", "linear", "ease-in", "ease-out", "ease-in-out", "bounce", "elastic" };
 const animation_direction_map = [_][]const u8{ "normal ", "reverse ", "forwards ", "alternate " };
+const font_style_map = [_][]const u8{ "default", "normal", "italic" };
 
 /// Generic helper to write a CSS string from a pre-defined map based on an enum's value.
 /// The `string_map` must have its string literals in the same order as the enum declaration.
@@ -301,6 +305,10 @@ fn alignmentToCSS(_align: Alignment, writer: writer_t) !void {
 
 fn positionTypeToCSS(pos_type: PositionType, writer: writer_t) !void {
     try writeMappedString(PositionType, pos_type, &position_type_map, writer);
+}
+
+fn fontStyleToCSS(font_style: Types.FontStyle, writer: writer_t) !void {
+    try writeMappedString(Types.FontStyle, font_style, &font_style_map, writer);
 }
 
 fn floatTypeToCSS(float_type: FloatType) []const u8 {
@@ -624,6 +632,10 @@ pub fn checkVisual(visual: *const Types.PackedVisual, writer: writer_t) void {
         writer.write(";\n") catch {};
     }
 
+    if (visual.font_style != .default) {
+        writePropValue("font-style", .{ .tag = .font_style, .data = .{ .font_style = visual.font_style } }, writer);
+    }
+
     if (visual.has_border_thickeness) {
         const border_thickness = visual.border_thickness;
         writePropValue("border-width", .{ .tag = .border, .data = .{ .border = border_thickness } }, writer);
@@ -697,7 +709,7 @@ pub fn generateLayout(layout_ptr: *const Types.PackedLayout, writer: *Writer) vo
     const layout = layout_ptr.layout;
     const direction = layout_ptr.direction;
     if (layout_ptr.flex != .default) {
-        writePropValue("display", .{ .tag = .flex_type, .data = .{ .flex_type = .flex } }, writer);
+        writePropValue("display", .{ .tag = .flex_type, .data = .{ .flex_type = layout_ptr.flex } }, writer);
         writePropValue("flex-direction", .{ .tag = .direction, .data = .{ .direction = direction } }, writer);
     }
     if (layout.x != .none and layout.y != .none) {

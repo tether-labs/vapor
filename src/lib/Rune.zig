@@ -344,9 +344,9 @@ pub fn Signal(comptime T: type) type {
 
         /// compare the current signal value with another
         /// add other compare functionality, for example equal deep
-        pub fn compare(self: *Self, cmp_value: T) bool {
-            switch (@TypeOf(T)) {
-                []const u8 => {
+        pub fn compare(self: *Self, comptime cmp_value: T) bool {
+            switch (T) {
+                []const u8, []u8, ?[]const u8 => {
                     return std.mem.eql(u8, self._value, cmp_value);
                 },
                 else => {
@@ -511,16 +511,16 @@ pub fn Signal(comptime T: type) type {
         /// it also updates the values attached ie if the text is updated
         fn notifyComponents(self: *Self) void {
             for (self._component_subscribers.items) |node| {
-                if (node.dynamic == .grain) {
-                    // This is broken!!!!!!!!!!!!!!!!!!!
-                    if (isNodeChild(node)) {
-                        Fabric.println("Found node", .{});
-                        // Fabric.cycleGrain();
-                        Fabric.grain_element_uuid = node.uuid;
-                        return;
-                    }
-                    continue;
-                }
+                // if (node.state_type == .grain) {
+                //     // This is broken!!!!!!!!!!!!!!!!!!!
+                //     if (isNodeChild(node)) {
+                //         Fabric.println("Found node", .{});
+                //         // Fabric.cycleGrain();
+                //         Fabric.grain_element_uuid = node.uuid;
+                //         return;
+                //     }
+                //     continue;
+                // }
                 if (node.type == ._If) {
                     if (@TypeOf(self._value) == bool) {
                         node.show = self._value;

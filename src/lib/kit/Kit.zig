@@ -1,6 +1,9 @@
 const std = @import("std");
 const Fabric = @import("../Fabric.zig");
 const isWasi = Fabric.isWasi;
+const Wasm = Fabric.Wasm;
+const utils = @import("../utils.zig");
+const hashKey = utils.hashKey;
 
 pub const Kit = @This();
 
@@ -827,4 +830,44 @@ pub const QueryBuilder = struct {
     pub fn getParams(query_builder: *QueryBuilder) []const Param {
         return query_builder.params.items;
     }
+};
+
+pub const Observer = struct {
+    pub const Target = struct {
+        url: []const u8,
+        is_in_view: bool,
+    };
+    name: []const u8,
+    callback: *const fn (Target) void,
+    // _node: *Fabric.Node,
+    pub fn new(name: []const u8, callback: anytype) Observer {
+        const Closure = struct {
+            opaque_node: Fabric.OpaqueNode = .{ .data = .{ .runFn = runFn } },
+            fn runFn(opaque_args: *anyopaque) void {
+                const target = @as(*const Target, @alignCast(@ptrCast(opaque_args))).*;
+                // const c_str: [*:0]const u8 = @as(?[*:0]const u8, @ptrCast(opaque_args)).?;
+                // 2. Create a valid Zig slice from the C-string
+                // const args: []const u8 = std.mem.span(c_str);
+                @call(.auto, callback, .{target});
+            }
+        };
+
+        const closure = Fabric.allocator_global.create(Closure) catch |err| {
+            Fabric.println("Error could not create closure {any}\n ", .{err});
+            unreachable;
+        };
+        closure.* = .{};
+
+        Fabric.opaque_registry.put(hashKey(name), &closure.opaque_node) catch |err| {
+            Fabric.println("Button Function Registry {any}\n", .{err});
+        };
+
+        Wasm.createObserverWasm(name.ptr, name.len);
+
+        return Observer{
+            .name = name,
+            .callback = callback,
+        };
+    }
+    // fn addCallBack(name: []const u8, cb: anytype, comptime T: type) void {}
 };

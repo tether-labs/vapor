@@ -21,7 +21,7 @@ pub const KeyStone = @import("keystone/KeyStone.zig");
 pub const Wasm = @import("wasm");
 const getVisualStyle = @import("convertStyleCustomWriter.zig").getVisualStyle;
 const Bridge = @import("Bridge.zig");
-const Event = @import("Event.zig");
+pub const Event = @import("Event.zig");
 const Canopy = @import("Canopy.zig");
 const CSSGenerator = @import("CSSGenerator.zig");
 const hashKey = utils.hashKey;
@@ -44,7 +44,7 @@ pub const generateStyle = @import("convertStyleCustomWriter.zig").generateStyle;
 const generateInputHTML = @import("grabInputDetails.zig").generateInputHTML;
 const grabInputDetails = @import("grabInputDetails.zig");
 const utils = @import("utils.zig");
-const createInput = grabInputDetails.createInput;
+// const createInput = grabInputDetails.createInput;
 const getInputSize = grabInputDetails.getInputSize;
 const getInputType = grabInputDetails.getInputType;
 const getAriaLabel = utils.getAriaLabel;
@@ -55,6 +55,11 @@ const Debugger = @import("Debugger.zig");
 const NodePool = @import("NodePool.zig");
 
 pub const Component = fn (void) void;
+
+pub const on_change_hash = "onChange";
+pub const on_submit_hash = "onSubmit";
+pub const on_focus_hash = "onFocus";
+pub const on_blur_hash = "onBlur";
 
 const EventType = types.EventType;
 const Active = types.Active;
@@ -94,6 +99,7 @@ pub var packed_margins_paddings_pool: std.heap.MemoryPool(types.PackedMarginsPad
 pub var packed_visuals_pool: std.heap.MemoryPool(types.PackedVisual) = undefined;
 pub var packed_animations_pool: std.heap.MemoryPool(types.PackedAnimations) = undefined;
 pub var packed_interactives_pool: std.heap.MemoryPool(types.PackedInteractive) = undefined;
+pub var element_registry: std.AutoHashMap(u32, *Element) = undefined;
 
 var serious_error: bool = false;
 
@@ -314,6 +320,9 @@ pub var time_out_registry: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var ctx_registry: std.AutoHashMap(u32, *Node) = undefined;
 pub var time_out_ctx_registry: std.AutoHashMap(usize, *Node) = undefined;
 pub var callback_registry: std.AutoHashMap(u32, *Node) = undefined;
+
+pub const OpaqueNode = struct { data: struct { runFn: *const fn (*anyopaque) void } };
+pub var opaque_registry: std.AutoHashMap(u32, *OpaqueNode) = undefined;
 pub var fetch_registry: std.AutoHashMap(u32, *Kit.FetchNode) = undefined;
 pub var events_callbacks: std.AutoHashMap(u32, *const fn (*Event) void) = undefined;
 pub var events_inst_callbacks: std.AutoHashMap(u32, *EvtInstNode) = undefined;
@@ -404,6 +413,7 @@ pub fn init(config: FabricConfig) void {
     // grain_subs = std.array_list.Managed(*GrainStruct.ComponentNode).init(allocator);
     classes_to_add = std.array_list.Managed(Class).init(allocator);
     classes_to_remove = std.array_list.Managed(Class).init(allocator);
+    element_registry = std.AutoHashMap(u32, *Element).init(allocator);
 
     // Init Context Data
     // Reconciler.node_map = std.StringHashMap(usize).init(allocator);
@@ -411,6 +421,7 @@ pub fn init(config: FabricConfig) void {
     // Reconciliation styles dedupe // this is 2kb
     // UIContext.nodes = allocator.alloc(*UINode, config.page_node_count) catch unreachable;
 
+    UIContext.indexes = std.AutoHashMap(u32, usize).init(allocator);
     // @memset(UIContext.common_nodes, 0);
     for (0..continuations.len) |i| {
         continuations[i] = null;
@@ -425,9 +436,9 @@ pub fn init(config: FabricConfig) void {
     // _ = getFocusStyle(null); // 20kb
     // _ = getFocusWithinStyle(null); // 20kb
     // this adds 4kb
-    _ = createInput(null); // 20kb
-    _ = getInputType(null); // 5kb
-    _ = getInputSize(null); // 5kb
+    // _ = createInput(null); // 20kb
+    // _ = getInputType(null); // 5kb
+    // _ = getInputSize(null); // 5kb
     _ = getAriaLabel(null); // < 1kb
 
     if (build_options.enable_debug) {
@@ -442,6 +453,7 @@ fn initRegistries(persistent_allocator: std.mem.Allocator) void {
     ctx_registry = std.AutoHashMap(u32, *Node).init(persistent_allocator); // this adds like 30kb
     time_out_ctx_registry = std.AutoHashMap(usize, *Node).init(persistent_allocator);
     callback_registry = std.AutoHashMap(u32, *Node).init(persistent_allocator);
+    opaque_registry = std.AutoHashMap(u32, *OpaqueNode).init(persistent_allocator);
     fetch_registry = std.AutoHashMap(u32, *Kit.FetchNode).init(persistent_allocator);
 }
 
@@ -654,6 +666,7 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     // packed_visuals.clearRetainingCapacity();
     // packed_interactives.clearRetainingCapacity();
     removed_nodes.clearRetainingCapacity();
+    UIContext.indexes.clearRetainingCapacity();
     // Fabric.btn_registry.clearRetainingCapacity();
     // Fabric.mounted_funcs.clearRetainingCapacity();
 
@@ -1036,6 +1049,16 @@ pub inline fn destroyElementInstEventListener(
 /// void
 pub inline fn focus(element_uuid: []const u8) void {
     Wasm.elementFocusWasm(element_uuid.ptr, element_uuid.len);
+}
+
+/// This function creates an focuses on the element.
+/// # Parameters:
+/// - `element_id`: []const u8,
+///
+/// # Returns:
+/// void
+pub inline fn focused(element_uuid: []const u8) bool {
+    return Wasm.elementFocusedWasm(element_uuid.ptr, element_uuid.len);
 }
 
 /// This function creates an eventListener on the element.
@@ -1629,6 +1652,19 @@ pub fn printlnSrc(
         _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
         allocator_global.free(buf_with_src);
         allocator_global.free(buf);
+    }
+}
+
+pub fn print(
+    comptime fmt: []const u8,
+    args: anytype,
+) void {
+    if (isWasi and build_options.enable_debug) {
+        const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
+        _ = Wasm.consoleLogWasm(buf.ptr, buf.len);
+        allocator_global.free(buf);
+    } else if (!isWasi) {
+        std.debug.print(fmt, args);
     }
 }
 

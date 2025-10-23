@@ -98,6 +98,13 @@ pub const UINode = struct {
             return error.BufferOverflowIncreasePageNodeCount;
         };
     }
+
+    // pub fn orderedMove(node: *UINode) void {
+    //     const parent = node.parent orelse return;
+    //     var children = parent.children orelse return;
+    //     const index = node.finger_print % children.items.len;
+    //     children.insertBounded(, item: *UINode)
+    // }
 };
 
 pub fn init(_: *UIContext, parent: ?*UINode, etype: EType) !*UINode {
@@ -189,25 +196,26 @@ pub fn stackPop(ui_ctx: *UIContext) void {
 
 pub var uuid_depth: usize = 0;
 var current_tree: usize = 0;
+pub var indexes: std.AutoHashMap(u32, usize) = undefined;
 fn setUUID(parent: *UINode, child: *UINode) void {
     uuid_depth += 1;
     // const count = key_depth_map.get(hashKey(parent.uuid)) orelse blk: {
     //     break :blk 0;
     // };
 
-    // const component_count = component_index_map.get(hashKey(parent.uuid)) orelse blk: {
-    //     break :blk 0;
-    // };
+    const component_count = indexes.get(hashKey(parent.uuid)) orelse blk: {
+        break :blk 0;
+    };
 
     // Set the keyGenerator count
     // KeyGenerator.setCount(count);
-    // KeyGenerator.setComponentCount(component_count);
+    KeyGenerator.setComponentCount(component_count);
     // KeyGenerator.resetCounter();
     const index: usize = parent.children_count;
     if (child.uuid.len > 0) {
-        KeyGenerator.incrementComponentCount();
+        // KeyGenerator.incrementComponentCount();
         // KeyGenerator.incrementCount();
-        child.index = KeyGenerator.getComponentCount();
+        child.index = index;
     } else {
         KeyGenerator.incrementComponentCount();
         // KeyGenerator.incrementCount();
@@ -217,7 +225,6 @@ fn setUUID(parent: *UINode, child: *UINode) void {
             &child.uuid_buf,
             child.type,
             parent.uuid,
-            index,
             uuid_depth,
         );
         // const string_data = Fabric.pool.createString(key) catch |err| {
@@ -235,9 +242,9 @@ fn setUUID(parent: *UINode, child: *UINode) void {
     // key_depth_map.put(hashKey(parent.uuid), KeyGenerator.getCount()) catch |err| {
     //     Fabric.printlnSrcErr("{any}", .{err}, @src());
     // };
-    // component_index_map.put(hashKey(parent.uuid), KeyGenerator.getComponentCount()) catch |err| {
-    //     Fabric.printlnSrcErr("{any}", .{err}, @src());
-    // };
+    indexes.put(hashKey(parent.uuid), KeyGenerator.getComponentCount()) catch |err| {
+        Fabric.printlnSrcErr("{any}", .{err}, @src());
+    };
 }
 
 // Open takes a current stack and adds the elements depth first search
@@ -382,6 +389,11 @@ pub fn checkVisual(visual: *const types.Visual, packet_visual: *types.PackedVisu
     if (visual.font_weight) |font_weight| {
         packet_visual.font_weight = font_weight;
     }
+
+    if (visual.font_style) |font_style| {
+        packet_visual.font_style = font_style;
+    }
+
     if (visual.text_color) |color| {
         var text_color = packet_visual.text_color;
         packColor(color, &text_color);
@@ -427,6 +439,7 @@ var packed_interactive: types.PackedInteractive = .{};
 var packed_transition: types.PackedTransition = .{};
 
 pub var class_map: std.StringHashMap(StringData) = undefined;
+var buf: [128]u8 = undefined;
 fn buildClassString(
     field_ptrs: *const PackedFieldPtrs,
     current_open: *UINode,
@@ -447,42 +460,36 @@ fn buildClassString(
     }
 
     if (field_ptrs.layout_ptr) |_| {
-        var buf: [128]u8 = undefined;
         const common = KeyGenerator.generateHashKey(&buf, hash_l, "lay");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
     }
 
     if (field_ptrs.position_ptr) |_| {
-        var buf: [128]u8 = undefined;
         const common = KeyGenerator.generateHashKey(&buf, hash_p, "pos");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
     }
 
     if (field_ptrs.margins_paddings_ptr) |_| {
-        var buf: [128]u8 = undefined;
         const common = KeyGenerator.generateHashKey(&buf, hash_m, "mapa");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
     }
 
     if (field_ptrs.visual_ptr) |_| {
-        var buf: [128]u8 = undefined;
         const common = KeyGenerator.generateHashKey(&buf, hash_v, "vis");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
     }
 
     if (field_ptrs.animations_ptr) |_| {
-        var buf: [128]u8 = undefined;
         const common = KeyGenerator.generateHashKey(&buf, hash_a, "anim");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
     }
 
     if (field_ptrs.interactive_ptr) |_| {
-        var buf: [128]u8 = undefined;
         const common = KeyGenerator.generateHashKey(&buf, hash_i, "intr");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
@@ -505,34 +512,16 @@ fn buildClassString(
 pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
     const stack = ui_ctx.stack orelse unreachable;
     const current_open = stack.ptr orelse unreachable;
+    const parent = current_open.parent orelse unreachable;
     const style = elem_decl.style;
     if (style != null and style.?.id != null) {
         current_open.uuid = style.?.id.?;
     }
-
-    packed_position = .{};
-    packed_layout = .{};
-    packed_margins_paddings = .{};
-    packed_visual = .{};
-    packed_animations = .{};
-    packed_interactive = .{};
-    packed_transition = .{};
-
-    var hash_l: u32 = 0;
-    var hash_p: u32 = 0;
-    var hash_mp: u32 = 0;
-    var hash_v: u32 = 0;
-    var hash_a: u32 = 0;
-    var hash_i: u32 = 0;
-
+    current_open.finger_print +%= parent.finger_print;
     current_open.finger_print +%= @intFromEnum(current_open.type);
     if (elem_decl.elem_type == .Svg) {
         current_open.text = elem_decl.svg;
         current_open.finger_print +%= hashKey(elem_decl.svg);
-    } else if (elem_decl.elem_type == .Input) {
-        current_open.input_params = elem_decl.input_params.?;
-        current_open.text = elem_decl.text orelse "";
-        current_open.finger_print +%= hashKey(current_open.text.?);
     } else if (elem_decl.text) |text| {
         current_open.text = text;
         current_open.finger_print +%= hashKey(text);
@@ -546,6 +535,21 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
     }
 
     if (style) |s| {
+        var hash_l: u32 = 0;
+        var hash_p: u32 = 0;
+        var hash_mp: u32 = 0;
+        var hash_v: u32 = 0;
+        var hash_a: u32 = 0;
+        var hash_i: u32 = 0;
+
+        packed_position = .{};
+        packed_layout = .{};
+        packed_margins_paddings = .{};
+        packed_visual = .{};
+        packed_animations = .{};
+        packed_interactive = .{};
+        packed_transition = .{};
+
         current_open.packed_field_ptrs = PackedFieldPtrs{};
         var hash_id: bool = false;
         if (s.style_id != null) {
@@ -557,7 +561,10 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
         if (s.layout != null or s.size != null or s.child_gap != null) {
             // packed_layout = .{};
             if (s.layout) |layout| {
-                if (current_open.text != null) {
+                if (layout.x == .in_line and layout.y == .in_line) {
+                    packed_layout.flex = .flow;
+                    packed_layout.layout = layout;
+                } else if (current_open.text != null) {
                     packed_layout.text_align = layout;
                 } else {
                     packed_layout.flex = .flex;
@@ -639,7 +646,7 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
         }
 
         // ** Packed Visual **
-        if (s.visual != null or s.list_style != null) {
+        if (s.visual != null or s.list_style != null or s.white_space != null) {
             // packed_visual = .{};
             if (s.font_family) |font_family| {
                 hash_v +%= hashKey(font_family);
@@ -749,11 +756,9 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                         &Fabric.packed_interactives_pool,
                     ) catch unreachable;
                 }
-            }
 
-            hash_a = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_animations));
+                hash_a = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_animations));
 
-            if (s.interactive) |interactive| {
                 if (interactive.hover) |hover| {
                     if (hover.transform) |transform| {
                         var packed_transform: types.PackedTransform = undefined;
@@ -761,16 +766,16 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                         packed_animations.transform = packed_transform;
                     }
                 }
-            }
 
-            if (!hash_id) {
-                if (packed_animations.has_transform) {
-                    current_open.packed_field_ptrs.?.animations_ptr = getOrPutAndUpdateHash(
-                        hash_a,
-                        packed_animations,
-                        &Fabric.packed_animations,
-                        &Fabric.packed_animations_pool,
-                    ) catch unreachable;
+                if (!hash_id) {
+                    if (packed_animations.has_transform) {
+                        current_open.packed_field_ptrs.?.animations_ptr = getOrPutAndUpdateHash(
+                            hash_a,
+                            packed_animations,
+                            &Fabric.packed_animations,
+                            &Fabric.packed_animations_pool,
+                        ) catch unreachable;
+                    }
                 }
             }
         }
