@@ -29,12 +29,12 @@ pub fn build(b: *std.Build) void {
     // This creates a "module", which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
     // Every executable or library we compile will be based on one or more modules.
-    var fabric_imports = std.array_list.Managed(std.Build.Module.Import).init(b.allocator);
+    var vapor_imports = std.array_list.Managed(std.Build.Module.Import).init(b.allocator);
     if (user_config_module) |ucm| {
-        fabric_imports.append(.{ .name = "user_config", .module = ucm }) catch @panic("OOM");
+        vapor_imports.append(.{ .name = "user_config", .module = ucm }) catch @panic("OOM");
     }
     
-    const mod = b.addModule("fabric", .{
+    const mod = b.addModule("vapor", .{
         // `root_source_file` is the Zig "entry point" of the module. If a module
         // only contains e.g. external object files, you can make this `null`.
         // In this case the main source file is merely a path, however, in more
@@ -42,13 +42,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
-        // Add user_config as an import to the fabric module if it exists
-        .imports = fabric_imports.items,
+        // Add user_config as an import to the vapor module if it exists
+        .imports = vapor_imports.items,
     });
     
     // // We will also create a module for our other entry point, 'main.zig'.
     var exe_imports = std.array_list.Managed(std.Build.Module.Import).init(b.allocator);
-    exe_imports.append(.{ .name = "fabric", .module = mod }) catch @panic("OOM");
+    exe_imports.append(.{ .name = "vapor", .module = mod }) catch @panic("OOM");
     if (user_config_module) |ucm| {
         exe_imports.append(.{ .name = "user_config", .module = ucm }) catch @panic("OOM");
     }
@@ -66,7 +66,7 @@ pub fn build(b: *std.Build) void {
     // This creates another `std.Build.Step.Compile`, but this one builds an executable
     // rather than a static library.
     const exe = b.addExecutable(.{
-        .name = "fabric",
+        .name = "vapor",
         .root_module = exe_mod,
     });
     b.installArtifact(exe);

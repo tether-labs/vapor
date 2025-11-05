@@ -17,8 +17,8 @@ const Pos = Types.Pos;
 const PosType = Types.PosType;
 const FlexType = Types.FlexType;
 const TransformOrigin = Types.TransformOrigin;
-const Fabric = @import("Fabric.zig");
-const Animation = Fabric.Animation;
+const Vapor = @import("Vapor.zig");
+const Animation = Vapor.Animation;
 const AnimationType = Types.AnimationType;
 const ListStyle = Types.ListStyle;
 const Transition = Types.Transition;
@@ -373,7 +373,7 @@ fn colorToCSS(color: Color, writer: anytype) !void {
         .Literal => |rgba| {
             // const alpha = @as(f32, @floatFromInt(rgba.a)) / 255.0;
             // const alpha = @round(@as(f32, @floatFromInt(rgba.a)) / 255.0 * 100.0) / 100.0;
-            // Fabric.println("alpha: {any}", .{alpha});
+            // Vapor.println("alpha: {any}", .{alpha});
             if (rgba.a == 1) {
                 try writer.write("rgb(");
                 try writer.writeU8Num(rgba.r);
@@ -1109,7 +1109,7 @@ pub export fn getStyle(node_ptr: ?*UINode) ?[*]const u8 {
 }
 
 pub export fn getGlobalStyle() ?[*]const u8 {
-    const user_defaults = Fabric.Style.getDefault();
+    const user_defaults = Vapor.Style.getDefault();
     generateStyle(null, &user_defaults);
     // Return a pointer to the CSS string
     return style_style.ptr;
@@ -1130,7 +1130,7 @@ pub fn setGlobalStyleVariables(catalog: Catalog) void {
         const name = theme_def.name;
         const theme = theme_def.theme;
         if (theme_def.default and has_default) {
-            Fabric.printlnErr("Theme {s} is default, but another theme is also default", .{name});
+            Vapor.printlnErr("Theme {s} is default, but another theme is also default", .{name});
             return;
         }
         if (theme_def.default) {

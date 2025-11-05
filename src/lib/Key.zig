@@ -1,5 +1,5 @@
 const std = @import("std");
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const UINode = @import("UITree.zig").UINode;
 const ElementType = @import("types.zig").ElementType;
 const Writer = @import("Writer.zig");
@@ -60,7 +60,7 @@ pub const KeyGenerator = struct {
 
         // Convert to UUID-like string (128-bit represented as hex)
         const result = std.fmt.allocPrint(allocator.*, "common-{x:0>16}", .{hash}) catch |err| {
-            Fabric.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
+            Vapor.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
             return "fallback-common-key";
         };
 
@@ -79,7 +79,7 @@ pub const KeyGenerator = struct {
 
         // Convert to UUID-like string (128-bit represented as hex)
         const result = std.fmt.allocPrint(allocator.*, "{s}-{x:0>16}", .{ tag, hash }) catch |err| {
-            Fabric.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
+            Vapor.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
             return "fallback-common-key";
         };
 
@@ -116,7 +116,7 @@ pub const KeyGenerator = struct {
         tag: []const u8,
     ) []const u8 {
         const result = std.fmt.allocPrint(allocator.*, "{s}-{any}", .{ tag, hash }) catch |err| {
-            Fabric.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
+            Vapor.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
             return "fallback-common-key";
         };
 
@@ -139,7 +139,7 @@ pub const KeyGenerator = struct {
         //     // This will fail if uuid_buf is too small.
         //     // For a UI, you might want to panic() in debug
         //     // or return a default key.
-        //     Fabric.println("Failed to generate key: {any}\n", .{err});
+        //     Vapor.println("Failed to generate key: {any}\n", .{err});
         //     return "";
         // };
         // return key;
@@ -217,9 +217,9 @@ pub const KeyGenerator = struct {
         writer.writeUsize(index) catch "";
         const hash = hashKey(writer.buffer[0..writer.pos]);
         writer.reset();
-        writer.writeU32(hash) catch "";
-        writer.writeByte('_') catch "";
         writer.write(tag_name[0..@min(4, tag_name.len)]) catch "";
+        writer.writeByte('_') catch "";
+        writer.writeU32(hash) catch "";
         writer.write("-genk") catch "";
         const key = writer.buffer[0..writer.pos];
         @memcpy(uuid_buf[0..key.len], key);

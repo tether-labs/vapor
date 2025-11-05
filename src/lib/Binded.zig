@@ -1,8 +1,8 @@
 const std = @import("std");
 const types = @import("types.zig");
-const Fabric = @import("Fabric.zig");
-const LifeCycle = Fabric.LifeCycle;
-const println = Fabric.println;
+const Vapor = @import("Vapor.zig");
+const LifeCycle = Vapor.LifeCycle;
+const println = Vapor.println;
 const Element = @import("Element.zig").Element;
 
 const Style = types.Style;
@@ -72,11 +72,11 @@ pub inline fn Box(options: BoxOptions) fn (void) void {
 pub inline fn FlexBox(element: *Element, style: Style) fn (void) void {
     const local = struct {
         fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
+            _ = Vapor.current_ctx.close();
             return;
         }
         fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
+            _ = Vapor.current_ctx.configure(elem_decl);
             return CloseElement;
         }
     };
@@ -86,7 +86,7 @@ pub inline fn FlexBox(element: *Element, style: Style) fn (void) void {
         .dynamic = .dynamic,
         .elem_type = .FlexBox,
     };
-    const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
+    const ui_node = Vapor.current_ctx.open(elem_decl) catch |err| {
         println("{any}\n", .{err});
         unreachable;
     };
@@ -98,11 +98,11 @@ pub inline fn FlexBox(element: *Element, style: Style) fn (void) void {
 pub inline fn JsonEditor(element: *Element, text: []const u8, style: Style) void {
     const local = struct {
         fn CloseElement() void {
-            _ = Fabric.current_ctx.close();
+            _ = Vapor.current_ctx.close();
             return;
         }
         fn ConfigureElement(elem_decl: ElementDecl) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
+            _ = Vapor.current_ctx.configure(elem_decl);
         }
     };
 
@@ -114,7 +114,7 @@ pub inline fn JsonEditor(element: *Element, text: []const u8, style: Style) void
     };
     elem_decl.style.id = element.id.?;
 
-    const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
+    const ui_node = Vapor.current_ctx.open(elem_decl) catch |err| {
         println("{any}\n", .{err});
         unreachable;
     };
@@ -127,11 +127,11 @@ pub inline fn JsonEditor(element: *Element, text: []const u8, style: Style) void
 pub inline fn InputV2(element: *Element, params: InputParams, style: Style) void {
     const local = struct {
         fn CloseElement() void {
-            _ = Fabric.current_ctx.close();
+            _ = Vapor.current_ctx.close();
             return;
         }
         fn ConfigureElement(elem_decl: ElementDecl) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
+            _ = Vapor.current_ctx.configure(elem_decl);
         }
     };
 
@@ -142,7 +142,7 @@ pub inline fn InputV2(element: *Element, params: InputParams, style: Style) void
         .input_params = params,
     };
 
-    const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
+    const ui_node = Vapor.current_ctx.open(elem_decl) catch |err| {
         println("{any}\n", .{err});
         unreachable;
     };
@@ -152,8 +152,8 @@ pub inline fn InputV2(element: *Element, params: InputParams, style: Style) void
 
     // if (params == .string) {
     //     if (params.string.onInput) |func| {
-    //         const id = Fabric.events_callbacks.count();
-    //         Fabric.events_callbacks.put(id, func) catch |err| {
+    //         const id = Vapor.events_callbacks.count();
+    //         Vapor.events_callbacks.put(id, func) catch |err| {
     //             println("Event Callback Error: {any}\n", .{err});
     //         };
     //     }
@@ -188,11 +188,11 @@ pub inline fn Input(options: InputOptions) void {
 pub inline fn Dialog(element: *Element, style: Style) fn (void) void {
     const local = struct {
         fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
+            _ = Vapor.current_ctx.close();
             return;
         }
         fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
+            _ = Vapor.current_ctx.configure(elem_decl);
             return CloseElement;
         }
     };
@@ -203,7 +203,7 @@ pub inline fn Dialog(element: *Element, style: Style) fn (void) void {
         .elem_type = .Dialog,
     };
 
-    const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
+    const ui_node = Vapor.current_ctx.open(elem_decl) catch |err| {
         println("{any}\n", .{err});
         unreachable;
     };

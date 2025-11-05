@@ -1,6 +1,6 @@
 const std = @import("std");
 const UINode = @import("UITree.zig").UINode;
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 pub const Transition = @import("Transition.zig").Transition;
 pub const TransitionProperty = @import("Transition.zig").TransitionProperty;
 pub const PackedTransition = @import("Transition.zig").PackedTransition;
@@ -52,6 +52,7 @@ pub const SizingType = enum(u8) {
     clamp_px,
     clamp_percent,
     min_max_vp,
+    auto,
 };
 
 const MinMax = packed struct {
@@ -163,6 +164,7 @@ pub const Sizing = packed struct {
     type: SizingType = .none,
 
     pub const grow = Sizing{ .type = .grow, .size = .{ .min = 0, .max = 0 } };
+    pub const auto = Sizing{ .type = .auto, .size = .{ .min = 0, .max = 0 } };
     pub const fit = Sizing{ .type = .fit, .size = .{ .min = 0, .max = 0 } };
 
     pub fn px(size: f32) Sizing {
@@ -369,7 +371,7 @@ pub const Color = union(enum) {
         return .{ .Thematic = .{ .token = thematic } };
     }
     pub fn hex(hex_str: []const u8) Color {
-        const rgba_arr = Fabric.hexToRgba(hex_str);
+        const rgba_arr = Vapor.hexToRgba(hex_str);
         return .{ .Literal = .{
             .r = @as(u8, @intFromFloat(rgba_arr[0])),
             .g = @as(u8, @intFromFloat(rgba_arr[1])),
@@ -384,7 +386,7 @@ pub const Color = union(enum) {
             @panic("Percentage must be between 0 and 100");
         }
 
-        const rgba_arr = Fabric.hexToRgba(hex_str);
+        const rgba_arr = Vapor.hexToRgba(hex_str);
         const factor = 1.0 - (percentage / 100.0);
 
         return .{
@@ -403,7 +405,7 @@ pub const Color = union(enum) {
             @panic("Percentage must be between 0 and 100");
         }
 
-        const rgba_arr = Fabric.hexToRgba(hex_str);
+        const rgba_arr = Vapor.hexToRgba(hex_str);
         const factor = percentage / 100.0;
 
         return .{
@@ -537,11 +539,11 @@ pub const Padding = packed struct {
 };
 
 pub const Margin = packed struct {
-    top: u8 = 0,
-    bottom: u8 = 0,
-    left: u8 = 0,
-    right: u8 = 0,
-    pub fn all(size: u8) Margin {
+    top: i16 = 0,
+    bottom: i16 = 0,
+    left: i16 = 0,
+    right: i16 = 0,
+    pub fn all(size: i16) Margin {
         return Margin{
             .top = size,
             .bottom = size,
@@ -549,7 +551,7 @@ pub const Margin = packed struct {
             .right = size,
         };
     }
-    pub fn tblr(top: u8, bottom: u8, left: u8, right: u8) Margin {
+    pub fn tblr(top: i16, bottom: i16, left: i16, right: i16) Margin {
         return Margin{
             .top = top,
             .bottom = bottom,
@@ -557,40 +559,40 @@ pub const Margin = packed struct {
             .right = right,
         };
     }
-    pub fn tb(top: u8, bottom: u8) Margin {
+    pub fn tb(top: i16, bottom: i16) Margin {
         return Margin{
             .top = top,
             .bottom = bottom,
         };
     }
-    pub fn br(bottom: u8, right: u8) Margin {
+    pub fn br(bottom: i16, right: i16) Margin {
         return Margin{
             .bottom = bottom,
             .right = right,
         };
     }
-    pub fn lr(left: u8, right: u8) Margin {
+    pub fn lr(left: i16, right: i16) Margin {
         return Margin{
             .left = left,
             .right = right,
         };
     }
-    pub fn t(top: u8) Margin {
+    pub fn t(top: i16) Margin {
         return Margin{
             .top = top,
         };
     }
-    pub fn b(bottom: u8) Margin {
+    pub fn b(bottom: i16) Margin {
         return Margin{
             .bottom = bottom,
         };
     }
-    pub fn l(left: u8) Margin {
+    pub fn l(left: i16) Margin {
         return Margin{
             .left = left,
         };
     }
-    pub fn r(right: u8) Margin {
+    pub fn r(right: i16) Margin {
         return Margin{
             .right = right,
         };
@@ -723,7 +725,7 @@ pub const Border = packed struct {
             .right = thickness,
         };
     }
-    pub fn specific(left: u8, top: u8, right: u8, bottom: u8) Border {
+    pub fn tblr(left: u8, top: u8, right: u8, bottom: u8) Border {
         return Border{
             .top = top,
             .bottom = bottom,
@@ -830,6 +832,7 @@ pub const Position = struct {
     top: ?Pos = null,
     bottom: ?Pos = null,
     type: PositionType = .relative,
+    z_index: ?i16 = null,
 
     pub const relative = Position{ .type = .relative };
 
@@ -838,6 +841,7 @@ pub const Position = struct {
         .right = .px(0),
         .type = .fixed,
         .top = .px(0),
+        .z_index = 999,
     };
 
     /// Creates a top bottom left right position
@@ -1358,11 +1362,20 @@ pub const BorderGrouped = struct {
     color: ?Color = .hex("#000000"),
     radius: ?BorderRadius = null,
 
+    pub const none = BorderGrouped{ .thickness = .all(0) };
+
     pub fn solid(thickness: Border, color: Color, radius: BorderRadius) BorderGrouped {
         return .{
             .thickness = thickness,
             .color = color,
             .radius = radius,
+        };
+    }
+
+    pub fn sharp(thickness: Border, color: Color) BorderGrouped {
+        return .{
+            .thickness = thickness,
+            .color = color,
         };
     }
 
@@ -1415,11 +1428,6 @@ pub const BorderGrouped = struct {
 
     pub fn top(color: Color) BorderGrouped {
         return .{ .thickness = .t(1), .color = color };
-    }
-
-    // Zero/none helper
-    pub fn none() BorderGrouped {
-        return .{ .thickness = .all(0) };
     }
 };
 
@@ -1565,6 +1573,8 @@ pub const Visual = struct {
 };
 
 pub const Interactive = struct {
+    hover_layout: ?Layout = null,
+    hover_position: ?Position = null,
     hover: ?Visual = null,
     focus: ?Visual = null,
     focus_within: ?Visual = null,
@@ -1598,6 +1608,13 @@ const PackedSizeType = packed struct {
     value: f32 = 0,
 };
 
+pub const AspectRatio = enum(u8) {
+    none = 0,
+    square = 1,
+    portrait = 2,
+    landscape = 3,
+};
+
 pub const PackedLayout = packed struct {
     flex: FlexType = .default,
     layout: Layout = .{},
@@ -1607,6 +1624,7 @@ pub const PackedLayout = packed struct {
     scroll: Scroll = .{},
     flex_wrap: FlexWrap = .none,
     text_align: Layout = .{},
+    aspect_ratio: AspectRatio = .none,
 };
 
 pub const PackedPosition = packed struct {
@@ -1663,16 +1681,20 @@ pub const PackedTransform = packed struct {
     y: f16 = 0,
     z: f16 = 0,
     opacity: f16 = 1,
-    type_ptr: ?[*]const TransformType = null,
+    type_ptr: ?*[]TransformType = null,
     type_len: u32 = 0,
 
     pub fn set(packed_transform: *PackedTransform, transform: *const Transform) void {
         const type_slice = transform.type;
-        var slice: []TransformType = Fabric.frame_arena.getFrameAllocator().alloc(TransformType, type_slice.len) catch unreachable;
+        const slice_ptr = Vapor.frame_arena.persistentAllocator().create([]TransformType) catch unreachable;
+        var slice: []TransformType = Vapor.frame_arena.persistentAllocator().alloc(TransformType, type_slice.len) catch unreachable;
         for (type_slice, 0..) |element, i| {
             slice[i] = element;
         }
 
+        slice_ptr.* = slice;
+        packed_transform.type_ptr = slice_ptr;
+        packed_transform.type_len = slice.len;
         packed_transform.size_type = transform.size_type;
         packed_transform.scale_size = transform.scale_size;
         packed_transform.trans_x = transform.trans_x;
@@ -1682,8 +1704,6 @@ pub const PackedTransform = packed struct {
         packed_transform.y = transform.y;
         packed_transform.z = transform.z;
         packed_transform.opacity = transform.opacity;
-        packed_transform.type_ptr = slice.ptr;
-        packed_transform.type_len = slice.len;
     }
 };
 
@@ -1721,6 +1741,8 @@ pub const PackedVisual = packed struct {
 pub const PackedInteractive = packed struct {
     has_hover: bool = false,
     hover: PackedVisual = undefined,
+    has_hover_position: bool = false,
+    hover_position: PackedPosition = undefined,
     has_focus: bool = false,
     focus: PackedVisual = undefined,
     has_focus_within: bool = false,
@@ -1768,6 +1790,9 @@ pub const Style = struct {
     /// Size configuration for the element
     size: ?Size = null,
 
+    /// Aspect ratio configuration for the element
+    aspect_ratio: ?AspectRatio = null,
+
     /// Internal spacing configuration
     padding: ?Padding = null,
 
@@ -1806,9 +1831,6 @@ pub const Style = struct {
 
     /// Animation name for exit/removal animations
     exit_animation: ?[]const u8 = null,
-
-    /// Z-index for layering control (higher values appear on top)
-    z_index: ?i16 = null,
 
     /// List styling for ul/ol elements
     list_style: ?ListStyle = null,
@@ -1913,7 +1935,6 @@ pub const Style = struct {
         if (override.key_frames != null) result.key_frames = override.key_frames;
         // if (override.animation != null) result.animation = override.animation;
         // if (override.exit_animation != null) result.exit_animation = override.exit_animation;
-        if (override.z_index != null) result.z_index = override.z_index;
         if (override.list_style != null) result.list_style = override.list_style;
         if (override.outline != null) result.outline = override.outline;
         if (override.transition != null) result.transition = override.transition;
@@ -1950,7 +1971,6 @@ pub const Style = struct {
         if (target.key_frames != null) self.key_frames = target.key_frames;
         // if (target.animation != null) self.animation = target.animation;
         // if (target.exit_animation != null) self.exit_animation = target.exit_animation;
-        if (target.z_index != null) self.z_index = target.z_index;
         if (target.list_style != null) self.list_style = target.list_style;
         if (target.outline != null) self.outline = target.outline;
         if (target.transition != null) self.transition = target.transition;
@@ -2180,6 +2200,8 @@ pub const StateType = enum {
     animation,
     grain,
     err,
+    removed,
+    added,
 };
 
 pub const ButtonType = enum {
@@ -2202,8 +2224,10 @@ pub const ElementDeclaration = struct {
     tooltip: ?*const Tooltip = null,
     animation_enter: ?*const Animation = null,
     animation_exit: ?*const Animation = null,
+    video: ?*const Video = null,
     /// Used for passing ect data
     udata: usize = 0,
+    level: ?u8 = null,
 };
 
 pub const Tooltip = struct {
@@ -2228,6 +2252,7 @@ pub const RenderCommand = struct {
     render_type: StateType = .static,
     tooltip: ?*Tooltip = null,
     has_children: bool = true,
+    hash: u32 = 0,
 };
 
 pub const EventType = enum(u8) {
@@ -2303,4 +2328,12 @@ pub const EventType = enum(u8) {
     show,
     close,
     cancel,
+};
+
+pub const Video = struct {
+    src: ?[]const u8 = null,
+    autoplay: bool = false,
+    muted: bool = false,
+    loop: bool = false,
+    controls: bool = false,
 };

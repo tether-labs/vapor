@@ -1,5 +1,5 @@
 const std = @import("std");
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const TimingFunction = @import("types.zig").TimingFunction;
 
 pub const TransformType = enum {
@@ -67,8 +67,8 @@ pub fn easing(self: Animation, easing_value: Easing) Animation {
 }
 
 pub fn build(self: Animation) void {
-    Fabric.animations.put(self._name, self) catch |err| {
-        Fabric.println("Could not create animation {any}\n", .{err});
+    Vapor.animations.put(self._name, self) catch |err| {
+        Vapor.println("Could not create animation {any}\n", .{err});
     };
 }
 
@@ -93,8 +93,8 @@ pub const Easing = enum {
 //     dist: f32 = 0,
 //     type: TransformType = .none,
 //     opacity: ?u32 = null,
-//     height: ?Fabric.Types.Sizing = null,
-//     width: ?Fabric.Types.Sizing = null,
+//     height: ?Vapor.Types.Sizing = null,
+//     width: ?Vapor.Types.Sizing = null,
 // };
 //
 // pub const AnimDir = enum {
@@ -132,8 +132,8 @@ pub const Easing = enum {
 //
 // pub fn createMotion(specs_tag: []const u8, motion: Motion) void {
 //     std.debug.assert(std.mem.eql(u8, specs_tag, motion.tag));
-//     Fabric.motions.append(motion) catch |err| {
-//         Fabric.println("Could not create motion {any}\n", .{err});
+//     Vapor.motions.append(motion) catch |err| {
+//         Vapor.println("Could not create motion {any}\n", .{err});
 //     };
 // }
 //
@@ -141,7 +141,7 @@ pub const Easing = enum {
 //
 // pub const FadeInOut = struct {
 //     exit_animation: []const u8 = "fadeOut",
-//     child_styles: []const Fabric.Types.ChildStyle = &.{
+//     child_styles: []const Vapor.Types.ChildStyle = &.{
 //         .{
 //             .style_id = "fade-in",
 //             .animation = Animation.Specs{
@@ -175,7 +175,7 @@ pub const Easing = enum {
 //
 // pub const SlideInOut = struct {
 //     exit_animation: []const u8 = "slideOut",
-//     child_styles: []const Fabric.Types.ChildStyle = &.{
+//     child_styles: []const Vapor.Types.ChildStyle = &.{
 //         .{
 //             .style_id = "slide-in",
 //             .animation = Animation.Specs{
@@ -217,7 +217,7 @@ pub const Easing = enum {
 //
 // pub const FoldInOut = struct {
 //     exit_animation: []const u8 = "foldDown",
-//     child_styles: []const Fabric.Types.ChildStyle = &.{
+//     child_styles: []const Vapor.Types.ChildStyle = &.{
 //         .{
 //             .style_id = "fold-up",
 //             .animation = Animation.Specs{
@@ -273,44 +273,44 @@ pub const Easing = enum {
 //     foldUpDownY,
 // };
 //
-// pub inline fn CustomFlexBox(style: Fabric.Style) fn (void) void {
+// pub inline fn CustomFlexBox(style: Vapor.Style) fn (void) void {
 //     const local = struct {
 //         fn CloseElement(_: void) void {
-//             _ = Fabric.current_ctx.close();
+//             _ = Vapor.current_ctx.close();
 //             return;
 //         }
-//         fn ConfigureElement(elem_decl: Fabric.Types.ElementDeclaration) *const fn (void) void {
-//             _ = Fabric.current_ctx.configure(elem_decl);
+//         fn ConfigureElement(elem_decl: Vapor.Types.ElementDeclaration) *const fn (void) void {
+//             _ = Vapor.current_ctx.configure(elem_decl);
 //             return CloseElement;
 //         }
 //     };
 //
-//     const elem_decl = Fabric.Types.ElementDeclaration{
+//     const elem_decl = Vapor.Types.ElementDeclaration{
 //         .style = style,
 //         .dynamic = .animation,
 //         .elem_type = .FlexBox,
 //     };
 //
-//     _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-//         Fabric.println("{any}\n", .{err});
+//     _ = Vapor.current_ctx.open(elem_decl) catch |err| {
+//         Vapor.println("{any}\n", .{err});
 //     };
 //     _ = local.ConfigureElement(elem_decl);
 //     return local.CloseElement;
 // }
 //
-// pub inline fn FlexBox(style: Fabric.Style, transition_type: TransitionType) fn (void) void {
+// pub inline fn FlexBox(style: Vapor.Style, transition_type: TransitionType) fn (void) void {
 //     const local = struct {
 //         fn CloseElement(_: void) void {
-//             _ = Fabric.current_ctx.close();
+//             _ = Vapor.current_ctx.close();
 //             return;
 //         }
-//         fn ConfigureElement(elem_decl: Fabric.Types.ElementDeclaration) *const fn (void) void {
-//             _ = Fabric.current_ctx.configure(elem_decl);
+//         fn ConfigureElement(elem_decl: Vapor.Types.ElementDeclaration) *const fn (void) void {
+//             _ = Vapor.current_ctx.configure(elem_decl);
 //             return CloseElement;
 //         }
 //     };
 //
-//     var elem_decl = Fabric.Types.ElementDeclaration{
+//     var elem_decl = Vapor.Types.ElementDeclaration{
 //         .style = style,
 //         .dynamic = .animation,
 //         .elem_type = .FlexBox,
@@ -336,8 +336,8 @@ pub const Easing = enum {
 //         },
 //     }
 //
-//     _ = Fabric.current_ctx.open(elem_decl) catch |err| {
-//         Fabric.println("{any}\n", .{err});
+//     _ = Vapor.current_ctx.open(elem_decl) catch |err| {
+//         Vapor.println("{any}\n", .{err});
 //     };
 //     _ = local.ConfigureElement(elem_decl);
 //     return local.CloseElement;

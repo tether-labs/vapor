@@ -12,7 +12,7 @@ const Pos = Types.Pos;
 const Background = Types.Background;
 const Transform = Types.Transform;
 const RenderCommand = Types.RenderCommand;
-const println = @import("Fabric.zig").println;
+const println = @import("Vapor.zig").println;
 
 // Global buffer to store the CSS string for returning to JavaScript
 var css_buffer: [4096]u8 = undefined;

@@ -1,6 +1,6 @@
 const std = @import("std");
 const UINode = @import("UITree.zig").UINode;
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const Color = @import("types.zig").Color;
 var current_label_len: usize = 0;
 pub export fn getAriaLabel(node_ptr: ?*UINode) ?[*]const u8 {
@@ -22,7 +22,7 @@ pub fn isDesktop() bool {
 }
 
 pub fn isMobile() bool {
-    if (Fabric.browser_width < 786) {
+    if (Vapor.browser_width < 786) {
         return true;
     } else {
         return false;
@@ -33,7 +33,7 @@ pub fn hashKey(key: []const u8) u32 {
     return std.hash.XxHash32.hash(0, key);
 }
 
-pub fn compareStyles(a: *const Fabric.Style, b: *const Fabric.Style) bool {
+pub fn compareStyles(a: *const Vapor.Style, b: *const Vapor.Style) bool {
     if (a.blur != null and b.blur != null) {
         if (a.blur.? != b.blur.?) return false;
     }
@@ -241,4 +241,8 @@ fn compareOptionalSlice(
     } else {
         return false;
     }
+}
+
+pub fn cast(comptime T: type, opaque_ptr: *anyopaque) T {
+    return @ptrCast(@alignCast(opaque_ptr));
 }

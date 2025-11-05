@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const BuilderClose = @import("Static.zig").ChainClose;
 const Builder = @import("Static.zig").Chain;
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const Text = BuilderClose.Text;
 const Box = Builder.Box;
 const Heading = BuilderClose.Heading;
@@ -175,8 +175,8 @@ pub const Parser = struct {
 
         // Create CodeBlock node
         const node = try self.createNode(.CodeBlock);
-        const editor: *CodeEditor = Fabric.allocator_global.create(CodeEditor) catch unreachable;
-        editor.*.init(&Fabric.allocator_global, code_content);
+        const editor: *CodeEditor = Vapor.allocator_global.create(CodeEditor) catch unreachable;
+        editor.*.init(&Vapor.allocator_global, code_content);
         node.data = .{ .code_block = .{
             .editor = editor,
             .content = code_content,
@@ -593,9 +593,9 @@ const Style = struct {
     is_bold: bool = false,
     is_italic: bool = false,
     level: u8 = 0,
-    code_color: Fabric.Types.Color = .hex("#212121"),
-    text_color: Fabric.Types.Color = .hex("#212121"),
-    heading_color: Fabric.Types.Color = .hex("#333333"),
+    code_color: Vapor.Types.Color = .hex("#212121"),
+    text_color: Vapor.Types.Color = .hex("#212121"),
+    heading_color: Vapor.Types.Color = .hex("#333333"),
 };
 
 // Note the new 'style: Style' parameter!
@@ -615,7 +615,7 @@ pub fn traverse(node: ?*Node, style: Style) !void {
                 const src = n.data.image.src;
                 // const alt = n.data.image.alt_text;
 
-                // You can adapt this to your Fabric component API
+                // You can adapt this to your Vapor component API
                 // Here’s a simple conceptual render:
                 // Hypothetical Image/Asset renderer
                 Box.style(&.{

@@ -1,17 +1,17 @@
 const std = @import("std");
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const Element = @import("Element.zig").Element;
-const Signal = Fabric.Signal;
-const Static = Fabric.Static;
-const Pure = Fabric.Pure;
-const Dynamic = Fabric.Dynamic;
-const InputParams = Fabric.Types.InputParams;
+const Signal = Vapor.Signal;
+const Static = Vapor.Static;
+const Pure = Vapor.Pure;
+const Dynamic = Vapor.Dynamic;
+const InputParams = Vapor.Types.InputParams;
 
 pub const InputType = struct {
     id: ?[]const u8 = null,
     label: []const u8,
     tag: []const u8,
-    params: Fabric.Types.InputParams,
+    params: Vapor.Types.InputParams,
 };
 
 const ValidationError = enum {
@@ -49,13 +49,13 @@ _errors: [][]const ValidateResult = &.{},
 // hence then the underlying value gets changed
 pub fn init(forge: *Forge) void {
     // We create a list to store all the element decls, then we use a map to have O(1) space time lookup
-    var _dynamic_element: std.ArrayList(*Element) = std.ArrayList(*Element).init(Fabric.allocator_global);
-    forge._errors = Fabric.allocator_global.alloc([]const ValidateResult, forge.fields.len) catch return;
-    forge.elements = Fabric.allocator_global.alloc(*Element, forge.fields.len) catch return;
-    forge.elements_map = std.AutoHashMap(usize, *const Element).init(Fabric.allocator_global);
+    var _dynamic_element: std.ArrayList(*Element) = std.ArrayList(*Element).init(Vapor.allocator_global);
+    forge._errors = Vapor.allocator_global.alloc([]const ValidateResult, forge.fields.len) catch return;
+    forge.elements = Vapor.allocator_global.alloc(*Element, forge.fields.len) catch return;
+    forge.elements_map = std.AutoHashMap(usize, *const Element).init(Vapor.allocator_global);
 
     for (forge.fields) |field| {
-        const element: *Element = Fabric.allocator_global.create(Element) catch return;
+        const element: *Element = Vapor.allocator_global.create(Element) catch return;
         element.* = .{
             .element_type = .Input,
         };
@@ -80,17 +80,17 @@ pub fn init(forge: *Forge) void {
     }
 
     forge.elements = _dynamic_element.toOwnedSlice() catch |err| {
-        Fabric.printlnSrc("Elements Error: {any}", .{err}, @src());
+        Vapor.printlnSrc("Elements Error: {any}", .{err}, @src());
         return;
     };
 }
 
 pub fn deinit(forge: *Forge) void {
     for (forge.elements) |e| {
-        Fabric.allocator_global.destroy(e);
+        Vapor.allocator_global.destroy(e);
     }
-    Fabric.allocator_global.free(forge.elements);
-    Fabric.allocator_global.free(forge._errors);
+    Vapor.allocator_global.free(forge.elements);
+    Vapor.allocator_global.free(forge._errors);
     forge.elements_map.deinit();
 }
 
@@ -123,7 +123,7 @@ pub fn isValidEmail(email: []const u8) bool {
 }
 
 pub fn validate(forge: *Forge) [][]const ValidateResult {
-    var errors = std.ArrayList(ValidateResult).init(Fabric.allocator_global);
+    var errors = std.ArrayList(ValidateResult).init(Vapor.allocator_global);
     for (forge.fields, 0..) |field, i| {
         const input_value = forge.elements[i].getInputValue() orelse {
             errors.append(ValidateResult{

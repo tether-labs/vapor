@@ -17,8 +17,8 @@ const Pos = Types.Pos;
 const PosType = Types.PosType;
 const FlexType = Types.FlexType;
 const TransformOrigin = Types.TransformOrigin;
-const Fabric = @import("Fabric.zig");
-const Animation = Fabric.Animation;
+const Vapor = @import("Vapor.zig");
+const Animation = Vapor.Animation;
 const AnimationType = Types.AnimationType;
 const ListStyle = Types.ListStyle;
 const Transition = Types.Transition;
@@ -68,6 +68,7 @@ const PropValue = struct {
         string_literal, // For values like "flex", "center", etc.
         opacity,
         font_style,
+        aspect_ratio,
     };
 
     // Union to hold the actual data
@@ -99,6 +100,7 @@ const PropValue = struct {
         string_literal: []const u8,
         opacity: f32,
         font_style: Types.FontStyle,
+        aspect_ratio: Types.AspectRatio,
     };
 };
 
@@ -128,7 +130,7 @@ fn writePropValue(prop: []const u8, value: PropValue, writer: writer_t) void {
         .appearance => appearanceToCSS(value.data.appearance, writer) catch {},
         .transform_type => {
             const transform = value.data.transform_type;
-            const slice = transform.type_ptr.?[0..transform.type_len];
+            const slice = transform.type_ptr.?.*[0..transform.type_len];
             for (slice) |t| {
                 switch (t) {
                     .scale => {
@@ -197,13 +199,13 @@ fn writePropValue(prop: []const u8, value: PropValue, writer: writer_t) void {
         },
         .transform_origin => transformOriginToCSS(value.data.transform_origin, writer) catch {},
         .margin => {
-            writer.writeU8Num(value.data.margin.top) catch {};
+            writer.writeI16(value.data.margin.top) catch {};
             writer.write("px ") catch {};
-            writer.writeU8Num(value.data.margin.right) catch {};
+            writer.writeI16(value.data.margin.right) catch {};
             writer.write("px ") catch {};
-            writer.writeU8Num(value.data.margin.bottom) catch {};
+            writer.writeI16(value.data.margin.bottom) catch {};
             writer.write("px ") catch {};
-            writer.writeU8Num(value.data.margin.left) catch {};
+            writer.writeI16(value.data.margin.left) catch {};
             writer.write("px") catch {};
         },
         .pos => posTypeToCSS(value.data.pos, writer) catch {},
@@ -259,6 +261,7 @@ fn writePropValue(prop: []const u8, value: PropValue, writer: writer_t) void {
         },
         .flex_type => flexTypeToCSS(value.data.flex_type, writer) catch {},
 
+        .aspect_ratio => aspectRatioToCSS(value.data.aspect_ratio, writer) catch {},
         // This new case handles simple string values efficiently.
         .string_literal => writer.write(value.data.string_literal) catch {},
     }
@@ -273,7 +276,7 @@ const float_type_map = [_][]const u8{ "top", "bottom", "left", "right" };
 const transform_origin_map = [_][]const u8{ "top", "bottom", "right", "left" };
 const text_decoration_map = [_][]const u8{ "default", "none", "inherit", "underline", "initial", "overline", "unset", "revert" };
 const appearance_map = [_][]const u8{ "none", "auto", "button", "textfield", "menulist", "searchfield", "textarea", "checkbox", "radio", "inherit", "initial", "revert", "unset" };
-const outline_map = [_][]const u8{ "none", "auto", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset", "inherit", "initial", "revert", "unset" };
+const outline_map = [_][]const u8{ "default", "none", "auto", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset", "inherit", "initial", "revert", "unset" };
 const cursor_map = [_][]const u8{ "default", "pointer", "help", "grab", "zoom-in", "zoom-out" };
 const box_sizing_map = [_][]const u8{ "content-box", "border-box", "padding-box", "inherit", "initial", "revert", "unset" };
 const list_style_map = [_][]const u8{ "default", "none", "disc", "circle", "square", "decimal", "decimal-leading-zero", "lower-roman", "upper-roman", "lower-alpha", "upper-alpha", "lower-greek", "armenian", "georgian", "inherit", "initial", "revert", "unset" };
@@ -283,6 +286,7 @@ const flex_type_map = [_][]const u8{ "default", "flex", "inline", "block", "inli
 const timing_function_map = [_][]const u8{ "ease", "linear", "ease-in", "ease-out", "ease-in-out", "bounce", "elastic" };
 const animation_direction_map = [_][]const u8{ "normal ", "reverse ", "forwards ", "alternate " };
 const font_style_map = [_][]const u8{ "default", "normal", "italic" };
+const aspect_ratio_map = [_][]const u8{ "none", "1 / 1", "3 / 4", "16 / 9" };
 
 /// Generic helper to write a CSS string from a pre-defined map based on an enum's value.
 /// The `string_map` must have its string literals in the same order as the enum declaration.
@@ -319,6 +323,10 @@ fn transformOriginToCSS(origin: TransformOrigin, writer: anytype) !void {
     try writeMappedString(TransformOrigin, origin, &transform_origin_map, writer);
 }
 
+fn aspectRatioToCSS(aspect_ratio: Types.AspectRatio, writer: anytype) !void {
+    try writeMappedString(Types.AspectRatio, aspect_ratio, &aspect_ratio_map, writer);
+}
+
 fn textDecoToCSS(deco: TextDecoration, writer: anytype) !void {
     try writeMappedString(TextDecoration, deco, &text_decoration_map, writer);
 }
@@ -327,6 +335,7 @@ fn sizingTypeToCSS(sizing: Sizing, writer: writer_t) !void {
     switch (sizing.type) {
         .fit => try writer.write("fit-content"),
         .grow => try writer.write("flex:1"),
+        .auto => try writer.write("auto"),
         .percent => {
             try writer.writeF32(sizing.size.min);
             try writer.writeByte('%');
@@ -430,7 +439,7 @@ fn gridToCSS(grid: Types.PackedGrid, writer: anytype) !void {
     writer.write("linear-gradient(90deg, ") catch {};
     const grid_color = grid.packed_color.has_color;
     if (grid_color) {
-        Fabric.println("Grid color {any}", .{grid.packed_color.color});
+        Vapor.println("Grid color {any}", .{grid.packed_color.color});
         const rgba = grid.packed_color.color;
         writeRgba(writer, rgba) catch {};
     } else {
@@ -446,7 +455,7 @@ fn gridToCSS(grid: Types.PackedGrid, writer: anytype) !void {
 
     writer.write("linear-gradient(180deg, ") catch {};
     if (grid_color) {
-        Fabric.println("Grid color {any}", .{grid.packed_color.color});
+        Vapor.println("Grid color {any}", .{grid.packed_color.color});
         const rgba = grid.packed_color.color;
         writeRgba(writer, rgba) catch {};
     } else {
@@ -477,8 +486,9 @@ fn outlineStyleToCSS(outline: Outline, writer: anytype) !void {
     try writeMappedString(Outline, outline, &outline_map, writer);
 }
 
-fn transitionStyleToCSS(style: PackedTransition, writer: anytype) void {
-    const slice = style.properties_ptr.?[0..style.properties_len];
+fn transitionStyleToCSS(style: PackedTransition, writer: writer_t) void {
+    const properties = style.properties_ptr orelse return;
+    const slice = properties.*[0..style.properties_len];
     if (slice.len > 0) {
         for (slice) |p| {
             switch (p) {
@@ -572,7 +582,7 @@ pub fn checkSize(size: *const Types.Size, writer: writer_t) void {
     }
 }
 
-pub fn checkVisual(visual: *const Types.PackedVisual, writer: writer_t) void {
+pub fn generateVisual(visual: *const Types.PackedVisual, writer: writer_t) void {
     // Color color
     if (visual.background.has_color or visual.background.has_token) {
         writePropValue("background-color", .{ .tag = .color, .data = .{ .color = visual.background } }, writer);
@@ -773,13 +783,18 @@ pub fn generateLayout(layout_ptr: *const Types.PackedLayout, writer: *Writer) vo
         .hidden => writer.write("overflow-x:hidden;\n") catch {},
         else => {},
     }
-    switch (scroll.x) {
+    switch (scroll.y) {
         .scroll => writer.write("overflow-y:scroll;\n") catch {},
         .hidden => writer.write("overflow-y:hidden;\n") catch {},
         else => {},
     }
     if (layout_ptr.flex_wrap != .none) {
         writePropValue("flex-wrap", .{ .tag = .flex_wrap, .data = .{ .flex_wrap = layout_ptr.flex_wrap } }, writer);
+    }
+
+    if (layout_ptr.aspect_ratio != .none) {
+        writePropValue("aspect-ratio", .{ .tag = .aspect_ratio, .data = .{ .aspect_ratio = layout_ptr.aspect_ratio } }, writer);
+        writer.write("object-fit: cover;\n") catch {};
     }
 }
 
@@ -885,7 +900,7 @@ pub fn generateStylePass(ptr: ?*UINode, writer: *Writer) void {
     }
 
     if (packed_field_ptrs.visual_ptr) |visual_ptr| {
-        checkVisual(visual_ptr, writer);
+        generateVisual(visual_ptr, writer);
     }
 
     // if (packed_field_ptrs.animations_ptr) |animations_ptr| {
@@ -943,7 +958,7 @@ pub export fn getStyle(ptr: ?*UINode) ?[*]const u8 {
     // }
 
     if (packed_field_ptrs.visual_ptr) |visual_ptr| {
-        checkVisual(visual_ptr, &writer);
+        generateVisual(visual_ptr, &writer);
     }
     // Return a pointer to the CSS string
     const len: usize = writer.pos;
@@ -953,7 +968,7 @@ pub export fn getStyle(ptr: ?*UINode) ?[*]const u8 {
 }
 
 pub export fn getGlobalStyle() ?[*]const u8 {
-    // const user_defaults = Fabric.Style.getDefault();
+    // const user_defaults = Vapor.Style.getDefault();
     // generateStyle(null, &user_defaults);
     // Return a pointer to the CSS string
     return style_style.ptr;
@@ -974,7 +989,7 @@ pub fn setGlobalStyleVariables(catalog: Catalog) void {
         const name = theme_def.name;
         const theme = theme_def.theme;
         if (theme_def.default and has_default) {
-            Fabric.printlnErr("Theme {s} is default, but another theme is also default", .{name});
+            Vapor.printlnErr("Theme {s} is default, but another theme is also default", .{name});
             return;
         }
         if (theme_def.default) {
@@ -1052,7 +1067,7 @@ pub export fn getVisualStyle(ptr: ?*UINode, visual_type: u8) ?[*]const u8 {
     writer.init(&css_buffer);
     if (visual_type == 3) {
         const visual = packed_fields.visual_ptr orelse return null;
-        checkVisual(visual, &writer);
+        generateVisual(visual, &writer);
 
         // Null-terminate the string
         const len: usize = writer.pos;
@@ -1067,15 +1082,19 @@ pub export fn getVisualStyle(ptr: ?*UINode, visual_type: u8) ?[*]const u8 {
     if (visual_type == 0) {
         // const visual = interactive.hover.?;
         const hover = interactive.hover;
-        checkVisual(&hover, &writer);
+        generateVisual(&hover, &writer);
+        const hover_position = interactive.hover_position;
+        if (interactive.has_hover_position) {
+            generatePositions(&hover_position, &writer);
+        }
     } else if (visual_type == 1) {
         // const visual = interactive.focus.?;
         const focus = interactive.focus;
-        checkVisual(&focus, &writer);
+        generateVisual(&focus, &writer);
     } else if (visual_type == 2) {
         // const visual = interactive.focus_within.?;
         const focus_within = interactive.focus_within;
-        checkVisual(&focus_within, &writer);
+        generateVisual(&focus_within, &writer);
     }
     // Null-terminate the string
     const len: usize = writer.pos;
@@ -1088,6 +1107,72 @@ pub export fn getVisualStyle(ptr: ?*UINode, visual_type: u8) ?[*]const u8 {
 
 export fn getVisualLen() usize {
     return visual_style.len;
+}
+
+var position_style: []const u8 = "";
+export fn getPositionStyle(ptr: ?*UINode) ?[*]const u8 {
+    const node_ptr = ptr orelse return null;
+    const packed_fields = node_ptr.packed_field_ptrs orelse return null;
+    const packed_position = packed_fields.position_ptr orelse return null;
+    var writer: Writer = undefined;
+    writer.init(&css_buffer);
+    generatePositions(packed_position, &writer);
+
+    // Null-terminate the string
+    const len: usize = writer.pos;
+    css_buffer[len] = 0;
+    position_style = css_buffer[0..len];
+
+    // Return a pointer to the CSS string
+    return position_style.ptr;
+}
+
+export fn getPositionLen() usize {
+    return position_style.len;
+}
+
+var layout_style: []const u8 = "";
+export fn getLayoutStyle(ptr: ?*UINode) ?[*]const u8 {
+    const node_ptr = ptr orelse return null;
+    const packed_fields = node_ptr.packed_field_ptrs orelse return null;
+    const packed_layout = packed_fields.layout_ptr orelse return null;
+    var writer: Writer = undefined;
+    writer.init(&css_buffer);
+    generateLayout(packed_layout, &writer);
+
+    // Null-terminate the string
+    const len: usize = writer.pos;
+    css_buffer[len] = 0;
+    layout_style = css_buffer[0..len];
+
+    // Return a pointer to the CSS string
+    return layout_style.ptr;
+}
+
+export fn getLayoutLen() usize {
+    return layout_style.len;
+}
+
+var mapa_style: []const u8 = "";
+export fn getMapaStyle(ptr: ?*UINode) ?[*]const u8 {
+    const node_ptr = ptr orelse return null;
+    const packed_fields = node_ptr.packed_field_ptrs orelse return null;
+    const packed_margin_paddings = packed_fields.margins_paddings_ptr orelse return null;
+    var writer: Writer = undefined;
+    writer.init(&css_buffer);
+    generateMarginsPadding(packed_margin_paddings, &writer);
+
+    // Null-terminate the string
+    const len: usize = writer.pos;
+    css_buffer[len] = 0;
+    mapa_style = css_buffer[0..len];
+
+    // Return a pointer to the CSS string
+    return mapa_style.ptr;
+}
+
+export fn getMapaLen() usize {
+    return mapa_style.len;
 }
 
 var tooltip_style: []const u8 = "";

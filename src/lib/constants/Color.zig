@@ -1,5 +1,5 @@
 // Color.zig
-const Fabric = @import("../Fabric.zig");
+const Vapor = @import("../Vapor.zig");
 const std = @import("std");
 pub const Theme = enum {
     light,
@@ -26,7 +26,7 @@ pub const ThemeColors = struct {
 };
 
 pub const Light = ThemeColors{
-    .border_color = Fabric.hexToRgba("#E9E9E9"),
+    .border_color = Vapor.hexToRgba("#E9E9E9"),
     .text_color = .{ 0, 0, 0, 255 },
     .background = .{ 255, 255, 255, 255 },
     .primary = .{ 255, 255, 255, 255 },
@@ -38,14 +38,14 @@ pub const Light = ThemeColors{
     .tint = .{ 67, 64, 240, 255 },
     .text_tint_color = .{ 255, 255, 255, 255 },
     .alternate_tint = .{ 67, 64, 240, 255 },
-    .btn_tint = Fabric.hexToRgba("#FF3838"),
-    .dark_text = Fabric.hexToRgba("#8C8C8C"),
-    .form_input_border_color = Fabric.hexToRgba("#E9E9E9"),
+    .btn_tint = Vapor.hexToRgba("#FF3838"),
+    .dark_text = Vapor.hexToRgba("#8C8C8C"),
+    .form_input_border_color = Vapor.hexToRgba("#E9E9E9"),
     .danger = .{ 255, 78, 51, 255 },
 };
 
 pub const Dark = ThemeColors{
-    .border_color = Fabric.hexToRgba("#27272a"),
+    .border_color = Vapor.hexToRgba("#27272a"),
     .text_color = .{ 255, 255, 255, 255 },
     .background = .{ 0, 0, 0, 255 },
     .primary = .{ 0, 0, 0, 255 },
@@ -53,14 +53,14 @@ pub const Dark = ThemeColors{
     .shadow = .{ 255, 255, 255, 30 },
     .border_cache_color = .{ 255, 255, 255, 40 },
     .font_family = "Montserrat",
-    .btn_color = Fabric.hexToRgba("#E5FF54"),
-    .tint = Fabric.hexToRgba("#6338FF"),
+    .btn_color = Vapor.hexToRgba("#E5FF54"),
+    .tint = Vapor.hexToRgba("#6338FF"),
     .text_tint_color = .{ 255, 255, 255, 255 },
-    // .tint = Fabric.hexToRgba("#E5FF54"),
-    .alternate_tint = Fabric.hexToRgba("#6338FF"),
-    .btn_tint = Fabric.hexToRgba("#FF3838"),
-    .dark_text = Fabric.hexToRgba("#8C8C8C"),
-    .form_input_border_color = Fabric.hexToRgba("#27272a"),
+    // .tint = Vapor.hexToRgba("#E5FF54"),
+    .alternate_tint = Vapor.hexToRgba("#6338FF"),
+    .btn_tint = Vapor.hexToRgba("#FF3838"),
+    .dark_text = Vapor.hexToRgba("#8C8C8C"),
+    .form_input_border_color = Vapor.hexToRgba("#27272a"),
     .danger = .{ 255, 78, 51, 255 },
 };
 
@@ -85,7 +85,7 @@ pub fn getThemeColors(self: *Color) ThemeColors {
 pub fn switchTheme(self: *Color, theme_type: Theme) void {
     self.theme = theme_type;
     self.switched_theme = true;
-    Fabric.global_rerender = true;
+    Vapor.global_rerender = true;
 }
 
 pub fn getAttribute(self: *Color, comptime attribute: []const u8) [4]f32 {

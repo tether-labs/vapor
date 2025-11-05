@@ -5,7 +5,7 @@
 //        v - e
 const std = @import("std");
 const UITree = @import("UITree.zig");
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const mem = std.mem;
 
 const RadixError = error{
@@ -32,6 +32,7 @@ pub const Node = struct {
     param_child: ?*Node,
     is_end: bool,
     page: *const fn () void,
+    sub_path: []const u8,
 
     fn findChildWithCommonPrefix(node: *Node, prefix: []const u8) ?*Node {
         var children_itr = node.children.iterator();
@@ -71,10 +72,12 @@ pub const Node = struct {
             .param_child = self.param_child,
             .is_end = true,
             .page = page,
+            .sub_path = self.sub_path[at..],
         };
 
         // set the current node to hell
         self.prefix = self.prefix[0..at];
+        self.sub_path = self.sub_path[0..at];
         self.children = std.StringHashMap(*Node).init(allocator);
         // store the new_node o in the hell node
         try self.children.put(new_node.prefix, new_node);
@@ -94,6 +97,7 @@ pub fn init(target: *Radix, arena: *std.mem.Allocator) !void {
         .param_child = null,
         .is_end = false,
         .page = undefined,
+        .sub_path = "",
     };
     target.* = .{
         .root = root_node,
@@ -123,6 +127,7 @@ fn newNode(
     query_param: []const u8,
     is_end: bool,
     page: *const fn () void,
+    sub_path: []const u8,
 ) !*Node {
     const node = try radix.allocator.create(Node);
     node.* = Node{
@@ -134,6 +139,7 @@ fn newNode(
         .param_child = null,
         .is_end = is_end,
         .page = page,
+        .sub_path = sub_path,
     };
     return node;
 }
@@ -150,8 +156,11 @@ fn findSegmentEndIdx(path: []const u8) usize {
 const Route = struct {
     ui_tree: *UITree = undefined,
     page: *const fn () void = undefined,
+    is_dynamic: bool = false,
+    path: []const u8,
 };
 pub fn searchRoute(radix: *const Radix, path: []const u8) ?Route {
+    var node_path: std.array_list.Managed(u8) = std.array_list.Managed(u8).init(Vapor.frame_arena.getFrameAllocator());
     // var param_args: ?*std.array_list.Managed(ParamInfo) = null;
     var node = radix.root;
     var start: usize = 1;
@@ -178,6 +187,8 @@ pub fn searchRoute(radix: *const Radix, path: []const u8) ?Route {
             if (common_len != match.prefix.len) return null;
             remaining = remaining[common_len..];
             node = match;
+            node_path.append('/') catch unreachable;
+            node_path.appendSlice(match.sub_path) catch unreachable;
         }
 
         // Handle dynamic parameters
@@ -191,11 +202,18 @@ pub fn searchRoute(radix: *const Radix, path: []const u8) ?Route {
             _ = path[param_start..param_end];
             start = param_end + 1;
             node = dynamic_child;
+            node_path.append('/') catch unreachable;
+            node_path.appendSlice(dynamic_child.sub_path) catch unreachable;
         }
     }
 
     if (node.is_end) {
-        return Route{ .ui_tree = node.tree.?, .page = node.page };
+        return Route{
+            .ui_tree = node.tree.?,
+            .page = node.page,
+            .is_dynamic = node.is_dynamic,
+            .path = node_path.toOwnedSlice() catch unreachable,
+        };
     }
     return null;
 }
@@ -223,7 +241,7 @@ fn insert(
         if (is_dynamic) {
             const param = segment[1..];
             if (node.param_child) |_| return error.ConflictDynamicRoute;
-            const dynamic_node = try radix.newNode(":dynamic", tree, param, true, page);
+            const dynamic_node = try radix.newNode(":dynamic", tree, param, true, page, segment);
             node.param_child = dynamic_node;
             node.is_end = true;
             return;
@@ -245,6 +263,7 @@ fn insert(
                     // Once we splitt the node we need to set the current to the correct route func
                     child.tree = tree;
                     child.prefix = segement_remaining[0..i];
+                    child.sub_path = segement_remaining[0..i];
                     child.param_child = null;
                     node = child;
                     // Focus on the PARENT (the split node, now "hell")
@@ -263,6 +282,7 @@ fn insert(
                     "",
                     false,
                     page,
+                    segement_remaining,
                 );
                 try node.children.put(segement_remaining, new_node);
                 node = new_node;
@@ -271,6 +291,54 @@ fn insert(
         }
     }
     node.is_end = true;
+}
+
+/// Update the UITree for a specific route path
+/// Returns true if the route was found and updated, false otherwise
+pub fn updateRouteTree(radix: *Radix, path: []const u8, new_tree: *UITree) bool {
+    var node = radix.root;
+    var start: usize = 1;
+
+    // Parse path segments similar to searchRoute
+    while (start < path.len) : (start += 1) {
+        if (path[start] == '/') continue;
+        if (path[start] == '#') break;
+        if (path[start] == ' ') break;
+        if (path[start] == 0) break;
+
+        if (start >= path.len) break;
+        const end = findSegmentEndIdx(path[start..]) + start;
+        const segment = path[start..end];
+        start = end;
+
+        var remaining = segment;
+        while (remaining.len > 0) {
+            const match = node.findChildWithCommonPrefix(remaining) orelse return false;
+            const common_len = findCommonPrefix(match.prefix, remaining);
+
+            if (common_len != match.prefix.len) return false;
+            remaining = remaining[common_len..];
+            node = match;
+        }
+
+        // Handle dynamic parameters
+        if (node.param_child) |dynamic_child| {
+            var param_start = start;
+            while (param_start < path.len and path[param_start] == '/') : (param_start += 1) {}
+            if (param_start >= path.len) break;
+
+            const param_end = std.mem.indexOfScalarPos(u8, path, param_start, '/') orelse path.len;
+            start = param_end + 1;
+            node = dynamic_child;
+        }
+    }
+
+    // Update the tree if this is an end node
+    if (node.is_end) {
+        node.tree = new_tree;
+        return true;
+    }
+    return false;
 }
 
 fn printTree(radix: *const Radix) !void {

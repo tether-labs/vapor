@@ -1,7 +1,7 @@
 const std = @import("std");
-const Fabric = @import("../Fabric.zig");
-const isWasi = Fabric.isWasi;
-const Wasm = Fabric.Wasm;
+const Vapor = @import("../Vapor.zig");
+const isWasi = Vapor.isWasi;
+const Wasm = Vapor.Wasm;
 const utils = @import("../utils.zig");
 const hashKey = utils.hashKey;
 
@@ -10,7 +10,7 @@ pub const Kit = @This();
 pub fn glue(comptime T: type, slice: []const u8) !std.json.Parsed(T) {
     const parsed = std.json.parseFromSlice(
         T,
-        Fabric.allocator_global,
+        Vapor.allocator_global,
         slice,
         .{},
     ) catch return error.MalformedJson;
@@ -210,19 +210,19 @@ pub fn fetch(url: []const u8, cb: *const fn () void, http_req: HttpReq) void {
         }
         fn deinitFn(node: *FetchNode) void {
             const closure: *@This() = @alignCast(@fieldParentPtr("fetch_node", node));
-            Fabric.allocator_global.destroy(closure);
+            Vapor.allocator_global.destroy(closure);
         }
     };
 
-    const closure = Fabric.allocator_global.create(Closure) catch |err| {
-        Fabric.println("Error could not create closure {any}\n ", .{err});
+    const closure = Vapor.allocator_global.create(Closure) catch |err| {
+        Vapor.println("Error could not create closure {any}\n ", .{err});
         unreachable;
     };
     closure.* = .{};
 
-    const id = Fabric.fetch_registry.count() + 1;
-    Fabric.fetch_registry.put(id, &closure.fetch_node) catch |err| {
-        Fabric.println("Button Function Registry {any}\n", .{err});
+    const id = Vapor.fetch_registry.count() + 1;
+    Vapor.fetch_registry.put(id, &closure.fetch_node) catch |err| {
+        Vapor.println("Button Function Registry {any}\n", .{err});
         return;
     };
     fetchWasm(url.ptr, url.len, id, json.ptr, json.len);
@@ -263,7 +263,7 @@ pub fn setWindowLocation(url: []const u8) void {
     if (isWasi) {
         setWindowLocationWasm(url.ptr, url.len);
     } else {
-        Fabric.printlnSrc("Attempted to reroute, but not wasi {s}", .{url}, @src());
+        Vapor.printlnSrc("Attempted to reroute, but not wasi {s}", .{url}, @src());
     }
 }
 
@@ -276,7 +276,7 @@ pub fn navigate(path: []const u8) void {
     if (isWasi) {
         navigateWasm(path.ptr, path.len);
     } else {
-        Fabric.printlnSrc("Attempted to reroute, but not wasi {s}", .{path}, @src());
+        Vapor.printlnSrc("Attempted to reroute, but not wasi {s}", .{path}, @src());
     }
 }
 
@@ -289,7 +289,7 @@ pub fn routePush(path: []const u8) void {
     if (isWasi) {
         routePushWASM(path.ptr, path.len);
     } else {
-        Fabric.printlnSrc("Attempted to reroute, but not wasi {s}", .{path}, @src());
+        Vapor.printlnSrc("Attempted to reroute, but not wasi {s}", .{path}, @src());
     }
 }
 
@@ -315,7 +315,7 @@ pub fn getWindowParams() ?[]const u8 {
             return params_str;
         }
     } else {
-        Fabric.printlnSrc("Attempted to get params, but not wasi", .{}, @src());
+        Vapor.printlnSrc("Attempted to get params, but not wasi", .{}, @src());
         return null;
     }
 }
@@ -407,9 +407,9 @@ pub const Response = struct {
 export fn resumeCallback(_: u32, resp_ptr: [*:0]u8) void {
     _ = std.mem.span(resp_ptr);
     // this std.json.parseFromSlice is extermely memory costly 43kb alone
-    // const parsed_value = std.json.parseFromSlice(Response, Fabric.allocator_global, resp, .{}) catch return;
+    // const parsed_value = std.json.parseFromSlice(Response, Vapor.allocator_global, resp, .{}) catch return;
     // const json_resp: Response = parsed_value.value;
-    // const node = Fabric.fetch_registry.get(id) orelse return;
+    // const node = Vapor.fetch_registry.get(id) orelse return;
     // @call(.auto, node.data.runFn, .{ &node.data, json_resp });
 }
 
@@ -640,21 +640,21 @@ pub fn fetchWithParams(url: []const u8, self: anytype, cb: anytype, http_req: Ht
         //
         fn deinitFn(node: *FetchNode) void {
             const closure: *@This() = @alignCast(@fieldParentPtr("fetch_node", node));
-            Fabric.allocator_global.destroy(closure);
+            Vapor.allocator_global.destroy(closure);
         }
     };
 
-    const closure = Fabric.allocator_global.create(Closure) catch |err| {
-        Fabric.println("Error could not create closure {any}\n ", .{err});
+    const closure = Vapor.allocator_global.create(Closure) catch |err| {
+        Vapor.println("Error could not create closure {any}\n ", .{err});
         unreachable;
     };
     closure.* = .{
         .self = self,
     };
 
-    const id = Fabric.fetch_registry.count() + 1;
-    Fabric.fetch_registry.put(id, &closure.fetch_node) catch |err| {
-        Fabric.println("Button Function Registry {any}\n", .{err});
+    const id = Vapor.fetch_registry.count() + 1;
+    Vapor.fetch_registry.put(id, &closure.fetch_node) catch |err| {
+        Vapor.println("Button Function Registry {any}\n", .{err});
         return;
     };
     fetchParamsWasm(url.ptr, url.len, id, json.ptr, json.len);
@@ -666,6 +666,10 @@ const Param = struct {
     key: []const u8,
     value: []const u8,
 };
+
+pub fn scrollTo(x: f32, y: f32) void {
+    Wasm.scrollToWasm(x, y);
+}
 
 pub const QueryBuilder = struct {
     allocator: std.mem.Allocator,
@@ -832,19 +836,111 @@ pub const QueryBuilder = struct {
     }
 };
 
+pub const ObserverOptions = packed struct {
+    threshold: f32 = 0,
+    rootMargin_top: i32 = 0,
+    rootMargin_right: i32 = 0,
+    rootMargin_bottom: i32 = 0,
+    rootMargin_left: i32 = 0,
+};
+
+// Field type enum that JS can understand
+pub const FieldType = enum(u8) {
+    u8_type,
+    i8_type,
+    u16_type,
+    i16_type,
+    u32_type,
+    i32_type,
+    u64_type,
+    i64_type,
+    f32_type,
+    f64_type,
+    bool_type,
+    string_type, // ptr + len pair
+};
+
+// Schema field descriptor
+pub const FieldDescriptor = packed struct {
+    field_type: FieldType,
+    offset: u32,
+    name_ptr: u32,
+    name_len: u32,
+};
+
+// Generic schema generator
+pub fn StructSchema(comptime T: type) type {
+    return struct {
+        pub var fields: []FieldDescriptor = undefined;
+        pub fn init() void {
+            const type_info = @typeInfo(T);
+            if (type_info != .@"struct") {
+                @compileError("StructSchema only works with struct types");
+            }
+
+            const struct_fields = type_info.@"struct".fields;
+            fields = Vapor.frame_arena.persistentAllocator().alloc(FieldDescriptor, struct_fields.len) catch unreachable;
+
+            inline for (struct_fields, 0..) |field, i| {
+                const field_type = mapZigTypeToFieldType(field.type);
+                // Vapor.print("Field {s} type {d} {any} {any}\n", .{ field.name, field_type, @offsetOf(T, field.name), @intFromPtr(field.name.ptr) });
+                fields[i] = FieldDescriptor{
+                    .field_type = field_type,
+                    .offset = @offsetOf(T, field.name),
+                    .name_ptr = @intFromPtr(field.name.ptr),
+                    .name_len = field.name.len,
+                };
+            }
+        }
+
+        pub fn getSchema() []FieldDescriptor {
+            return fields;
+        }
+
+        pub fn getSchemaLength() usize {
+            return fields.len;
+        }
+    };
+}
+
+fn mapZigTypeToFieldType(comptime T: type) FieldType {
+    return switch (T) {
+        u8 => .u8_type,
+        i8 => .i8_type,
+        u16 => .u16_type,
+        i16 => .i16_type,
+        u32 => .u32_type,
+        i32 => .i32_type,
+        u64 => .u64_type,
+        i64 => .i64_type,
+        f32 => .f32_type,
+        f64 => .f64_type,
+        bool => .bool_type,
+        else => blk: {
+            // Check if it's a string type (ptr + len)
+            const type_info = @typeInfo(T);
+            if (type_info == .Pointer) {
+                break :blk .string_type;
+            }
+            @compileError("Unsupported type: " ++ @typeName(T));
+        },
+    };
+}
+
 pub const Observer = struct {
     pub const Target = struct {
         url: []const u8,
         is_in_view: bool,
+        index: usize,
     };
     name: []const u8,
     callback: *const fn (Target) void,
-    // _node: *Fabric.Node,
-    pub fn new(name: []const u8, callback: anytype) Observer {
+    // _node: *Vapor.Node,
+    pub fn new(name: []const u8, callback: anytype, options: ObserverOptions) Observer {
         const Closure = struct {
-            opaque_node: Fabric.OpaqueNode = .{ .data = .{ .runFn = runFn } },
+            opaque_node: Vapor.OpaqueNode = .{ .data = .{ .runFn = runFn } },
             fn runFn(opaque_args: *anyopaque) void {
-                const target = @as(*const Target, @alignCast(@ptrCast(opaque_args))).*;
+                const target = @as(*const Target, @ptrCast(@alignCast(opaque_args))).*;
                 // const c_str: [*:0]const u8 = @as(?[*:0]const u8, @ptrCast(opaque_args)).?;
                 // 2. Create a valid Zig slice from the C-string
                 // const args: []const u8 = std.mem.span(c_str);
@@ -852,22 +948,42 @@ pub const Observer = struct {
             }
         };
 
-        const closure = Fabric.allocator_global.create(Closure) catch |err| {
-            Fabric.println("Error could not create closure {any}\n ", .{err});
+        const closure = Vapor.frame_arena.persistentAllocator().create(Closure) catch |err| {
+            Vapor.println("Error could not create closure {any}\n ", .{err});
             unreachable;
         };
         closure.* = .{};
 
-        Fabric.opaque_registry.put(hashKey(name), &closure.opaque_node) catch |err| {
-            Fabric.println("Button Function Registry {any}\n", .{err});
+        Vapor.opaque_registry.put(hashKey(name), &closure.opaque_node) catch |err| {
+            Vapor.println("Button Function Registry {any}\n", .{err});
         };
 
-        Wasm.createObserverWasm(name.ptr, name.len);
+        Wasm.createObserverWasm(name.ptr, name.len, &options);
 
         return Observer{
             .name = name,
             .callback = callback,
         };
     }
+
+    pub fn reinit(name: []const u8) void {
+        Wasm.reinitObserverWasm(name.ptr, name.len);
+    }
+
+    pub fn destroy(name: []const u8) void {
+        Wasm.destroyObserverWasm(name.ptr, name.len);
+    }
     // fn addCallBack(name: []const u8, cb: anytype, comptime T: type) void {}
 };
+
+const ObserverOptionsSchema = StructSchema(ObserverOptions);
+// Export schema getters with unique names
+export fn getObserverOptionsSchema() [*]FieldDescriptor {
+    ObserverOptionsSchema.init();
+    return ObserverOptionsSchema.getSchema().ptr;
+}
+
+export fn getObserverOptionsSchemaLength() usize {
+    ObserverOptionsSchema.init();
+    return ObserverOptionsSchema.getSchemaLength();
+}

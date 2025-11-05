@@ -1,9 +1,9 @@
 const std = @import("std");
 const UINode = @import("UITree.zig").UINode;
 const UI = @import("UITree.zig");
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const Element = @import("Element.zig").Element;
-const print = Fabric.println;
+const print = Vapor.println;
 
 pub const PureNode = struct {
     uuid: []const u8,
@@ -93,7 +93,7 @@ pub fn printTree(self: *PureTree) !void {
         // Start the recursion with an empty prefix.
         try self.printNode(&writer, child, "", is_last);
     }
-    Fabric.println("PureTree {s}\n", .{buffer[0..writer.end]});
+    Vapor.println("PureTree {s}\n", .{buffer[0..writer.end]});
 }
 
 /// Private recursive function to print a node and its descendants.

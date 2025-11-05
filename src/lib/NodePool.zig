@@ -1,5 +1,5 @@
 const std = @import("std");
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const UINode = @import("UITree.zig").UINode;
 const NodePool = @This();
 slots: []UINode,

@@ -1,6 +1,6 @@
 const std = @import("std");
-const Fabric = @import("../Fabric.zig");
-const Kit = Fabric.Kit;
+const Vapor = @import("../Vapor.zig");
+const Kit = Vapor.Kit;
 
 const Provider = enum {
     google,
@@ -43,18 +43,18 @@ clients: Clients = undefined,
 provider: Provider = undefined,
 
 pub fn init(clients: Clients) void {
-    // _ = Fabric.createHook({}, hooks, "/nightwatch/auth");
+    // _ = Vapor.createHook({}, hooks, "/nightwatch/auth");
     keystone = KeyStone{
         .clients = clients,
     };
 }
 
 fn hooks(_: void) void {
-    const params_str = Fabric.Kit.getWindowParams() orelse return;
+    const params_str = Vapor.Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
-    const params = Kit.parseParams(params_str, &Fabric.allocator_global) catch return orelse return;
+    const params = Kit.parseParams(params_str, &Vapor.allocator_global) catch return orelse return;
     const code = params.get("code") orelse return;
-    const cookie = Fabric.getCookie("oauth_provider") orelse return;
+    const cookie = Vapor.getCookie("oauth_provider") orelse return;
     const provider = std.meta.stringToEnum(Provider, cookie) orelse return;
     switch (provider) {
         .google => exchangeGoogle(),
@@ -65,11 +65,11 @@ fn hooks(_: void) void {
 }
 
 pub fn handleAuthExchanges(_: void) void {
-    const params_str = Fabric.Kit.getWindowParams() orelse return;
+    const params_str = Vapor.Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
-    const params = Kit.parseParams(params_str, &Fabric.allocator_global) catch return orelse return;
+    const params = Kit.parseParams(params_str, &Vapor.allocator_global) catch return orelse return;
     const code = params.get("code") orelse return;
-    const cookie = Fabric.getCookie("oauth_provider") orelse return;
+    const cookie = Vapor.getCookie("oauth_provider") orelse return;
     const provider = std.meta.stringToEnum(Provider, cookie) orelse return;
     switch (provider) {
         .google => exchangeGoogle(),
@@ -82,7 +82,7 @@ pub fn handleAuthExchanges(_: void) void {
 fn exchangeGithub(code: []const u8) void {
     const params_str = Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
-    const body = Fabric.fmtln("auth-code={s}", .{code});
+    const body = Vapor.fmtln("auth-code={s}", .{code});
     Kit.fetchWithParams("http://localhost:8443/exchange/github/token", {}, logToken, .{
         .method = "POST",
         .body = body,
@@ -96,9 +96,9 @@ fn exchangeGithub(code: []const u8) void {
 fn exchangeGoogle() void {
     const params_str = Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
-    const params = Kit.parseParams(params_str, &Fabric.allocator_global) catch return orelse return;
+    const params = Kit.parseParams(params_str, &Vapor.allocator_global) catch return orelse return;
     const code = params.get("code") orelse return;
-    const body = Fabric.fmtln("auth-code={s}", .{code});
+    const body = Vapor.fmtln("auth-code={s}", .{code});
     Kit.fetchWithParams("http://localhost:8443/exchange/google/token", {}, logToken, .{
         .method = "POST",
         .body = body,
@@ -113,11 +113,11 @@ fn exchangeGoogle() void {
 fn exchangeApple() void {
     const params_str = Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
-    Fabric.printlnSrc("Params {s}", .{params_str}, @src());
-    const params = Kit.parseParams(params_str, &Fabric.allocator_global) catch return orelse return;
-    Fabric.printlnSrc("{s}", .{params.get("code") orelse ""}, @src());
+    Vapor.printlnSrc("Params {s}", .{params_str}, @src());
+    const params = Kit.parseParams(params_str, &Vapor.allocator_global) catch return orelse return;
+    Vapor.printlnSrc("{s}", .{params.get("code") orelse ""}, @src());
     const code = params.get("code") orelse return;
-    const body = Fabric.fmtln("auth-code={s}", .{code});
+    const body = Vapor.fmtln("auth-code={s}", .{code});
     Kit.fetchWithParams("http://localhost:8443/exchange/google/token", {}, logToken, .{
         .method = "POST",
         .body = body,
@@ -131,11 +131,11 @@ fn exchangeApple() void {
 fn exchangeAzure() void {
     const params_str = Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
-    Fabric.printlnSrc("Params {s}", .{params_str}, @src());
-    const params = Kit.parseParams(params_str, &Fabric.allocator_global) catch return orelse return;
-    Fabric.printlnSrc("{s}", .{params.get("code") orelse ""}, @src());
+    Vapor.printlnSrc("Params {s}", .{params_str}, @src());
+    const params = Kit.parseParams(params_str, &Vapor.allocator_global) catch return orelse return;
+    Vapor.printlnSrc("{s}", .{params.get("code") orelse ""}, @src());
     const code = params.get("code") orelse return;
-    const body = Fabric.fmtln("auth-code={s}", .{code});
+    const body = Vapor.fmtln("auth-code={s}", .{code});
     Kit.fetchWithParams("http://localhost:8443/exchange/google/token", {}, logToken, .{
         .method = "POST",
         .body = body,
@@ -147,7 +147,7 @@ fn exchangeAzure() void {
 }
 
 fn logToken(_: void, resp: Kit.Response) void {
-    Fabric.printlnSrc("Logged response {any}", .{resp.code}, @src());
+    Vapor.printlnSrc("Logged response {any}", .{resp.code}, @src());
     const path = Kit.getWindowPath();
     if (resp.code == 401 and !std.mem.eql(u8, "/nightwatch/auth", path)) {
         Kit.routePush("/nightwatch/auth");
@@ -160,7 +160,7 @@ fn logToken(_: void, resp: Kit.Response) void {
 }
 
 pub fn getSession() ?[]const u8 {
-    return Fabric.getCookie("_nightwatch-session");
+    return Vapor.getCookie("_nightwatch-session");
 }
 
 pub fn validate() void {
@@ -185,7 +185,7 @@ pub fn signInWithOauth(provider: Provider) void {
             options.access_type = "offline";
             options.prompt = "consent";
             const cookie = "oauth_provider=google; path=/; secure; samesite=strict";
-            Fabric.setCookie(cookie);
+            Vapor.setCookie(cookie);
             keystone.google() catch return;
         },
         .apple => {
@@ -198,7 +198,7 @@ pub fn signInWithOauth(provider: Provider) void {
             options.state = "random_csrf_token";
             options.nonce = "random_nonce_value";
             const cookie = "oauth_provider=apple; path=/; secure; samesite=strict";
-            Fabric.setCookie(cookie);
+            Vapor.setCookie(cookie);
             keystone.apple() catch return;
         },
         .github => {
@@ -208,7 +208,7 @@ pub fn signInWithOauth(provider: Provider) void {
             options.scope = "read:user user:email";
             options.state = "random_csrf_token";
             const cookie = "oauth_provider=github; path=/; secure; samesite=strict";
-            Fabric.setCookie(cookie);
+            Vapor.setCookie(cookie);
             keystone.github() catch return;
         },
         else => {},
@@ -217,7 +217,7 @@ pub fn signInWithOauth(provider: Provider) void {
 
 fn apple(_: KeyStone) !void {
     var query: Kit.QueryBuilder = undefined;
-    try query.init(Fabric.allocator_global);
+    try query.init(Vapor.allocator_global);
 
     try query.add("response_type", "code id_token"); // or your actual callback URL
     try query.add("client_id", options.client_id);
@@ -229,16 +229,16 @@ fn apple(_: KeyStone) !void {
     //
     try query.queryStrEncode();
     const full_url = try query.generateUrl("https://appleid.apple.com/auth/authorize", query.str);
-    defer Fabric.allocator_global.free(full_url);
-    Fabric.println("{s}\n", .{full_url});
+    defer Vapor.allocator_global.free(full_url);
+    Vapor.println("{s}\n", .{full_url});
 
-    // Fabric.printlnSrc("{s}\n", .{full_url}, @src());
+    // Vapor.printlnSrc("{s}\n", .{full_url}, @src());
     Kit.setWindowLocation(full_url);
 }
 
 fn github(_: KeyStone) !void {
     var query: Kit.QueryBuilder = undefined;
-    try query.init(Fabric.allocator_global);
+    try query.init(Vapor.allocator_global);
 
     try query.add("client_id", options.client_id);
     try query.add("redirect_uri", options.redirect_uri); // or your actual callback URL
@@ -247,15 +247,15 @@ fn github(_: KeyStone) !void {
     //
     try query.queryStrEncode();
     const full_url = try query.generateUrl("https://github.com/login/oauth/authorize", query.str);
-    defer Fabric.allocator_global.free(full_url);
+    defer Vapor.allocator_global.free(full_url);
 
-    Fabric.printlnSrc("{s}\n", .{full_url}, @src());
+    Vapor.printlnSrc("{s}\n", .{full_url}, @src());
     Kit.setWindowLocation(full_url);
 }
 
 fn google(_: KeyStone) !void {
     var query: Kit.QueryBuilder = undefined;
-    try query.init(Fabric.allocator_global);
+    try query.init(Vapor.allocator_global);
 
     try query.add("client_id", options.client_id);
     try query.add("redirect_uri", options.redirect_uri); // or your actual callback URL
@@ -266,8 +266,8 @@ fn google(_: KeyStone) !void {
     //
     try query.queryStrEncode();
     const full_url = try query.generateUrl("https://accounts.google.com/o/oauth2/v2/auth", query.str);
-    defer Fabric.allocator_global.free(full_url);
+    defer Vapor.allocator_global.free(full_url);
 
-    Fabric.printlnSrc("{s}\n", .{full_url}, @src());
+    Vapor.printlnSrc("{s}\n", .{full_url}, @src());
     Kit.setWindowLocation(full_url);
 }

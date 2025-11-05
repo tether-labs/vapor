@@ -1,7 +1,7 @@
 // Transition.zig
 const std = @import("std");
 const TimingFunction = @import("types.zig").TimingFunction;
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 
 pub const TransitionProperty = enum(u8) {
     opacity,
@@ -29,7 +29,7 @@ pub const TransitionState = packed union {
 };
 
 pub const PackedTransition = packed struct {
-    properties_ptr: ?[*]const TransitionProperty = null,
+    properties_ptr: ?*[]TransitionProperty = null,
     properties_len: u32 = 0,
     duration: u32 = 300, // default 300ms
     timing: TimingFunction = .ease,
@@ -38,11 +38,13 @@ pub const PackedTransition = packed struct {
     // final_state: TransitionState = .{ .none = {} },
 
     pub fn set(packed_transition: *PackedTransition, transition: *const Transition) void {
-        var slice: []TransitionProperty = Fabric.frame_arena.getFrameAllocator().alloc(TransitionProperty, transition.properties.len) catch unreachable;
+        const slice_ptr = Vapor.frame_arena.persistentAllocator().create([]TransitionProperty) catch unreachable;
+        var slice: []TransitionProperty = Vapor.frame_arena.persistentAllocator().alloc(TransitionProperty, transition.properties.len) catch unreachable;
         for (transition.properties, 0..) |property, i| {
             slice[i] = property;
         }
-        packed_transition.properties_ptr = slice.ptr;
+        slice_ptr.* = slice;
+        packed_transition.properties_ptr = slice_ptr;
         packed_transition.properties_len = slice.len;
         packed_transition.duration = transition.duration;
         packed_transition.timing = transition.timing;

@@ -1,5 +1,5 @@
 const std = @import("std");
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const Alignment = std.mem.Alignment;
 const BITS_IN_BYTE = 8;
 const BYTES_IN_MEGABYTE = 1000;
@@ -9,7 +9,7 @@ const BYTES_IN_MEGABYTE = 1000;
 //4 * 100 = 400 bytes
 pub fn printSizeInBytes(comptime T: type, number: usize) void {
     const SIZE_IN_BYTES = @sizeOf(T) * number;
-    Fabric.println("     size: {} bytes\n", .{SIZE_IN_BYTES});
+    Vapor.println("     size: {} bytes\n", .{SIZE_IN_BYTES});
 }
 
 const MemoryDeets = struct {
@@ -76,11 +76,11 @@ pub fn alloc(
 fn printAllocStackTrace(ta: *TrackingAllocator, _: usize, bytes: usize, ptr_op: ?[*]u8) void {
     if (ptr_op == null) return;
     const ptr = ptr_op.?;
-    // Fabric.trackAlloc();
+    // Vapor.trackAlloc();
 
     // _ = std.debug.getSelfDebugInfo() catch @panic("Could not get debug_info");
     // const trace = @errorReturnTrace();
-    // Fabric.println("{any}", .{trace});
+    // Vapor.println("{any}", .{trace});
     // 1) Prepare a big enough buffer on the stack
     // var buf: [512]u8 = undefined;
     // // 2) Wrap it in a FixedBufferStream
@@ -106,9 +106,9 @@ fn printAllocStackTrace(ta: *TrackingAllocator, _: usize, bytes: usize, ptr_op: 
     // // const fn_final = std.mem.trimLeft(u8, fn_line_value, " ");
     // // const fn_start = std.mem.indexOf(u8, fn_final, "= ") orelse 0;
     // // const fn_end = std.mem.indexOf(u8, fn_final, ")") orelse fn_final.len - fn_start - 1;
-    // // Fabric.println("{s}\n", .{fn_final[fn_start + 2..fn_end + 1]});
+    // // Vapor.println("{s}\n", .{fn_final[fn_start + 2..fn_end + 1]});
     // if (ta._log) {
-    //     Fabric.println(" Memory bytes\n", .{
+    //     Vapor.println(" Memory bytes\n", .{
     //         // ptr,
     //         // bytes,
     //     });
@@ -145,7 +145,7 @@ fn printFreeStackTrace(ta: *TrackingAllocator, _: usize, bytes: usize, ptr: [*]u
     //
     // // 3) Call printSourceAtAddress into *your* writer
     // const tty = std.io.tty.detectConfig(std.io.getStdErr());
-    // Fabric.printlnSourceAtAddress(debug_info, writer, ret_addr, tty) catch {};
+    // Vapor.printlnSourceAtAddress(debug_info, writer, ret_addr, tty) catch {};
     //
     // // 4) Grab only the bytes that were written
     // const outSlice = buf[0..stream.pos];
@@ -156,7 +156,7 @@ fn printFreeStackTrace(ta: *TrackingAllocator, _: usize, bytes: usize, ptr: [*]u
     // const line = sections.next() orelse return;
     //
     // if (ta._log) {
-    //     Fabric.println("\x1b[1m\x1b[33mFree \x1b[0m\x1b[22m[\x1b[35m{any}\x1b[0m] {any} bytes | {s}:{s}\n", .{
+    //     Vapor.println("\x1b[1m\x1b[33mFree \x1b[0m\x1b[22m[\x1b[35m{any}\x1b[0m] {any} bytes | {s}:{s}\n", .{
     //         ptr,
     //         bytes,
     //         file_name,
@@ -171,7 +171,7 @@ fn printFreeStackTrace(ta: *TrackingAllocator, _: usize, bytes: usize, ptr: [*]u
     };
     if (ta._is_runtime) {
         var old_mem_deets = ta._runtime_free_map.get(ptr) orelse {
-            // Fabric.printlnSrcErr("Could not free, no allocation {any} | Memory {any} bytes\n", .{ ptr, bytes }, @src());
+            // Vapor.printlnSrcErr("Could not free, no allocation {any} | Memory {any} bytes\n", .{ ptr, bytes }, @src());
             ta._runtime_free_map.put(ptr, mem_deets) catch return;
             return;
             // @panic("Invalid free");
@@ -185,7 +185,7 @@ fn printFreeStackTrace(ta: *TrackingAllocator, _: usize, bytes: usize, ptr: [*]u
         return;
     }
     var old_mem_deets = ta._allocations_map.get(ptr) orelse {
-        Fabric.println("Could not free, no allocation\n", .{});
+        Vapor.println("Could not free, no allocation\n", .{});
         return;
         // @panic("Invalid free");
     };
@@ -270,49 +270,49 @@ pub fn bytesAllocated(self: *TrackingAllocator) usize {
 }
 
 pub fn checkAllocation(ta: *TrackingAllocator) void {
-    // Fabric.println("Total Allocations\n", .{});
-    Fabric.printlnAllocation("Total Memory: {} bytes\n", .{ta.allocated_bytes});
-    // Fabric.println("Start Up Bytes Size: {} bytes\n", .{ta._start_bytes_size});
-    Fabric.println("-------------------------------------------\n", .{});
-    // Fabric.println("Startup Allocations:\n", .{});
+    // Vapor.println("Total Allocations\n", .{});
+    Vapor.printlnAllocation("Total Memory: {} bytes\n", .{ta.allocated_bytes});
+    // Vapor.println("Start Up Bytes Size: {} bytes\n", .{ta._start_bytes_size});
+    Vapor.println("-------------------------------------------\n", .{});
+    // Vapor.println("Startup Allocations:\n", .{});
     // var itr = ta._allocations_map.iterator();
     // var total_size: usize = 0;
     // while (itr.next()) |entry| {
     //     const key = entry.key_ptr.*;
     //     const mem_deets = entry.value_ptr.*;
-    //     Fabric.printlnAllocation("{any} | Memory: {any} bytes\n", .{ key, mem_deets.bytes });
+    //     Vapor.printlnAllocation("{any} | Memory: {any} bytes\n", .{ key, mem_deets.bytes });
     //     total_size += mem_deets.bytes;
     // }
-    // Fabric.println("-------------------------------------------\n", .{});
-    // Fabric.println("Total Runtime Memory: {} bytes\n", .{ta.allocated_bytes - ta._start_bytes_size});
-    // Fabric.println("-------------------------------------------\n", .{});
-    // Fabric.printlnAllocation("Runtime Allocations:", .{});
+    // Vapor.println("-------------------------------------------\n", .{});
+    // Vapor.println("Total Runtime Memory: {} bytes\n", .{ta.allocated_bytes - ta._start_bytes_size});
+    // Vapor.println("-------------------------------------------\n", .{});
+    // Vapor.printlnAllocation("Runtime Allocations:", .{});
     // var run_time_itr = ta._runtime_allocation_map.iterator();
     // while (run_time_itr.next()) |entry| {
     //     const _free_deets = ta._runtime_free_map.get(entry.key_ptr.*);
     //     const key = entry.key_ptr.*;
     //     const mem_deets = entry.value_ptr.*;
-    //     Fabric.printlnWithColor("{any} | Memory: {any} bytes\n", .{ key, mem_deets.bytes }, "color: #84E2FF;", "ALLOC");
+    //     Vapor.printlnWithColor("{any} | Memory: {any} bytes\n", .{ key, mem_deets.bytes }, "color: #84E2FF;", "ALLOC");
     //     if (_free_deets) |fr| {
-    //         Fabric.printlnWithColor("{any} | Memory: {any} bytes\n", .{ key, fr.bytes }, "color: #F0C04F;", "FREE");
+    //         Vapor.printlnWithColor("{any} | Memory: {any} bytes\n", .{ key, fr.bytes }, "color: #F0C04F;", "FREE");
     //     }
     // }
-    Fabric.println("-------------------------------------------\n", .{});
+    Vapor.println("-------------------------------------------\n", .{});
 }
 
 pub fn printBytes(self: TrackingAllocator) void {
-    Fabric.println("Memory: {} bytes\n", .{self.allocated_bytes});
+    Vapor.println("Memory: {} bytes\n", .{self.allocated_bytes});
 }
 
 pub fn printBits(self: TrackingAllocator) void {
-    Fabric.println("     Memory: {} bits\n", .{self.allocated_bytes * BITS_IN_BYTE});
+    Vapor.println("     Memory: {} bits\n", .{self.allocated_bytes * BITS_IN_BYTE});
 }
 
 pub fn printMegaBytes(self: TrackingAllocator) void {
     const ALLOCATED_BYTES_U64: f64 = @floatFromInt(self.allocated_bytes);
     const SIZE_IN_MEGABYTES: f64 = ALLOCATED_BYTES_U64 / @as(f64, BYTES_IN_MEGABYTE);
 
-    Fabric.println("     Memory: {d:.3}", .{SIZE_IN_MEGABYTES});
+    Vapor.println("     Memory: {d:.3}", .{SIZE_IN_MEGABYTES});
 }
 
 // test "alloc" {

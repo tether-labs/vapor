@@ -1,7 +1,7 @@
 const std = @import("std");
 const UINode = @import("UITree.zig").UINode;
-const println = @import("Fabric.zig").println;
-const Fabric = @import("Fabric.zig");
+const println = @import("Vapor.zig").println;
+const Vapor = @import("Vapor.zig");
 /// This is all very confusing, I have no idea how I came up with this solution, but it works idk, its kinda magic
 
 // Set uses AutoHashMap underneath the hood
@@ -19,7 +19,7 @@ pub fn Set(comptime T: type) type {
 
         pub fn add(self: *Self, value: T) void {
             self.map.put(value, {}) catch |err| {
-                Fabric.printlnSrcErr("{any}\n", .{err}, @src());
+                Vapor.printlnSrcErr("{any}\n", .{err}, @src());
                 return;
             };
         }
@@ -146,7 +146,7 @@ pub fn Signal(comptime T: type) type {
         _sub_index: usize = 0,
 
         pub fn init(sig: *Signal(T).Self, value: T) void {
-            const allocator_ptr = &Fabric.allocator_global;
+            const allocator_ptr = &Vapor.allocator_global;
             const new_set = Set(Subscriber).init(allocator_ptr);
             const effects = std.array_list.Managed(*Node).init(allocator_ptr.*);
             const components_new_set = std.array_list.Managed(*UINode).init(allocator_ptr.*);
@@ -162,14 +162,14 @@ pub fn Signal(comptime T: type) type {
                 ._has_pending_update = false,
                 ._pending_value = null,
                 ._closure = sig_closure,
-                ._sub_index = Fabric.component_subscribers.items.len,
+                ._sub_index = Vapor.component_subscribers.items.len,
             };
 
             sig_closure.* = .{
                 .signal = sig,
             };
 
-            Fabric.component_subscribers.append(
+            Vapor.component_subscribers.append(
                 &sig_closure.node,
             ) catch unreachable;
 
@@ -177,7 +177,7 @@ pub fn Signal(comptime T: type) type {
         }
 
         pub fn initv2(value: T, _: *std.mem.Allocator) *Signal(T).Self {
-            const allocator_ptr = &Fabric.allocator_global;
+            const allocator_ptr = &Vapor.allocator_global;
             const new_set = Set(Subscriber).init(allocator_ptr);
             const effects = std.array_list.Managed(*Node).init(allocator_ptr.*);
             const components_new_set = std.array_list.Managed(*UINode).init(allocator_ptr.*);
@@ -194,21 +194,21 @@ pub fn Signal(comptime T: type) type {
                 ._has_pending_update = false,
                 ._pending_value = null,
                 ._closure = sig_closure,
-                ._sub_index = Fabric.component_subscribers.items.len,
+                ._sub_index = Vapor.component_subscribers.items.len,
             };
 
             sig_closure.* = .{
                 .signal = sig,
             };
 
-            Fabric.component_subscribers.append(
+            Vapor.component_subscribers.append(
                 &sig_closure.node,
             ) catch unreachable;
 
             return sig;
         }
         pub fn deinit(self: *Self) void {
-            _ = Fabric.component_subscribers.orderedRemove(self._sub_index);
+            _ = Vapor.component_subscribers.orderedRemove(self._sub_index);
             var iter = self._subscribers.iterator();
             while (iter.next()) |sub| {
                 if (sub.sig) |sig| {
@@ -302,10 +302,34 @@ pub fn Signal(comptime T: type) type {
         /// Then calls notify, notifyEffects, notifyComponents
         pub fn increment(self: *Self) void {
             if (@TypeOf(self._value) != u32 and @TypeOf(self._value) != i32 and @TypeOf(self._value) != f32 and @TypeOf(self._value) != usize) {
-                Fabric.printlnErr("increment only takes a u32, i32, f32, and usize", .{});
+                Vapor.printlnErr("increment only takes a u32, i32, f32, and usize", .{});
                 return;
             }
             self._value = self._value + 1;
+
+            // If we're in a batching context, only set the pending value
+            if (self._is_batching) {
+                self._has_pending_update = true;
+                self._pending_value = self._value;
+                // Still notify subscribers but not components
+                // self.notify();
+                self.notifyEffects();
+            } else {
+                self.notify();
+                self.notifyEffects();
+                self.notifyComponents();
+            }
+        }
+
+        /// increment the current signal value
+        /// must be int u32, i32, or f32 type
+        /// Then calls notify, notifyEffects, notifyComponents
+        pub fn decrement(self: *Self) void {
+            if (@TypeOf(self._value) != u32 and @TypeOf(self._value) != i32 and @TypeOf(self._value) != f32 and @TypeOf(self._value) != usize) {
+                Vapor.printlnErr("decrement only takes a u32, i32, f32, and usize", .{});
+                return;
+            }
+            self._value = self._value - 1;
 
             // If we're in a batching context, only set the pending value
             if (self._is_batching) {
@@ -392,7 +416,7 @@ pub fn Signal(comptime T: type) type {
             const temp = self._value;
 
             const _temp: *T = self.allocator_ptr.create(T) catch |err| {
-                Fabric.printlnSrcErr("Failed to update, could not clone {any}", .{err}, @src());
+                Vapor.printlnSrcErr("Failed to update, could not clone {any}", .{err}, @src());
                 return;
             };
             _temp.* = self._value;
@@ -418,8 +442,8 @@ pub fn Signal(comptime T: type) type {
         }
 
         pub fn grain(_: *Self, node_ptr: *UINode) void {
-            Fabric.grain_element_uuid = node_ptr.uuid;
-            Fabric.cycleGrain();
+            Vapor.grain_element_uuid = node_ptr.uuid;
+            Vapor.cycleGrain();
         }
 
         /// derived takes a signals and a callback function and returns a new signal that can be subscribed to
@@ -446,16 +470,16 @@ pub fn Signal(comptime T: type) type {
         ///     count: usize = 0,
         ///     pub fn effect_callback(self: *Self) void {
         ///         self.count += 1;
-        ///         Fabric.printlnSrc("Count {any}", .{self.count}, @src());
+        ///         Vapor.printlnSrc("Count {any}", .{self.count}, @src());
         ///     }
         /// };
         pub fn effect(self: *Self, comptime Effect: type) void {
             if (@typeInfo(Effect) != .@"struct") {
-                Fabric.printlnSrcErr("Must be struct type", .{}, @src());
+                Vapor.printlnSrcErr("Must be struct type", .{}, @src());
                 return;
             }
             if (!std.meta.hasMethod(Effect, "effect_callback")) {
-                Fabric.printlnSrcErr("Must have effect_callback() method", .{}, @src());
+                Vapor.printlnSrcErr("Must have effect_callback() method", .{}, @src());
                 return;
             }
 
@@ -514,9 +538,9 @@ pub fn Signal(comptime T: type) type {
                 // if (node.state_type == .grain) {
                 //     // This is broken!!!!!!!!!!!!!!!!!!!
                 //     if (isNodeChild(node)) {
-                //         Fabric.println("Found node", .{});
-                //         // Fabric.cycleGrain();
-                //         Fabric.grain_element_uuid = node.uuid;
+                //         Vapor.println("Found node", .{});
+                //         // Vapor.cycleGrain();
+                //         Vapor.grain_element_uuid = node.uuid;
                 //         return;
                 //     }
                 //     continue;
@@ -545,7 +569,7 @@ pub fn Signal(comptime T: type) type {
                         []const u8 => {
                             switch (node.type) {
                                 .Icon => {
-                                    Fabric.println("Setting this value", .{});
+                                    Vapor.println("Setting this value", .{});
                                     node.href = self._value;
                                 },
                                 else => {
@@ -559,7 +583,7 @@ pub fn Signal(comptime T: type) type {
                 self._parent = node;
                 // self.markChildrenDirty(node);
             }
-            Fabric.cycle();
+            Vapor.cycle();
         }
 
         /// Notify effect takes a signals ptr and notifies all effect subscribers,
@@ -605,7 +629,7 @@ pub fn Signal(comptime T: type) type {
         // This is broken
         fn isNodeChild(node: *UINode) bool {
             // Here we find the node which was clicked;
-            const starting_node = findNodeByUUID(Fabric.current_ctx.root.?, Fabric.current_depth_node_id) orelse return false;
+            const starting_node = findNodeByUUID(Vapor.current_ctx.root.?, Vapor.current_depth_node_id) orelse return false;
             //Now we search said node if it has children that includes the grain component.
             if (findNodeByUUID(starting_node, node.uuid)) |_| {
                 return true;

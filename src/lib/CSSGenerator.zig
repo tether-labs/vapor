@@ -5,7 +5,7 @@ const UINode = UITree.UINode;
 const indexOf = UITree.indexOf;
 const StyleWriter = @import("convertStyleCustomWriter.zig");
 const generateStyle = StyleWriter.generateStyle;
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const Writer = @import("Writer.zig");
 const KeyGenerator = @import("Key.zig").KeyGenerator;
 const Types = @import("types.zig");
@@ -44,12 +44,14 @@ fn writeLayout(layout_ptr: *const Types.PackedLayout) void {
 }
 
 fn writeVisual(visual_ptr: *const Types.PackedVisual) void {
-    StyleWriter.checkVisual(visual_ptr, &writer);
+    StyleWriter.generateVisual(visual_ptr, &writer);
 }
 
 fn writeInteractive(interactive_ptr: *const Types.PackedInteractive) void {
     const hover = interactive_ptr.hover;
-    StyleWriter.checkVisual(&hover, &writer);
+    const hover_position = interactive_ptr.hover_position;
+    StyleWriter.generateVisual(&hover, &writer);
+    StyleWriter.generatePositions(&hover_position, &writer);
 }
 
 fn writeAnimation(animation_ptr: *const Types.PackedAnimations) void {
@@ -142,17 +144,17 @@ fn writeFullNodeRule(gen: *Generator, node: *UINode, selector: []const u8) void 
 
 /// REFACTORED: Now dramatically simpler, just calls the new helper.
 pub fn writeAllStyles(gen: *Generator) void {
-    const allocator = Fabric.frame_arena.getFrameAllocator();
+    const allocator = Vapor.frame_arena.getFrameAllocator();
     var key_buf: [128]u8 = undefined; // Shared buffer for key generation
 
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_layouts, "lay", &key_buf, writeLayout, null);
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_visuals, "vis", &key_buf, writeVisual, null);
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_positions, "pos", &key_buf, writePos, null);
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_margins_paddings, "mapa", &key_buf, writeMarginPaddings, null);
+    writeCommonStyleGroup(gen, allocator, &Vapor.packed_layouts, "lay", &key_buf, writeLayout, null);
+    writeCommonStyleGroup(gen, allocator, &Vapor.packed_visuals, "vis", &key_buf, writeVisual, null);
+    writeCommonStyleGroup(gen, allocator, &Vapor.packed_positions, "pos", &key_buf, writePos, null);
+    writeCommonStyleGroup(gen, allocator, &Vapor.packed_margins_paddings, "mapa", &key_buf, writeMarginPaddings, null);
 
     // Special cases with ":hover"
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_interactives, "intr", &key_buf, writeInteractive, ":hover");
-    writeCommonStyleGroup(gen, allocator, &Fabric.packed_animations, "anim", &key_buf, writeAnimation, ":hover");
+    writeCommonStyleGroup(gen, allocator, &Vapor.packed_interactives, "intr", &key_buf, writeInteractive, ":hover");
+    writeCommonStyleGroup(gen, allocator, &Vapor.packed_animations, "anim", &key_buf, writeAnimation, ":hover");
 }
 
 /// REFACTORED: Now uses the `writeFullNodeRule` helper.
@@ -176,7 +178,7 @@ pub fn writeNodeStyle(gen: *Generator, node: *UINode) void {
 
 pub fn printCSS(gen: *Generator) void {
     const buffer = gen.buffer[0..gen.end];
-    Fabric.println("{s}", .{buffer});
+    Vapor.println("{s}", .{buffer});
 }
 
 /// Uses SIMD to check if a needle exists within a haystack.

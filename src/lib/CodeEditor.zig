@@ -1,6 +1,6 @@
 const std = @import("std");
-const Fabric = @import("fabric");
-const Pure = Fabric.Pure;
+const Vapor = @import("fabric");
+const Pure = Vapor.Pure;
 const Builder = @import("Static.zig").Chain;
 const BuilderNoBody = @import("Static.zig").ChainClose;
 
@@ -13,10 +13,10 @@ const Graphic = BuilderNoBody.Graphic;
 const Icon = PureBuilderNoBody.Icon;
 const Text = BuilderNoBody.Text;
 const theme = @import("theme");
-const Color = Fabric.Types.Color;
+const Color = Vapor.Types.Color;
 // const code = @import("code/FormCode.zig").code;
 
-const Signal = Fabric.Signal;
+const Signal = Vapor.Signal;
 
 const NewLine = struct {
     processed_text: []TextDetails = undefined,
@@ -40,15 +40,15 @@ local_copy_code: []const u8 = undefined,
 
 fn toggleIcon(code_editor: *CodeEditor) void {
     code_editor.show_cpy_btn = false;
-    Fabric.cycle();
+    Vapor.cycle();
     // code_editor.show_cpy_btn.set(false);
 }
 
 fn copy(code_editor: *CodeEditor) void {
-    Fabric.Clipboard.copy(code_editor.local_copy_code);
+    Vapor.Clipboard.copy(code_editor.local_copy_code);
     code_editor.show_cpy_btn = true;
-    Fabric.cycle();
-    Fabric.registerCtxTimeout(1000, toggleIcon, .{code_editor});
+    Vapor.cycle();
+    Vapor.registerCtxTimeout(1000, toggleIcon, .{code_editor});
 }
 
 pub fn initWrapper(ptr: *anyopaque, allocator: *std.mem.Allocator, code: []const u8) void {
@@ -64,7 +64,7 @@ pub fn init(target: *CodeEditor, allocator: *std.mem.Allocator, code: []const u8
     // target.show_cpy_btn.init(false);
     target.local_copy_code = code;
     target.tokenize(code) catch |err| {
-        Fabric.println("Tokenize error {any}\n", .{err});
+        Vapor.println("Tokenize error {any}\n", .{err});
         return;
     };
 }
@@ -90,14 +90,14 @@ pub fn deinit(code_editor: *CodeEditor) void {
 }
 
 pub inline fn Code() fn (void) void {
-    const elem_decl = Fabric.ElementDecl{
+    const elem_decl = Vapor.ElementDecl{
         .state_type = .static,
         .elem_type = .Code,
         // .style = &.{},
     };
-    _ = Fabric.LifeCycle.open(elem_decl);
-    Fabric.LifeCycle.configure(elem_decl);
-    return Fabric.LifeCycle.close;
+    _ = Vapor.LifeCycle.open(elem_decl);
+    Vapor.LifeCycle.configure(elem_decl);
+    return Vapor.LifeCycle.close;
 }
 pub fn render(code_editor: *CodeEditor, _: f32) void {
     Box.style(&.{
@@ -197,11 +197,11 @@ pub fn render(code_editor: *CodeEditor, _: f32) void {
             Code()({
                 for (code_editor.processed_lines.items) |line| {
                     const color = if (line.is_removed) blk: {
-                        break :blk Fabric.Types.Background.transparentizeHex(.hex("#FF0000"), 0.1);
+                        break :blk Vapor.Types.Background.transparentizeHex(.hex("#FF0000"), 0.1);
                     } else if (line.is_added) blk: {
-                        break :blk Fabric.Types.Background.transparentizeHex(.hex("#00FF00"), 0.1);
+                        break :blk Vapor.Types.Background.transparentizeHex(.hex("#00FF00"), 0.1);
                     } else blk: {
-                        break :blk Fabric.Types.Background.transparent;
+                        break :blk Vapor.Types.Background.transparent;
                     };
                     Box.style(&.{
                         .size = .h(.px(20)),
@@ -214,7 +214,7 @@ pub fn render(code_editor: *CodeEditor, _: f32) void {
                         for (line.processed_text) |word| {
                             Text(word.text).style(&.{
                                 .visual = .{
-                                    .font_size = if (Fabric.isMobile()) 16 else 16,
+                                    .font_size = if (Vapor.isMobile()) 16 else 16,
                                     .font_weight = 500,
                                     .text_color = word.color,
                                 },
@@ -320,11 +320,11 @@ fn parseSubText(allocator: *std.mem.Allocator, processed_text: *std.array_list.M
                 text_deets.text = try std.fmt.allocPrint(allocator.*, "{s}", .{sub_slice});
                 try processed_text.append(text_deets);
             } else if (includes(sub_slice, "Box")) {
-                // text_deets.color = Fabric.hexToRgba("#E5FF54");
+                // text_deets.color = Vapor.hexToRgba("#E5FF54");
                 text_deets.text = try std.fmt.allocPrint(allocator.*, "{s}", .{sub_slice});
                 try processed_text.append(text_deets);
             } else if (includes(sub_slice, "Text")) {
-                // text_deets.color = Fabric.hexToRgba("#E5FF54");
+                // text_deets.color = Vapor.hexToRgba("#E5FF54");
                 text_deets.text = try std.fmt.allocPrint(allocator.*, "{s}", .{sub_slice});
                 try processed_text.append(text_deets);
             } else {
@@ -451,7 +451,7 @@ pub fn tokenize(code_editor: *CodeEditor, text: []const u8) !void {
                     try parseSubText(allocator, &processed_texts, result);
                     allocator.free(result);
                 } else if (includes(result, "(") and containsAlphabetic(result)) {
-                    // Fabric.println("Found bracket ( {s}", .{result});
+                    // Vapor.println("Found bracket ( {s}", .{result});
                     var split = std.mem.splitScalar(u8, result, '(');
                     text_deets.color = .palette(.code_keyword_color);
                     text_deets.text = try std.fmt.allocPrint(allocator.*, "{s}", .{split.next().?});
@@ -466,7 +466,7 @@ pub fn tokenize(code_editor: *CodeEditor, text: []const u8) !void {
                 }
             } else {
                 text_deets.text = result;
-                // text_deets.color = Fabric.hexToRgba("#88859D");
+                // text_deets.color = Vapor.hexToRgba("#88859D");
                 try processed_texts.append(text_deets);
             }
         }

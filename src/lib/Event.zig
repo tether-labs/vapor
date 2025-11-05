@@ -1,7 +1,7 @@
 const std = @import("std");
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const Wasm = @import("wasm");
-const isWasi = Fabric.isWasi;
+const isWasi = Vapor.isWasi;
 
 pub const Event = @This();
 id: u32,

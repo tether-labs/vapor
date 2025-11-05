@@ -1,11 +1,11 @@
 const std = @import("std");
 const UINode = @import("UITree.zig").UINode;
-const Signal = Fabric.Signal;
-const LifeCycle = Fabric.LifeCycle;
-const ElementDecl = Fabric.ElementDecl;
-const Style = Fabric.Style;
-const println = @import("Fabric.zig").println;
-const Fabric = @import("Fabric.zig");
+const Signal = Vapor.Signal;
+const LifeCycle = Vapor.LifeCycle;
+const ElementDecl = Vapor.ElementDecl;
+const Style = Vapor.Style;
+const println = @import("Vapor.zig").println;
+const Vapor = @import("Vapor.zig");
 
 /// Grain FlexBox
 /// Takes a signal, and attaches it to this node, ie only this node will update, none of its children

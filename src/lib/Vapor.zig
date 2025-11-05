@@ -26,12 +26,20 @@ const Canopy = @import("Canopy.zig");
 const CSSGenerator = @import("CSSGenerator.zig");
 const hashKey = utils.hashKey;
 const Pool = @import("Pool.zig");
+const mutateDomElementStyleString = @import("Element.zig").mutateDomElementStyleString;
 
 const DebugLevel = enum(u8) { all = 0, debug = 1, info = 2, warn = 3, none = 4 };
 
-pub const build_options = struct {
+pub var build_options = struct {
     enable_debug: bool = debug,
     debug_level: DebugLevel = .none,
+}{};
+
+pub var Timer = struct {
+    generation_time: f64 = 0,
+    reconcile_time: f64 = 0,
+    commit_time: f64 = 0,
+    total_time: f64 = 0,
 }{};
 // const getFocusStyle = @import("convertFocus.zig").getFocusStyle;
 // const getFocusWithinStyle = @import("convertFocusWithin.zig").getFocusWithinStyle;
@@ -57,6 +65,8 @@ const NodePool = @import("NodePool.zig");
 pub const Component = fn (void) void;
 
 pub const on_change_hash = "onChange";
+pub const on_leave_hash = "onLeave";
+pub const on_hover_hash = "onHover";
 pub const on_submit_hash = "onSubmit";
 pub const on_focus_hash = "onFocus";
 pub const on_blur_hash = "onBlur";
@@ -103,7 +113,7 @@ pub var element_registry: std.AutoHashMap(u32, *Element) = undefined;
 
 var serious_error: bool = false;
 
-const Fabric = @This();
+const Vapor = @This();
 pub const Kit = @import("kit/Kit.zig");
 // pub const Chart = @import("components/charts/Chart.zig");
 pub const Style = types.Style;
@@ -140,7 +150,7 @@ pub fn persist(key: []const u8, value: anytype) void {
         i32, u32, usize, f32 => Wasm.setLocalStorageNumberWasm(key.ptr, key.len, value),
         []const u8 => Wasm.setLocalStorageStringWasm(key.ptr, key.len, value.ptr, value.len),
         else => {
-            Fabric.printlnErr("Cannot store non string or int float types", .{});
+            Vapor.printlnErr("Cannot store non string or int float types", .{});
         },
     }
 }
@@ -166,7 +176,7 @@ pub fn getPersist(comptime T: type, key: []const u8) ?T {
                 }
             },
             else => {
-                Fabric.printlnErr("Cannot get non string or int float types", .{});
+                Vapor.printlnErr("Cannot get non string or int float types", .{});
                 return null;
             },
         }
@@ -204,6 +214,14 @@ pub fn setLocalStorageNumber(key: []const u8, value: u32) void {
         Wasm.setLocalStorageNumberWasm(key.ptr, key.len, value);
     }
 }
+
+const EventHandler = struct {
+    type: EventType,
+    ctx_aware: bool = false,
+    cb_opaque: *const anyopaque,
+};
+
+pub const EventHandlers = struct { handlers: std.ArrayListUnmanaged(EventHandler) };
 
 pub const Action = struct {
     runFn: ActionProto,
@@ -285,7 +303,7 @@ pub fn registerCallback(
     const PtrArgs = *const Args;
 
     // 2. Allocate memory for the arguments and copy them over.
-    const args_ptr = try Fabric.allocator_global.create(Args);
+    const args_ptr = try Vapor.allocator_global.create(Args);
     args_ptr.* = args;
 
     // 3. Create the wrapper function that matches our uniform signature.
@@ -303,15 +321,15 @@ pub fn registerCallback(
         .context = args_ptr,
     };
 
-    // 6. Create the FabricNode instance.
-    const node_with_closure = try Fabric.allocator_global.create(CtxNode);
+    // 6. Create the VaporNode instance.
+    const node_with_closure = try Vapor.allocator_global.create(CtxNode);
     node_with_closure.* = CtxNode{
         .closure = closure,
         // ... other node data
     };
 
-    // Now you would create your FabricNode and put it in the registry.
-    try Fabric.ctx_registry.put(id, node_with_closure);
+    // Now you would create your VaporNode and put it in the registry.
+    try Vapor.ctx_registry.put(id, node_with_closure);
     // ...
 }
 
@@ -324,19 +342,26 @@ pub var callback_registry: std.AutoHashMap(u32, *Node) = undefined;
 pub const OpaqueNode = struct { data: struct { runFn: *const fn (*anyopaque) void } };
 pub var opaque_registry: std.AutoHashMap(u32, *OpaqueNode) = undefined;
 pub var fetch_registry: std.AutoHashMap(u32, *Kit.FetchNode) = undefined;
-pub var events_callbacks: std.AutoHashMap(u32, *const fn (*Event) void) = undefined;
+pub const EventNode = struct { cb: *const fn (*Event) void, ui_node: ?*UINode = null };
+pub var events_callbacks: std.AutoHashMap(u32, EventNode) = undefined;
+pub var nodes_with_events: std.AutoHashMap(u32, *UINode) = undefined;
+pub var node_events_callbacks: std.AutoHashMap(u32, *CtxAwareEventNode) = undefined;
 pub var events_inst_callbacks: std.AutoHashMap(u32, *EvtInstNode) = undefined;
-pub var hooks_inst_callbacks: std.AutoHashMap(u32, *HookInstNode) = undefined;
+pub var hooks_inst_callbacks: std.AutoHashMap(u32, *const fn (HookContext) void) = undefined;
 pub var mounted_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
+pub var on_end_funcs: std.array_list.Managed(*const fn () void) = undefined;
+pub var on_commit_funcs: std.array_list.Managed(*const fn () void) = undefined;
 pub var mounted_ctx_funcs: std.array_list.Managed(*Node) = undefined;
 pub var created_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var updated_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var destroy_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
-const RemovedNode = struct {
-    uuid: []const u8,
-    index: usize,
-};
+const RemovedNode = struct { uuid: []const u8, index: usize };
 pub var removed_nodes: std.array_list.Managed(RemovedNode) = undefined;
+pub var added_nodes: std.array_list.Managed(RenderCommand) = undefined;
+pub var dirty_nodes: std.array_list.Managed(RenderCommand) = undefined;
+// Potential nodes is an set to chekc if the potential nodes that are either shifted or removed on in the dom currently
+// instead of an active set, we only record the nodes that are different from the current tree
+pub var potential_nodes: std.StringHashMap(void) = undefined;
 const Class = struct {
     element_id: []const u8,
     style_id: []const u8,
@@ -360,7 +385,29 @@ pub var page_node_count: usize = 256;
 const FrameAllocator = @import("FrameAllocator.zig");
 pub var frame_arena: FrameAllocator = undefined;
 
-pub const FabricConfig = struct {
+pub fn getFrameAllocator() std.mem.Allocator {
+    return frame_arena.getFrameAllocator();
+}
+
+pub fn frameList(comptime T: type) std.array_list.Managed(T) {
+    var array_list: std.array_list.Managed(T) = undefined;
+    array_list = std.array_list.Managed(T).init(frame_arena.getFrameAllocator());
+    return array_list;
+}
+
+pub fn getPersistentAllocator() std.mem.Allocator {
+    return frame_arena.persistentAllocator();
+}
+
+pub fn getRouteAllocator() std.mem.Allocator {
+    return frame_arena.getRouteAllocator();
+}
+
+pub fn getFrameArena() *FrameAllocator {
+    return &frame_arena;
+}
+
+pub const VaporConfig = struct {
     screen_width: f32,
     screen_height: f32,
     allocator: std.mem.Allocator,
@@ -368,7 +415,7 @@ pub const FabricConfig = struct {
 };
 
 pub var pool: Pool = undefined;
-pub fn init(config: FabricConfig) void {
+pub fn init(config: VaporConfig) void {
     browser_width = config.screen_width;
     browser_height = config.screen_height;
     page_node_count = config.page_node_count;
@@ -398,7 +445,7 @@ pub fn init(config: FabricConfig) void {
 
     // UIContext.ui_nodes = allocator.alloc(UINode, config.page_node_count) catch unreachable;
 
-    // Init string pool
+    // Init string pool adds 1kb
     pool = Pool.init(allocator, page_node_count) catch |err| {
         printlnErr("Could not init Pool {any}\n", .{err});
         unreachable;
@@ -407,9 +454,13 @@ pub fn init(config: FabricConfig) void {
     KeyGenerator.initWriter();
     // UIContext.debugPrintUINodeLayout();
 
+    // All this below adds 3kb
     animations = std.StringHashMap(Animation).init(allocator);
     component_subscribers = std.array_list.Managed(*Rune.ComponentNode).init(allocator);
     removed_nodes = std.array_list.Managed(RemovedNode).init(allocator);
+    added_nodes = std.array_list.Managed(RenderCommand).init(allocator);
+    dirty_nodes = std.array_list.Managed(RenderCommand).init(allocator);
+    potential_nodes = std.StringHashMap(void).init(allocator);
     // grain_subs = std.array_list.Managed(*GrainStruct.ComponentNode).init(allocator);
     classes_to_add = std.array_list.Managed(Class).init(allocator);
     classes_to_remove = std.array_list.Managed(Class).init(allocator);
@@ -423,9 +474,9 @@ pub fn init(config: FabricConfig) void {
 
     UIContext.indexes = std.AutoHashMap(u32, usize).init(allocator);
     // @memset(UIContext.common_nodes, 0);
-    for (0..continuations.len) |i| {
-        continuations[i] = null;
-    }
+    // for (0..continuations.len) |i| {
+    //     continuations[i] = null;
+    // }
 
     // this adds 7kb
     _ = getStyle(null); // 16kb
@@ -442,9 +493,10 @@ pub fn init(config: FabricConfig) void {
     _ = getAriaLabel(null); // < 1kb
 
     if (build_options.enable_debug) {
-        eventListener(.keydown, Debugger.onKeyPress);
+        // eventListener(.keydown, Debugger.onKeyPress);
         printlnColor("-----------Debug Mode----------", .{}, .hex("#F6820C"));
     }
+    // printDebug() catch unreachable;
 }
 
 fn initRegistries(persistent_allocator: std.mem.Allocator) void {
@@ -458,10 +510,14 @@ fn initRegistries(persistent_allocator: std.mem.Allocator) void {
 }
 
 fn initCalls(persistent_allocator: std.mem.Allocator) void {
-    events_callbacks = std.AutoHashMap(u32, *const fn (*Event) void).init(persistent_allocator);
+    events_callbacks = std.AutoHashMap(u32, EventNode).init(persistent_allocator);
+    nodes_with_events = std.AutoHashMap(u32, *UINode).init(persistent_allocator);
+    node_events_callbacks = std.AutoHashMap(u32, *CtxAwareEventNode).init(persistent_allocator);
     events_inst_callbacks = std.AutoHashMap(u32, *EvtInstNode).init(persistent_allocator);
-    hooks_inst_callbacks = std.AutoHashMap(u32, *HookInstNode).init(persistent_allocator);
+    hooks_inst_callbacks = std.AutoHashMap(u32, *const fn (HookContext) void).init(persistent_allocator);
     mounted_funcs = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
+    on_end_funcs = std.array_list.Managed(*const fn () void).init(persistent_allocator);
+    on_commit_funcs = std.array_list.Managed(*const fn () void).init(persistent_allocator);
     mounted_ctx_funcs = std.array_list.Managed(*Node).initCapacity(persistent_allocator, 32) catch |err| {
         println("Could not init Ctx Hooks {any}\n", .{err});
         return;
@@ -525,45 +581,38 @@ pub const LifeCycle = struct {
     }
 };
 
-// var last_time: i64 = 0;
-// /// throttle is used to throttle the render cycle
-// /// we can pass a delay in ms, if the time since the last render cycle is less than the delay, we return true
-// /// otherwise we return false
-// pub fn throttle(delay: u32) bool {
-//     const current_time = std.time.milliTimestamp();
-//     if (current_time - last_time < delay) {
-//         return true;
-//     }
-//     last_time = current_time;
-//     return false;
-// }
-
 /// Force rerender forces the entire dom tree to check props of all dynamic and pure components and rerender the ui
-/// since Fabric is built with zig and wasm, checking all props of 10000s of nodes and ui components is cheap
+/// since Vapor is built with zig and wasm, checking all props of 10000s of nodes and ui components is cheap
 /// feel free to abuse force, its essentially a global signal
 pub fn cycle() void {
     if (isWasi) {
-        Fabric.global_rerender = true;
+        Vapor.global_rerender = true;
+        // render_phase = .generating;
         Wasm.requestRerenderWasm();
     }
+    // } else if (render_phase == .committing) {
+    //     const route_ptr = frame_arena.getFrameAllocator().dupeZ(u8, current_route) catch unreachable;
+    //     defer frame_arena.getFrameAllocator().free(route_ptr);
+    //     renderCycle(route_ptr.ptr);
+    // }
 }
 
 // /// Force rerender forces the entire dom tree to check props of all dynamic and pure components and rerender the ui
-// /// since Fabric is built with zig and wasm, checking all props of 10000s of nodes and ui components is cheap
+// /// since Vapor is built with zig and wasm, checking all props of 10000s of nodes and ui components is cheap
 // /// feel free to abuse force, its essentially a global signal
 // pub fn cycleGrain() void {
-//     Fabric.grain_rerender = true;
-//     Fabric.println("Grain rerender", .{});
+//     Vapor.grain_rerender = true;
+//     Vapor.println("Grain rerender", .{});
 //     Wasm.requestRerenderWasm();
 // }
 
 /// Force rerender forces the entire dom tree to check props and rerender the entire ui
-/// since Fabric is built with zig and wasm, checking all props of 10000s of nodes and ui components is cheap
+/// since Vapor is built with zig and wasm, checking all props of 10000s of nodes and ui components is cheap
 /// feel free to abuse force, its essentially a global signal
 pub fn forceEverything() void {
     if (isWasi) {
-        Fabric.rerender_everything = true;
-        Fabric.global_rerender = true;
+        Vapor.rerender_everything = true;
+        Vapor.global_rerender = true;
         Wasm.requestRerenderWasm();
     }
 }
@@ -571,7 +620,7 @@ pub fn forceEverything() void {
 /// This function adds the route to the tether radix tree.
 /// Deinitializes the tether instance recursively calls routes deinit routes from radix tree
 /// # Parameters:
-/// - `fabric`: *Fabric,
+/// - `vapor`: *Vapor,
 /// - `path`: []const u8,
 /// - `page`: CommandTree
 ///
@@ -619,9 +668,9 @@ fn callNestedLayouts() void {
         } else {
             // TODO: This is taking a lot of time we need to create a better hashmap system, currently the hashmap compare
             // with the node is long and slow
-            const time = nowMs();
+            // const time = nowMs();
             render_page();
-            Fabric.println("Render time {any}", .{nowMs() - time});
+            // Vapor.println("Render time {any}", .{nowMs() - time});
         }
         return;
     }
@@ -649,35 +698,44 @@ fn callNestedLayouts() void {
 }
 
 pub var clean_up_ctx: *UIContext = undefined;
-var current_route: []const u8 = "/root";
-var previous_route: []const u8 = "/root";
+var current_route: []const u8 = "";
+var previous_route: []const u8 = "";
 var render_page: *const fn () void = undefined;
 pub var generator: CSSGenerator = undefined;
+const RenderPhase = enum {
+    generating, // Building VDOM
+    committing, // Running commit hooks
+    applying, // Applying to real DOM
+    idle, // Done
+};
+// pub var render_phase: RenderPhase = .idle;
 pub fn renderCycle(route_ptr: [*:0]u8) void {
-    // pool.resetFreeList();
-    // const time = nowMs();
     frame_arena.beginFrame(); // For double-buffered approach
+    const start = nowMs();
     const route = std.mem.span(route_ptr);
+
+    if (!std.mem.eql(u8, current_route, route)) {
+        // We need to start a new route allocator
+        // otherwise we are on the same route
+        frame_arena.beginRoute();
+    }
+
     current_route = route;
-    // packed_animations.clearRetainingCapacity();
-    // packed_layouts.clearRetainingCapacity();
-    // packed_positions.clearRetainingCapacity();
-    // packed_margins_paddings.clearRetainingCapacity();
-    // packed_visuals.clearRetainingCapacity();
-    // packed_interactives.clearRetainingCapacity();
     removed_nodes.clearRetainingCapacity();
+    added_nodes.clearRetainingCapacity();
+    dirty_nodes.clearRetainingCapacity();
+    potential_nodes.clearRetainingCapacity();
+    node_events_callbacks.clearRetainingCapacity();
+    events_callbacks.clearRetainingCapacity();
+    nodes_with_events.clearRetainingCapacity();
     UIContext.indexes.clearRetainingCapacity();
-    // Fabric.btn_registry.clearRetainingCapacity();
-    // Fabric.mounted_funcs.clearRetainingCapacity();
 
     var ctx_itr = ctx_registry.iterator();
     while (ctx_itr.next()) |entry| {
         _ = entry.value_ptr.*;
-        // node.data.deinitFn(node);
     }
     ctx_registry.clearRetainingCapacity();
 
-    // var hooks_ctx_itr = mounted_ctx_funcs.iterator();
     for (mounted_ctx_funcs.items) |node| {
         node.data.deinitFn(node);
     }
@@ -705,12 +763,8 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
         return;
     };
 
-    // new_ctx.root.?.style = old_ctx.root.?.style;
     new_ctx.root.?.uuid = old_ctx.root.?.uuid;
 
-    // Pure tree is attached to the traversal algo, ie itll be updated when the traversal algo is updated
-    // pure_tree.init(new_ctx.root.?, &allocator_global) catch {};
-    // error_tree.init(new_ctx.root.?, &allocator_global) catch {};
     current_ctx = new_ctx;
     var route_itr = std.mem.tokenizeScalar(u8, route, '/');
     var count: usize = 0;
@@ -728,66 +782,42 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     // Init the generator
     generator.init();
     next_layout_path_to_check = "";
-    // We call the routes and nested layuts
-    // This finds the reset layout, if it exists
+
+    const generation_start = nowMs();
     findResetLayout();
     // This calls the render tree, with render_page as the root function call
     // First it traverses the layouts calling them in order, and then it calls the render_page
     callNestedLayouts(); // 4.5ms
-    // Fabric.println("Traverse time {any}", .{nowMs() - UIContext.total_time});
-
-    // We reconcile the new dom
-    // the reason the fabric-debugger gets remvoed is the new ui tree does not include it;
-    // printUITree(old_ctx.root.?);
-    // printUITree(new_ctx.root.?);
-    // const time = nowMs();
-    Reconciler.reconcile(old_ctx, new_ctx); // 3kb
-    // printUITree(new_ctx.root.?);
-    // Fabric.println("Reconcile time {any}", .{nowMs() - time});
-    // // We iterate over the new dom and generate our pure tree  !!! we need to imrpove this perf wise
-    // iterateChildren(new_ctx.root.?);
-    // // we call debugger to determine the nodes that were updated
+    Timer.generation_time = nowMs() - generation_start;
     // Debugger.render();
-    // if (Debugger.old_debugger_node == null and Debugger.show_debugger) {
-    //     // Here new_debugger_node is not null
-    //     markChildrenDirty(Debugger.new_debugger_node.?);
-    //     Debugger.old_debugger_node = Debugger.new_debugger_node;
-    //     Fabric.has_dirty = true;
-    // } else if (!Debugger.show_debugger) {
-    //     // Here new_debugger_node is null
-    //     removed_nodes.append(.{ .uuid = "fabric-debugger", .index = 0 }) catch {};
-    //     Debugger.old_debugger_node = null;
-    // } else if (Debugger.old_debugger_node != null and Debugger.new_debugger_node != null and !rerender_everything) {
-    //     Reconciler.reconcileDebug(Debugger.old_debugger_node.?, Debugger.new_debugger_node.?);
-    //     Debugger.old_debugger_node = Debugger.new_debugger_node;
-    //     // printUITree(Debugger.new_debugger_node.?);
-    // }
 
+    on_commit_funcs.clearRetainingCapacity();
+
+    const reconcile_start = nowMs();
+    Reconciler.reconcile(old_ctx, new_ctx); // 3kb
+    Timer.reconcile_time = nowMs() - reconcile_start;
     // We generate the render commands tree
+    const commit_start = nowMs();
     endPage(new_ctx);
-    // Fabric.println("Total {d}", .{frame_arena.queryBytesUsed()});
+    Timer.commit_time = nowMs() - commit_start;
+    // Vapor.println("Total {d}", .{frame_arena.queryBytesUsed()});
     if (!std.mem.eql(u8, previous_route, current_route)) {
-        Fabric.has_dirty = true;
+        Vapor.has_dirty = true;
     }
-
-    // generator.traverse(new_ctx.root.?);
-    // generator.printCSS();
 
     // Replace old context with new context in the map
     clean_up_ctx = old_ctx;
-    _ = router.addRoute(route, new_ctx, render_page) catch {
-        printlnSrcErr("Failed to update context map\n", .{}, @src());
-        new_ctx.deinit();
-        allocator_global.destroy(new_ctx);
+    Timer.total_time = nowMs() - start;
+    // _ = frame_arena.queryNodes();
+    if (router.updateRouteTree(old_route.path, new_ctx)) {
         return;
-    };
+    }
 
     allocator_global.free(route); // return host‑allocated buffer
     if (build_options.enable_debug and build_options.debug_level == .all) {
         frame_arena.printStats();
     }
     previous_route = current_route;
-    // Clean up the old context
 }
 
 fn renderErrorPage(route: []const u8) void {
@@ -900,17 +930,17 @@ pub fn endPage(path_ctx: *UIContext) void {
     path_ctx.traverse();
 }
 
-pub fn end(fabric: *Fabric) !void {
+pub fn end(vapor: *Vapor) !void {
     const watch_paths: []const []const u8 = &.{"src/routes"};
     for (watch_paths) |watch_path| {
         var dir = try std.fs.cwd().openDir(watch_path, .{ .iterate = true });
         defer dir.close();
 
-        var walker = try dir.walk(fabric.allocator.*);
+        var walker = try dir.walk(vapor.allocator.*);
         defer walker.deinit();
 
         while (try walker.next()) |entry| {
-            const path = try std.fs.path.join(fabric.allocator.*, &.{ watch_path, entry.path });
+            const path = try std.fs.path.join(vapor.allocator.*, &.{ watch_path, entry.path });
             println("{s}\n", .{path});
         }
     }
@@ -918,10 +948,21 @@ pub fn end(fabric: *Fabric) !void {
 
 // Okay so we need to change the node in the tree depending on the page route
 // for example we add the commads tree to the router tree
-pub fn Page(src: std.builtin.SourceLocation, page: fn () void, page_deinit: ?fn () void) void {
-    const allocator = std.heap.page_allocator;
-    const full_route = src.file;
-    var itr = std.mem.tokenizeScalar(u8, full_route[7..], '/');
+const Path = union(enum) {
+    route: []const u8,
+    src: std.builtin.SourceLocation,
+};
+pub fn Page(path: Path, page: fn () void, page_deinit: ?fn () void) void {
+    const allocator = Vapor.frame_arena.persistentAllocator();
+    var full_route: []const u8 = "";
+    var itr: std.mem.TokenIterator(u8, std.mem.DelimiterType.scalar) = undefined;
+    if (path == .src) {
+        full_route = path.src.file[0..path.src.file.len];
+        itr = std.mem.tokenizeScalar(u8, full_route[7..], '/');
+    } else {
+        full_route = path.route;
+        itr = std.mem.tokenizeScalar(u8, full_route, '/');
+    }
     var buf = std.array_list.Managed(u8).init(allocator);
 
     buf.appendSlice("/root") catch |err| {
@@ -931,7 +972,7 @@ pub fn Page(src: std.builtin.SourceLocation, page: fn () void, page_deinit: ?fn 
 
     var file_name: []const u8 = "";
     blk: while (itr.next()) |sub| {
-        if (itr.peek() == null) {
+        if (itr.peek() == null and path == .src) {
             file_name = sub;
             break :blk;
         }
@@ -1012,10 +1053,10 @@ pub inline fn destroyElementEventListener(
 ) ?bool {
     const event_type_str = std.enums.tagName(types.EventType, event_type) orelse return null;
     Wasm.removeElementEventListener(element_uuid.ptr, element_uuid.len, event_type_str.ptr, event_type_str.len, cb_id);
-    Fabric.printlnSrc("Callback id {}", .{cb_id}, @src());
-    if (events_callbacks.remove(cb_id)) {
-        return true;
-    }
+    Vapor.printlnSrc("Callback id {}", .{cb_id}, @src());
+    // if (events_callbacks.remove(cb_id)) {
+    //     return true;
+    // }
     return false;
 }
 
@@ -1061,6 +1102,84 @@ pub inline fn focused(element_uuid: []const u8) bool {
     return Wasm.elementFocusedWasm(element_uuid.ptr, element_uuid.len);
 }
 
+pub fn attachEventCtxCallback(ui_node: *UINode, event_type: EventType, cb: anytype, args: anytype) !void {
+    const onid = hashKey(ui_node.uuid);
+
+    const Args = @TypeOf(args);
+    const Closure = struct {
+        arguments: Args,
+        event_type: EventType,
+        ui_node: *UINode,
+        run_node: Vapor.CtxAwareEventNode = .{ .data = .{ .runFn = runFn } },
+        fn runFn(data: *const Vapor.CtxAwareEvent) void {
+            const run_node: *const Vapor.CtxAwareEventNode = @fieldParentPtr("data", data);
+            const closure: *const @This() = @alignCast(@fieldParentPtr("run_node", run_node));
+            _ = Vapor.elementInstEventListener(closure.ui_node.uuid, closure.event_type, closure.arguments, cb);
+        }
+    };
+
+    const closure = Vapor.getFrameAllocator().create(Closure) catch |err| {
+        println("Error could not create closure {any}\n ", .{err});
+        unreachable;
+    };
+
+    closure.* = .{
+        .ui_node = ui_node,
+        .arguments = args,
+        .event_type = event_type,
+    };
+
+    if (ui_node.event_handlers) |*handlers| {
+        handlers.handlers.ensureUnusedCapacity(frame_arena.getFrameAllocator(), 1) catch |err| {
+            printlnSrcErr("Event Callback Error: {any}\n", .{err}, @src());
+            return error.EventCallbackError;
+        };
+        handlers.handlers.appendAssumeCapacity(.{ .type = event_type, .cb_opaque = @ptrCast(@alignCast(&closure.run_node)), .ctx_aware = true });
+    } else {
+        var handlers = std.ArrayListUnmanaged(EventHandler).initCapacity(frame_arena.getFrameAllocator(), 1) catch |err| {
+            printlnSrcErr("Event Callback Error: {any}\n", .{err}, @src());
+            return error.EventCallbackError;
+        };
+        handlers.appendBounded(.{ .type = event_type, .cb_opaque = @ptrCast(@alignCast(&closure.run_node)), .ctx_aware = true }) catch |err| {
+            println("Event Callback Error: {any}\n", .{err});
+            return error.EventCallbackError;
+        };
+        ui_node.event_handlers = EventHandlers{ .handlers = handlers };
+    }
+
+    nodes_with_events.put(onid, ui_node) catch |err| {
+        println("Event Callback Error: {any}\n", .{err});
+        return error.EventCallbackError;
+    };
+}
+
+pub fn attachEventCallback(ui_node: *UINode, event_type: EventType, cb: *const fn (event: *Event) void) !void {
+    const onid = hashKey(ui_node.uuid);
+
+    if (ui_node.event_handlers) |*handlers| {
+        handlers.handlers.ensureUnusedCapacity(frame_arena.getFrameAllocator(), 1) catch |err| {
+            printlnSrcErr("Event Callback Error: {any}\n", .{err}, @src());
+            return error.EventCallbackError;
+        };
+        handlers.handlers.appendAssumeCapacity(.{ .type = event_type, .cb_opaque = @ptrCast(@alignCast(cb)) });
+    } else {
+        var handlers = std.ArrayListUnmanaged(EventHandler).initCapacity(frame_arena.getFrameAllocator(), 1) catch |err| {
+            printlnSrcErr("Event Callback Error: {any}\n", .{err}, @src());
+            return error.EventCallbackError;
+        };
+        handlers.appendBounded(.{ .type = event_type, .cb_opaque = @ptrCast(@alignCast(cb)) }) catch |err| {
+            println("Event Callback Error: {any}\n", .{err});
+            return error.EventCallbackError;
+        };
+        ui_node.event_handlers = EventHandlers{ .handlers = handlers };
+    }
+
+    nodes_with_events.put(onid, ui_node) catch |err| {
+        println("Event Callback Error: {any}\n", .{err});
+        return error.EventCallbackError;
+    };
+}
+
 /// This function creates an eventListener on the element.
 /// Takes a callback function to be called when an event is received;
 /// # Parameters:
@@ -1071,18 +1190,19 @@ pub inline fn focused(element_uuid: []const u8) bool {
 /// # Returns:
 /// !void
 pub inline fn elementEventListener(
-    element_uuid: []const u8,
+    ui_node: *UINode,
     event_type: types.EventType,
     cb: *const fn (event: *Event) void,
 ) ?usize {
-    const id = events_callbacks.count() + 1;
-    events_callbacks.put(id, cb) catch |err| {
+    var onid = hashKey(ui_node.uuid);
+    onid +%= @intFromEnum(event_type);
+    events_callbacks.put(onid, .{ .cb = cb, .ui_node = ui_node }) catch |err| {
         println("Event Callback Error: {any}\n", .{err});
     };
 
     const event_type_str = std.enums.tagName(types.EventType, event_type) orelse return null;
-    Wasm.createElementEventListener(element_uuid.ptr, element_uuid.len, event_type_str.ptr, event_type_str.len, id);
-    return id;
+    Wasm.createElementEventListener(ui_node.uuid.ptr, ui_node.uuid.len, event_type_str.ptr, event_type_str.len, onid);
+    return onid;
 }
 
 pub const EvtInst = struct {
@@ -1095,49 +1215,57 @@ pub const EvtInstNodeProto = *const fn (*EvtInstNode) void;
 
 pub const EvtInstNode = struct { data: EvtInst };
 
+pub const CtxAwareEventNode = struct { data: CtxAwareEvent };
+
+pub const CtxAwareEvent = struct {
+    runFn: CtxAwareEventNodeProto,
+};
+
+pub const CtxAwareEventNodeProto = *const fn (*const CtxAwareEvent) void;
+
 pub inline fn elementInstEventListener(
     element_uuid: []const u8,
     event_type: types.EventType,
-    self: anytype,
+    arguments: anytype,
     cb: anytype,
 ) ?usize {
-    const Self = @TypeOf(self);
+    const Args = @TypeOf(arguments);
     const EvtClosure = struct {
-        self: Self,
+        arguments: Args,
         evt_node: EvtInstNode = .{ .data = .{ .evt_cb = runFn, .deinit = deinitFn } },
 
         fn runFn(evt_inst: *EvtInst, evt: *Event) void {
             const evt_node: *EvtInstNode = @fieldParentPtr("data", evt_inst);
             const closure: *@This() = @alignCast(@fieldParentPtr("evt_node", evt_node));
-            @call(.auto, cb, .{ closure.self, evt });
+            @call(.auto, cb, .{ evt, closure.arguments });
         }
-        fn deinitFn(evt_node: *EvtInstNode) void {
-            const closure: *@This() = @alignCast(@fieldParentPtr("evt_node", evt_node));
-            Fabric.allocator_global.destroy(closure);
+        fn deinitFn(_: *EvtInstNode) void {
+            // const closure: *@This() = @alignCast(@fieldParentPtr("evt_node", evt_node));
+            // Vapor.allocator_global.destroy(closure);
         }
     };
 
-    const evt_closure = Fabric.allocator_global.create(EvtClosure) catch |err| {
+    const evt_closure = Vapor.frame_arena.getFrameAllocator().create(EvtClosure) catch |err| {
         println("Error could not create closure {any}\n ", .{err});
         unreachable;
     };
     evt_closure.* = .{
-        .self = self,
+        .arguments = arguments,
     };
 
-    const id = events_inst_callbacks.count();
-    events_inst_callbacks.put(id, &evt_closure.evt_node) catch |err| {
+    var onid = hashKey(element_uuid);
+    onid +%= @intFromEnum(event_type);
+    events_inst_callbacks.put(onid, &evt_closure.evt_node) catch |err| {
         println("Event Callback Error: {any}\n", .{err});
     };
 
     const event_type_str = std.enums.tagName(types.EventType, event_type) orelse return null;
-    Wasm.createElementEventInstListener(element_uuid.ptr, element_uuid.len, event_type_str.ptr, event_type_str.len, id);
-    return id;
+    Wasm.createElementEventInstListener(element_uuid.ptr, element_uuid.len, event_type_str.ptr, event_type_str.len, onid);
+    return onid;
 }
 
 pub const HookInst = struct {
     hook_cb: HookInstProto,
-    deinit: HookInstNodeProto,
 };
 
 pub const HookInstProto = *const fn (*HookInst) void;
@@ -1145,42 +1273,30 @@ pub const HookInstNodeProto = *const fn (*HookInstNode) void;
 
 pub const HookInstNode = struct { data: HookInst };
 
+pub const HookContext = struct {
+    from_path: []const u8,
+    to_path: []const u8,
+    params: std.StringHashMap([]const u8),
+    query: std.StringHashMap([]const u8),
+};
+
+pub const HookType = enum(u8) {
+    before = 0,
+    after = 1,
+};
+
 /// cb(Self)
-pub inline fn createHook(
-    self: anytype,
-    cb: anytype,
+pub inline fn registerHook(
     url: []const u8,
+    cb: anytype,
+    hook_type: HookType,
 ) ?usize {
-    const Self = @TypeOf(self);
-    const HookClosure = struct {
-        self: Self,
-        hook_node: HookInstNode = .{ .data = .{ .hook_cb = runFn, .deinit = deinitFn } },
-
-        fn runFn(hook_inst: *HookInst) void {
-            const hook_node: *HookInstNode = @fieldParentPtr("data", hook_inst);
-            const closure: *@This() = @alignCast(@fieldParentPtr("hook_node", hook_node));
-            @call(.auto, cb, .{closure.self});
-        }
-        fn deinitFn(hook_node: *HookInstNode) void {
-            const closure: *@This() = @alignCast(@fieldParentPtr("hook_node", hook_node));
-            Fabric.allocator_global.destroy(closure);
-        }
-    };
-
-    const hook_closure = Fabric.allocator_global.create(HookClosure) catch |err| {
-        println("Error could not create closure {any}\n ", .{err});
-        unreachable;
-    };
-    hook_closure.* = .{
-        .self = self,
-    };
-
     const id = hooks_inst_callbacks.count();
-    hooks_inst_callbacks.put(id, &hook_closure.hook_node) catch |err| {
+    hooks_inst_callbacks.put(id, cb) catch |err| {
         println("Event Callback Error: {any}\n", .{err});
     };
 
-    Wasm.createHookWASM(url.ptr, url.len, id);
+    Wasm.createHookWASM(url.ptr, url.len, id, @intFromEnum(hook_type));
     return id;
 }
 
@@ -1197,7 +1313,7 @@ pub inline fn eventListener(
     cb: *const fn (event: *Event) void,
 ) void {
     const id = events_callbacks.count() + 1;
-    events_callbacks.put(id, cb) catch |err| {
+    events_callbacks.put(id, .{ .cb = cb, .ui_node = null }) catch |err| {
         println("Event Callback Error: {any}\n", .{err});
     };
 
@@ -1256,8 +1372,8 @@ pub fn generateTextData() void {
 pub fn printUIRouteTree(route: u32) void {
     frame_arena.beginFrame(); // For double-buffered approach
     current_route = route;
-    // Fabric.btn_registry.clearRetainingCapacity();
-    // Fabric.mounted_funcs.clearRetainingCapacity();
+    // Vapor.btn_registry.clearRetainingCapacity();
+    // Vapor.mounted_funcs.clearRetainingCapacity();
 
     ctx_registry.clearRetainingCapacity();
 
@@ -1314,7 +1430,7 @@ pub fn printUIRouteTree(route: u32) void {
     callNestedLayouts(); // 4.5ms
 
     // We reconcile the new dom
-    // the reason the fabric-debugger gets remvoed is the new ui tree does not include it;
+    // the reason the vapor-debugger gets remvoed is the new ui tree does not include it;
 
     // const valid_route = replace_dash(current_route) catch unreachable;
     // defer allocator_global.free(valid_route);
@@ -1401,15 +1517,78 @@ fn printStaticTextNode(node: *UINode) void {
     }
 }
 
+fn collectComponentIds(node: *UINode, selected_type: ElementType, component_ids: *std.array_list.Managed([]const u8)) void {
+    if (node.type == selected_type) {
+        component_ids.append(node.uuid) catch unreachable;
+    }
+    if (node.children == null) return;
+    for (node.children.?.items) |child| {
+        collectComponentIds(child, selected_type, component_ids);
+    }
+}
+
+pub fn queryComponentIds(target_type: ElementType) ![][]const u8 {
+    const root = current_ctx.root orelse return error.NoTree;
+    var component_ids = std.array_list.Managed([]const u8).init(allocator_global);
+    collectComponentIds(root, target_type, &component_ids);
+    return try component_ids.toOwnedSlice();
+}
+
+fn findNodeByUUID(node: *UINode, uuid: []const u8) UINode {
+    if (std.mem.eql(u8, node.uuid, uuid)) {
+        return node.*;
+    }
+    if (node.children == null) return;
+    for (node.children.?.items) |child| {
+        collectComponentIds(child, uuid);
+    }
+}
+
+pub fn queryByUUID(uuid: []const u8) !UINode {
+    const root = current_ctx.root orelse return error.NoTree;
+    const node = findNodeByUUID(root, uuid);
+    return node;
+}
+
+pub fn mutateById(uuid: []const u8, attribute: []const u8, value: []const u8) void {
+    mutateDomElementStyleString(uuid.ptr, uuid.len, attribute.ptr, attribute.len, value.ptr, value.len);
+}
+
+pub const Bounds = struct {
+    top: f32 = 0,
+    left: f32 = 0,
+    right: f32 = 0,
+    bottom: f32 = 0,
+    width: f32 = 0,
+    height: f32 = 0,
+};
+
+pub fn getComponentBounds(uuid: []const u8) ?Bounds {
+    const bounds_ptr = if (isWasi) blk: {
+        break :blk Wasm.getBoundingClientRectWasm(uuid.ptr, uuid.len);
+    } else {
+        return null;
+    };
+
+    return Bounds{
+        .top = bounds_ptr[0],
+        .left = bounds_ptr[1],
+        .right = bounds_ptr[2],
+        .bottom = bounds_ptr[3],
+        .width = bounds_ptr[4],
+        .height = bounds_ptr[5],
+    };
+}
+
 fn iterateChildren(node: *UINode) void {
     if (node.state_type == .pure) {
         const pure_node = pure_tree.createNode(node) catch return;
-        Fabric.pure_tree.openNode(pure_node) catch return;
+        Vapor.pure_tree.openNode(pure_node) catch return;
     }
 
     if (node.state_type == .err) {
         const error_node = error_tree.createNode(node) catch return;
-        Fabric.error_tree.openNode(error_node) catch return;
+        Vapor.error_tree.openNode(error_node) catch return;
     }
 
     for (node.children.items) |child| {
@@ -1465,6 +1644,7 @@ pub var layout_info = packed struct {
     tooltip_size: u32,
     tooltip_offset: u32,
     has_children_offset: u32,
+    hash_offset: u32,
 }{
     .render_command_size = @sizeOf(RenderCommand),
 
@@ -1494,6 +1674,7 @@ pub var layout_info = packed struct {
     .tooltip_size = @sizeOf(types.Tooltip),
     .tooltip_offset = @offsetOf(RenderCommand, "tooltip"),
     .has_children_offset = @offsetOf(RenderCommand, "has_children"),
+    .hash_offset = @offsetOf(RenderCommand, "hash"),
 };
 
 // Make sure this function is not evaluated at compile time
@@ -1552,7 +1733,7 @@ pub fn printlnErr(
 ) void {
     if (isWasi and build_options.enable_debug) {
         const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
-        const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%cERROR%c] {s}", .{buf[0..]}) catch return;
+        const buf_with_src = std.fmt.allocPrint(allocator_global, "[Vapor] [%cERROR%c] {s}", .{buf[0..]}) catch return;
         const style_1 = "color: #FF3029;";
         const style_2 = "";
         _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
@@ -1568,7 +1749,7 @@ pub fn printlnSrcErr(
 ) void {
     if (isWasi and build_options.enable_debug) {
         const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
-        const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%c{s}:{d}%c]\n[Fabric] [ERROR] {s}", .{ src.file, src.line, buf[0..] }) catch return;
+        const buf_with_src = std.fmt.allocPrint(allocator_global, "[Vapor] [%c{s}:{d}%c]\n[Vapor] [ERROR] {s}", .{ src.file, src.line, buf[0..] }) catch return;
         const style_1 = "color: #FF3029;";
         const style_2 = "";
         _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
@@ -1585,7 +1766,7 @@ pub fn printlnWithColor(
 ) void {
     const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
     const color_buf = std.fmt.allocPrint(allocator_global, "color: {s};", .{color}) catch return;
-    const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%c{s}%c] {s}", .{ title, buf[0..] }) catch return;
+    const buf_with_src = std.fmt.allocPrint(allocator_global, "[Vapor] [%c{s}%c] {s}", .{ title, buf[0..] }) catch return;
     // const style_2 = "";
     // _ = consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, color_buf[0..].ptr, color_buf.len, style_2[0..].ptr, style_2.len);
     allocator_global.free(buf_with_src);
@@ -1631,7 +1812,7 @@ pub fn printlnAllocation(
     args: anytype,
 ) void {
     const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
-    const buf_with_src = std.fmt.allocPrint(allocator_global, "[Fabric] [%cALLOC%c] {s}", .{buf[0..]}) catch return;
+    const buf_with_src = std.fmt.allocPrint(allocator_global, "[Vapor] [%cALLOC%c] {s}", .{buf[0..]}) catch return;
     // const style_1 = "color: #744EFF;";
     // const style_2 = "";
     // _ = consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
@@ -1653,6 +1834,63 @@ pub fn printlnSrc(
         allocator_global.free(buf_with_src);
         allocator_global.free(buf);
     }
+}
+
+pub fn printDebug() !void {
+    // std.debug.print("Hello World\n", .{});
+    // const addr: std.builtin.StackTrace = @errorReturnTrace().?.*;
+    // for (addr.instruction_addresses) |_addr| {
+    //     std.debug.print("    0x{d}\n", .{_addr});
+    // }
+    var buffer_debug: [512]u8 = undefined;
+    var stream = std.Io.Writer.fixed(&buffer_debug);
+    const writer_debug = &stream;
+    // // var writer_debug = std.fs.File.writer(std.fs.File.stderr(), &buffer_debug).interface;
+    // // _ = addr.format(&writer_debug) catch unreachable;
+    // std.debug.print("{*}", .{&addr});
+    std.debug.dumpCurrentStackTraceToWriter(@returnAddress(), writer_debug) catch unreachable;
+    std.debug.print("Called from: 0x{s}\n", .{writer_debug.buffer[0..writer_debug.end]});
+
+    // try std.debug.dumpCurrentStackTraceToWriter(@returnAddress(), &writer_debug);
+    // Vapor.print("{any}", .{@returnAddress()});
+    // try writer_debug.print("Error\n", .{});
+    // try writer_debug.flush();
+    // Let's say you have an address you want to inspect
+    // 1. Get the standard error writer (maps to console.error() in browser)
+    // const stderr = std.io.getStdErr().writer();
+
+    // 2. Just print the address. The browser will symbolicate it for you.
+    //    You don't need printSourceAtAddress.
+
+    // 3. Or, if you just want a full stack trace:
+    //    Zig's built-in stack dumper will print the raw addresses.
+    //    The browser DevTools will automatically convert this
+    //    trace into file:line locations.
+    // const ret_addr = @returnAddress();
+    // const debug_info = std.debug.getSelfDebugInfo() catch @panic("Could not get debug_info");
+    // // 1) Prepare a big enough buffer on the stack
+    // var buffer_debug: [512]u8 = undefined;
+    // var stream = std.Io.Writer.fixed(&buffer_debug);
+    // const writer_debug = &stream;
+    //
+    // // 3) Call printSourceAtAddress into *your*writer_debug
+    // const tty = std.io.tty.detectConfig(std.fs.File.stderr());
+    // try std.debug.printSourceAtAddress(debug_info, writer_debug, ret_addr, tty);
+    // std.debug.dumpStackTrace();
+    // const outSlice = buffer_debug[0..stream.end];
+    // const start = std.mem.indexOf(u8, outSlice, "src") orelse std.mem.indexOf(u8, outSlice, "std") orelse 0;
+    // const src = buffer_debug[start..stream.end];
+    // Vapor.print("{s}", .{src});
+    // var sections = std.mem.splitScalar(u8, src, ':');
+    // var indents = std.mem.splitScalar(u8, src, '\n');
+    // const file_name = sections.next() orelse return;
+    // const line = sections.next() orelse return;
+    // const u32_line_n: u32 = std.fmt.parseInt(u32, line, 10) catch return;
+    // _ = indents.next().?;
+    // const fn_name = indents.next().?;
+    // const err_str = try std.fmt.allocPrint(reverb.arena.*, "{any}", .{error.MethodNotSupported});
+    // const function_name = try std.fmt.allocPrint(reverb.arena.*, "{s}", .{fn_name[0 .. fn_name.len - 2]});
+    // const file_name_alloc = try std.fmt.allocPrint(reverb.arena.*, "{s}", .{file_name});
 }
 
 pub fn print(
@@ -1727,7 +1965,7 @@ pub fn loopInterval(name: []const u8, cb: anytype, args: anytype, delay: u32) vo
         .arguments = args,
     };
 
-    callback_registry.put(name, &closure.run_node) catch |err| {
+    callback_registry.put(hashKey(name), &closure.run_node) catch |err| {
         println("Button Function Registry {any}\n", .{err});
     };
 
@@ -1814,3 +2052,17 @@ pub const Clipboard = struct {
     }
     fn paste(_: []const u8) void {}
 };
+
+pub fn onEnd(callback: *const fn () void) void {
+    on_end_funcs.append(callback) catch |err| {
+        printlnErr("Button Function Registry {any}\n", .{err});
+    };
+}
+
+/// This hook takes a function callback and calls it after the virtual dom has been created
+/// WARNING: This is a dangerous hook, and can cause infinite loops
+pub fn onCommit(callback: *const fn () void) void {
+    on_commit_funcs.append(callback) catch |err| {
+        printlnErr("Button Function Registry {any}\n", .{err});
+    };
+}

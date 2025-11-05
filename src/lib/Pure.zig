@@ -1,14 +1,14 @@
 const std = @import("std");
 const types = @import("types.zig");
-const Fabric = @import("Fabric.zig");
-const println = Fabric.println;
+const Vapor = @import("Vapor.zig");
+const println = Vapor.println;
 const UIContext = @import("UITree.zig");
 const UINode = @import("UITree.zig").UINode;
 const CommandsTree = UIContext.CommandsTree;
 const Transition = @import("Transition.zig").Transition;
 const TransitionState = @import("Transition.zig").TransitionState;
 const Element = @import("Element.zig").Element;
-const LifeCycle = Fabric.LifeCycle;
+const LifeCycle = Vapor.LifeCycle;
 const Static = @import("Static.zig");
 const Binded = @import("Binded.zig");
 const Types = @import("types.zig");
@@ -47,11 +47,11 @@ const IconOptions = struct {
 pub inline fn Icon(options: IconOptions) void {
     const local = struct {
         fn CloseElement() void {
-            _ = Fabric.current_ctx.close();
+            _ = Vapor.current_ctx.close();
             return;
         }
         fn ConfigureElement(elem_decl: ElementDecl) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
+            _ = Vapor.current_ctx.configure(elem_decl);
             return;
         }
     };
@@ -67,7 +67,7 @@ pub inline fn Icon(options: IconOptions) void {
     //     elem_decl.style.style_id = icon_name;
     // }
 
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
+    _ = Vapor.current_ctx.open(elem_decl) catch |err| {
         println("{any}\n", .{err});
     };
     _ = local.ConfigureElement(elem_decl);
@@ -77,11 +77,11 @@ pub inline fn Icon(options: IconOptions) void {
 pub inline fn Header(text: []const u8, size: HeaderSize, style: Style) void {
     const local = struct {
         fn CloseElement() void {
-            _ = Fabric.current_ctx.close();
+            _ = Vapor.current_ctx.close();
             return;
         }
         fn ConfigureElement(elem_decl: ElementDecl) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
+            _ = Vapor.current_ctx.configure(elem_decl);
             return;
         }
     };
@@ -106,21 +106,21 @@ pub inline fn Header(text: []const u8, size: HeaderSize, style: Style) void {
             .Small => elem_decl.style.font_size = 12 * 1,
         }
     }
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
+    _ = Vapor.current_ctx.open(elem_decl) catch |err| {
         println("{any}\n", .{err});
     };
     _ = local.ConfigureElement(elem_decl);
     _ = local.CloseElement();
     return;
 }
-pub inline fn Hooks(hooks: Fabric.HooksFuncs) fn (void) void {
+pub inline fn Hooks(hooks: Vapor.HooksFuncs) fn (void) void {
     const local = struct {
         fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
+            _ = Vapor.current_ctx.close();
             return;
         }
         fn ConfigureElement(elem_decl: ElementDecl) *const fn (void) void {
-            _ = Fabric.current_ctx.configure(elem_decl);
+            _ = Vapor.current_ctx.configure(elem_decl);
             return CloseElement;
         }
     };
@@ -130,35 +130,35 @@ pub inline fn Hooks(hooks: Fabric.HooksFuncs) fn (void) void {
     };
 
     if (hooks.mounted) |f| {
-        const id = Fabric.mounted_funcs.count();
+        const id = Vapor.mounted_funcs.count();
         elem_decl.hooks.mounted_id += id + 1;
-        Fabric.mounted_funcs.put(elem_decl.hooks.mounted_id, f) catch |err| {
+        Vapor.mounted_funcs.put(elem_decl.hooks.mounted_id, f) catch |err| {
             println("Mount Function Registry {any}\n", .{err});
         };
     }
     if (hooks.created) |f| {
-        const id = Fabric.created_funcs.count();
+        const id = Vapor.created_funcs.count();
         elem_decl.hooks.created_id += id + 1;
-        Fabric.created_funcs.put(elem_decl.hooks.created_id, f) catch |err| {
+        Vapor.created_funcs.put(elem_decl.hooks.created_id, f) catch |err| {
             println("Mount Function Registry {any}\n", .{err});
         };
     }
     if (hooks.updated) |f| {
-        const id = Fabric.updated_funcs.count();
+        const id = Vapor.updated_funcs.count();
         elem_decl.hooks.updated_id += id + 1;
-        Fabric.updated_funcs.put(elem_decl.hooks.updated_id, f) catch |err| {
+        Vapor.updated_funcs.put(elem_decl.hooks.updated_id, f) catch |err| {
             println("Mount Function Registry {any}\n", .{err});
         };
     }
     if (hooks.destroy) |f| {
-        const id = Fabric.destroy_funcs.count();
+        const id = Vapor.destroy_funcs.count();
         elem_decl.hooks.destroy_id += id + 1;
-        Fabric.destroy_funcs.put(elem_decl.hooks.destroy_id, f) catch |err| {
+        Vapor.destroy_funcs.put(elem_decl.hooks.destroy_id, f) catch |err| {
             println("Mount Function Registry {any}\n", .{err});
         };
     }
 
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
+    _ = Vapor.current_ctx.open(elem_decl) catch |err| {
         println("{any}\n", .{err});
     };
     _ = local.ConfigureElement(elem_decl);
@@ -168,11 +168,11 @@ pub inline fn Hooks(hooks: Fabric.HooksFuncs) fn (void) void {
 pub inline fn Draggable(element: *Element, style: Style) fn (void) void {
     const local = struct {
         fn CloseElement(_: void) void {
-            _ = Fabric.current_ctx.close();
+            _ = Vapor.current_ctx.close();
             return;
         }
         fn ConfigureElement(elem_decl: ElementDecl) *UINode {
-            return Fabric.current_ctx.configure(elem_decl);
+            return Vapor.current_ctx.configure(elem_decl);
         }
     };
 
@@ -184,7 +184,7 @@ pub inline fn Draggable(element: *Element, style: Style) fn (void) void {
 
     elem_decl.style.position.type = .absolute;
 
-    _ = Fabric.current_ctx.open(elem_decl) catch |err| {
+    _ = Vapor.current_ctx.open(elem_decl) catch |err| {
         println("{any}\n", .{err});
         unreachable;
     };
@@ -262,7 +262,7 @@ pub fn VirtualList(comptime T: type) type {
                 .fit => item_height = calculated_item_height,
                 .min_max_vp => item_height = calculated_item_height,
                 .grow => item_height = calculated_item_height,
-                .percent => item_height = calculated_item_height * Fabric.browser_height / 100,
+                .percent => item_height = calculated_item_height * Vapor.browser_height / 100,
                 .fixed => item_height = options.item_height.size.minmax.min,
                 .elastic => item_height = calculated_item_height,
                 .elastic_percent => item_height = calculated_item_height,
@@ -274,7 +274,7 @@ pub fn VirtualList(comptime T: type) type {
                 .fit => item_width = calculated_item_width,
                 .min_max_vp => item_width = calculated_item_width,
                 .grow => item_width = calculated_item_width,
-                .percent => item_width = calculated_item_width * Fabric.browser_width / 100,
+                .percent => item_width = calculated_item_width * Vapor.browser_width / 100,
                 .fixed => item_width = options.item_width.size.minmax.min,
                 .elastic => item_width = calculated_item_width,
                 .elastic_percent => item_width = calculated_item_width,
@@ -285,9 +285,9 @@ pub fn VirtualList(comptime T: type) type {
 
             total_height = @as(f32, @floatFromInt(options.data.len)) * item_height;
             total_items = @as(f32, @floatFromInt(options.data.len));
-            scroll_top_max = total_height - Fabric.browser_height;
+            scroll_top_max = total_height - Vapor.browser_height;
 
-            const number_of_items_fit = @as(usize, @intFromFloat(@floor(Fabric.browser_height / item_height)));
+            const number_of_items_fit = @as(usize, @intFromFloat(@floor(Vapor.browser_height / item_height)));
             const min_buffer: usize = 20;
             const max_buffer: usize = 100;
 
@@ -300,11 +300,11 @@ pub fn VirtualList(comptime T: type) type {
                 @min(number_of_items_fit * 2, max_buffer);
 
             total_window_items = @max(min_buffer, @min(buffer_size, options.data.len));
-            Fabric.println("total_window_items {d}", .{total_window_items});
+            Vapor.println("total_window_items {d}", .{total_window_items});
 
             list_height = @as(f32, @floatFromInt(total_window_items)) * item_height;
 
-            var internal_slice: []T = Fabric.allocator_global.alloc(T, total_window_items) catch unreachable;
+            var internal_slice: []T = Vapor.allocator_global.alloc(T, total_window_items) catch unreachable;
             for (0..total_window_items) |i| {
                 internal_slice[i] = options.data[i];
             }
@@ -325,7 +325,7 @@ pub fn VirtualList(comptime T: type) type {
         }
 
         fn mount(self: *Self) void {
-            Fabric.println("Mount {s}\n", .{self.inner_container._get_id().?});
+            Vapor.println("Mount {s}\n", .{self.inner_container._get_id().?});
             _ = self.inner_container.addInstListener(.scroll, self, trackScroll);
         }
 
@@ -353,12 +353,12 @@ pub fn VirtualList(comptime T: type) type {
             //     self._internal_slice[i] = self.data[data_index];
             // }
 
-            const translation = Fabric.fmtln("translateY({d}px)", .{start_index * @as(usize, @intFromFloat(self.item_height))});
+            const translation = Vapor.fmtln("translateY({d}px)", .{start_index * @as(usize, @intFromFloat(self.item_height))});
             self.window_element.mutateStyle("transform", .{ .string = translation });
-            Fabric.cycle();
+            Vapor.cycle();
         }
 
-        pub fn trackScroll(self: *Self, _: *Fabric.Event) void {
+        pub fn trackScroll(self: *Self, _: *Vapor.Event) void {
             const scroll_top: f32 = @floatFromInt(self.inner_container.getAttributeNumber("scrollTop"));
             const current_item_index = @floor(@divExact(scroll_top, self.item_height));
 
@@ -409,7 +409,7 @@ pub fn VirtualList(comptime T: type) type {
                     .element = &self.inner_container,
                     .style = &.{
                         .size = .{
-                            .height = .px(Fabric.browser_height),
+                            .height = .px(Vapor.browser_height),
                             .width = .percent(100),
                         },
                         .direction = .column,
@@ -466,7 +466,7 @@ pub fn VirtualList(comptime T: type) type {
 
 pub const ChainClose = struct {
     const Self = @This();
-    _elem_type: Fabric.ElementType,
+    _elem_type: Vapor.ElementType,
     _state_type: Types.StateType = .pure,
     _flex_type: FlexType = .Flex,
     _text: ?[]const u8 = null,
@@ -477,15 +477,15 @@ pub const ChainClose = struct {
     _input_params: ?*const InputParams = null,
     _ui_node: ?*UINode = null,
     _id: ?[]const u8 = null,
-    _style: ?*const Fabric.Style = null,
+    _style: ?*const Vapor.Style = null,
 
-    _animation_enter: ?*const Fabric.Animation = null,
-    _animation_exit: ?*const Fabric.Animation = null,
+    _animation_enter: ?*const Vapor.Animation = null,
+    _animation_exit: ?*const Vapor.Animation = null,
 
     // Style props
     _pos: ?types.Position = null,
     _font_size: ?u8 = null,
-    _font_weight: ?usize = null,
+    _font_weight: ?u16 = null,
     _text_color: ?Color = null,
     _padding: ?types.Padding = null,
     _layout: ?types.Layout = null,
@@ -498,13 +498,13 @@ pub const ChainClose = struct {
     _text_decoration: ?types.TextDecoration = null,
     _interactive: ?types.Interactive = null,
     _transition: ?types.Transition = null,
-    _z_index: ?f32 = null,
+    _z_index: ?i16 = null,
     _blur: ?u8 = null,
     _direction: types.Direction = .row,
     _list_style: ?types.ListStyle = null,
 
     pub fn Text(text: []const u8) Self {
-        return Self{ .elem_type = .Text, ._text = if (Fabric.isGenerated) "" else text };
+        return Self{ .elem_type = .Text, ._text = if (Vapor.isGenerated) "" else text };
     }
 
     pub fn id(self: *const Self, element_id: []const u8) Self {
@@ -514,39 +514,39 @@ pub const ChainClose = struct {
     }
 
     /// TextFmt takes a format string and a array of arguments and allocates a new string
-    /// This string is handled by the Fabric engine and is not freed by the user
+    /// This string is handled by the Vapor engine and is not freed by the user
     pub fn TextFmt(comptime fmt: []const u8, args: anytype) Self {
-        const allocator = Fabric.frame_arena.getFrameAllocator();
+        const allocator = Vapor.frame_arena.getFrameAllocator();
         const text = std.fmt.allocPrint(allocator, fmt, args) catch |err| {
-            Fabric.printlnColor(
+            Vapor.printlnColor(
                 \\Error formatting text: {any}\n"
                 \\FMT: {s}\n"
                 \\ARGS: {any}\n"
             , .{ err, fmt, args }, .hex("#FF3029"));
             return Self{ ._elem_type = .Text, ._text = "ERROR", ._state_type = .err };
         };
-        Fabric.frame_arena.addBytesUsed(text.len);
+        Vapor.frame_arena.addBytesUsed(text.len);
         return Self{ ._elem_type = .TextFmt, ._text = text };
     }
 
     /// TextFmt takes a format string and a array of arguments and allocates a new string
-    /// This string is handled by the Fabric engine and is not freed by the user
+    /// This string is handled by the Vapor engine and is not freed by the user
     pub inline fn TextFmtErr(fmt: []const u8, args: anytype) Self {
-        // const allocator = Fabric.frame_arena.getFrameAllocator();
+        // const allocator = Vapor.frame_arena.getFrameAllocator();
         // const text = std.fmt.allocPrint(allocator, fmt, args) catch |err| {
         //     std.debug.print("Error formatting text: {any}\n", .{err});
-        Fabric.printlnColor(
+        Vapor.printlnColor(
             \\Error formatting text: {any}
             \\FMT: {s}
             \\ARGS: {any}
         , .{ error.CouldNotAllocate, fmt, args }, .hex("#FF3029"));
         return Self{ ._elem_type = .Text, ._text = "ERROR", ._state_type = .err };
         // };
-        // Fabric.frame_arena.addBytesUsed(text.len);
+        // Vapor.frame_arena.addBytesUsed(text.len);
         // return Self{ ._elem_type = .TextFmt, ._text = text };
     }
     pub fn Icon(token: *const IconTokens) Self {
-        if (Fabric.isWasi) {
+        if (Vapor.isWasi) {
             return Self{ ._elem_type = .Icon, ._href = token.web orelse "" };
         } else {
             return Self{ ._elem_type = .Icon, ._href = token.svg orelse "" };
@@ -561,8 +561,8 @@ pub const ChainClose = struct {
         return Self{ ._elem_type = .Svg, .svg = options.svg };
     }
 
-    pub fn style(self: *const Self, style_ptr: *const Fabric.Style) void {
-        var elem_decl = Fabric.ElementDecl{
+    pub fn style(self: *const Self, style_ptr: *const Vapor.Style) void {
+        var elem_decl = Vapor.ElementDecl{
             .state_type = self._state_type,
             .elem_type = self._elem_type,
             .text = self._text,
@@ -578,12 +578,12 @@ pub const ChainClose = struct {
             elem_decl.style = &mutable_style;
         }
 
-        _ = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
-        Fabric.LifeCycle.configure(elem_decl);
-        return Fabric.LifeCycle.close({});
+        _ = Vapor.LifeCycle.open(elem_decl) orelse unreachable;
+        Vapor.LifeCycle.configure(elem_decl);
+        return Vapor.LifeCycle.close({});
     }
 
-    pub fn font(self: *const Self, font_size: i32, weight: ?u16, color: ?Color) Self {
+    pub fn font(self: *const Self, font_size: u8, weight: ?u16, color: ?Color) Self {
         var new_self: Self = self.*;
         new_self._font_size = font_size;
         new_self._font_weight = weight;
@@ -593,13 +593,21 @@ pub const ChainClose = struct {
 
     pub fn pos(self: *const Self, position: types.Position) Self {
         var new_self: Self = self.*;
-        new_self._pos = position;
+        var new_position = new_self._pos orelse types.Position{};
+        new_position.top = position.top;
+        new_position.right = position.right;
+        new_position.bottom = position.bottom;
+        new_position.left = position.left;
+        new_position.type = position.type;
+        new_self._pos = new_position;
         return new_self;
     }
 
-    pub fn zIndex(self: *const Self, z_index: ?f32) Self {
+    pub fn zIndex(self: *const Self, z_index: ?i16) Self {
         var new_self: Self = self.*;
-        new_self._z_index = z_index;
+        var position = new_self._pos orelse types.Position{};
+        position.z_index = z_index;
+        new_self._pos = position;
         return new_self;
     }
 
@@ -727,6 +735,7 @@ pub const ChainClose = struct {
             .border = self._border,
             .border_radius = self._border_radius,
             .text_decoration = self._text_decoration,
+            .blur = self._blur,
         };
         if (mutable_style.interactive == null) mutable_style.interactive = self._interactive;
         if (mutable_style.child_gap == null) mutable_style.child_gap = self._child_gap;
@@ -735,8 +744,6 @@ pub const ChainClose = struct {
         if (mutable_style.margin == null) mutable_style.margin = self._margin;
         if (mutable_style.size == null) mutable_style.size = self._size;
         if (mutable_style.transition == null) mutable_style.transition = self._transition;
-        if (mutable_style.z_index == null) mutable_style.z_index = self._z_index;
-        if (mutable_style.blur == null) mutable_style.blur = self._blur;
         mutable_style.direction = self._direction;
         mutable_style.list_style = self._list_style;
 
@@ -754,7 +761,7 @@ pub const ChainClose = struct {
             mutable_style.id = _id;
         }
 
-        const elem_decl = Fabric.ElementDecl{
+        const elem_decl = Vapor.ElementDecl{
             .elem_type = self._elem_type,
             .state_type = self._state_type,
             .text = self._text,
@@ -767,10 +774,10 @@ pub const ChainClose = struct {
         };
 
         if (self._elem_type != .CtxButton) {
-            const ui_node = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+            const ui_node = Vapor.LifeCycle.open(elem_decl) orelse unreachable;
             if (self._elem_type == .Button or self._elem_type == .ButtonCycle) {
                 if (self._options.?.on_press) |on_press| {
-                    Fabric.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
+                    Vapor.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
                         println("Button Function Registry {any}\n", .{err});
                     };
                 }
@@ -778,16 +785,16 @@ pub const ChainClose = struct {
         } else if (self._elem_type == .CtxButton) {
             const ui_node = self._ui_node orelse unreachable;
             if (elem_decl.style.?.style_id) |element_id| {
-                const kv = Fabric.ctx_registry.fetchRemove(hashKey(ui_node.uuid)) orelse unreachable;
-                Fabric.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
+                const kv = Vapor.ctx_registry.fetchRemove(hashKey(ui_node.uuid)) orelse unreachable;
+                Vapor.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
                     println("Button Function Registry {any}\n", .{err});
                     unreachable;
                 };
             }
         }
 
-        Fabric.LifeCycle.configure(elem_decl);
-        return Fabric.LifeCycle.close({});
+        Vapor.LifeCycle.configure(elem_decl);
+        return Vapor.LifeCycle.close({});
     }
 };
 
@@ -795,15 +802,15 @@ const Tooltip = struct {
     text: []const u8,
     position: types.Position,
     layout: types.Layout,
-    color: ?Fabric.Types.Color = null,
-    background: ?Fabric.Types.Background = null,
-    border: ?Fabric.Types.BorderGrouped = null,
+    color: ?Vapor.Types.Color = null,
+    background: ?Vapor.Types.Background = null,
+    border: ?Vapor.Types.BorderGrouped = null,
     delay: u32 = 300,
 };
 
 pub const Chain = struct {
     const Self = @This();
-    _elem_type: Fabric.ElementType,
+    _elem_type: Vapor.ElementType,
     _flex_type: FlexType = .Flex,
     _text: ?[]const u8 = null,
     _href: ?[]const u8 = null,
@@ -813,10 +820,10 @@ pub const Chain = struct {
     _input_params: ?*const InputParams = null,
     _ui_node: ?*UINode = null,
     _id: ?[]const u8 = null,
-    _style: ?*const Fabric.Style = null,
+    _style: ?*const Vapor.Style = null,
 
-    _animation_enter: ?*const Fabric.Animation = null,
-    _animation_exit: ?*const Fabric.Animation = null,
+    _animation_enter: ?*const Vapor.Animation = null,
+    _animation_exit: ?*const Vapor.Animation = null,
 
     // Style props
     _pos: ?types.Position = null,
@@ -861,26 +868,26 @@ pub const Chain = struct {
             ._elem_type = .CtxButton,
         };
 
-        const ui_node = Fabric.current_ctx.open(elem_decl) catch |err| {
+        const ui_node = Vapor.current_ctx.open(elem_decl) catch |err| {
             println("{any}\n", .{err});
             unreachable;
         };
         const Args = @TypeOf(args);
         const Closure = struct {
             arguments: Args,
-            run_node: Fabric.Node = .{ .data = .{ .runFn = runFn, .deinitFn = deinitFn } },
-            fn runFn(action: *Fabric.Action) void {
-                const run_node: *Fabric.Node = @fieldParentPtr("data", action);
+            run_node: Vapor.Node = .{ .data = .{ .runFn = runFn, .deinitFn = deinitFn } },
+            fn runFn(action: *Vapor.Action) void {
+                const run_node: *Vapor.Node = @fieldParentPtr("data", action);
                 const closure: *@This() = @alignCast(@fieldParentPtr("run_node", run_node));
                 @call(.auto, func, closure.arguments);
             }
-            fn deinitFn(node: *Fabric.Node) void {
+            fn deinitFn(node: *Vapor.Node) void {
                 const closure: *@This() = @alignCast(@fieldParentPtr("run_node", node));
-                Fabric.allocator_global.destroy(closure);
+                Vapor.allocator_global.destroy(closure);
             }
         };
 
-        const closure = Fabric.allocator_global.create(Closure) catch |err| {
+        const closure = Vapor.allocator_global.create(Closure) catch |err| {
             println("Error could not create closure {any}\n ", .{err});
             unreachable;
         };
@@ -888,7 +895,7 @@ pub const Chain = struct {
             .arguments = args,
         };
 
-        Fabric.ctx_registry.put(hashKey(ui_node.uuid), &closure.run_node) catch |err| {
+        Vapor.ctx_registry.put(hashKey(ui_node.uuid), &closure.run_node) catch |err| {
             println("Button Function Registry {any}\n", .{err});
             unreachable;
         };
@@ -911,15 +918,15 @@ pub const Chain = struct {
             ._elem_type = .Link,
             ._aria_label = options.aria_label,
             // ._href = options.url,
-            ._href = if (Fabric.isGenerated) "" else options.url,
+            ._href = if (Vapor.isGenerated) "" else options.url,
         };
     }
 
     pub fn RedirectLink(options: struct { url: []const u8, aria_label: ?[]const u8 }) Self {
         return Self{
             ._elem_type = .RedirectLink,
-            // ._href = options.url,
-            ._href = if (Fabric.isGenerated) "" else options.url,
+            ._href = options.url,
+            // ._href = if (Vapor.isGenerated) "" else options.url,
             ._aria_label = options.aria_label,
         };
     }
@@ -939,13 +946,13 @@ pub const Chain = struct {
         return self;
     }
 
-    pub fn animationEnter(self: *const Self, animation_ptr: *const Fabric.Animation) Self {
+    pub fn animationEnter(self: *const Self, animation_ptr: *const Vapor.Animation) Self {
         var new_self: Self = self.*;
         new_self._animation_enter = animation_ptr;
         return new_self;
     }
 
-    pub fn animationExit(self: *const Self, animation_ptr: *const Fabric.Animation) Self {
+    pub fn animationExit(self: *const Self, animation_ptr: *const Vapor.Animation) Self {
         var new_self: Self = self.*;
         new_self._animation_exit = animation_ptr;
         return new_self;
@@ -953,7 +960,7 @@ pub const Chain = struct {
 
     // pub fn tooltip(self: *const Self, tool_tip: *const Tooltip) Self {
     //     var new_self: Self = self.*;
-    //     var tooltip_style: Fabric.Style = .{
+    //     var tooltip_style: Vapor.Style = .{
     //         .layout = .center,
     //         .position = .{ .type = .absolute },
     //         .padding = .tblr(4, 4, 8, 8),
@@ -1017,7 +1024,7 @@ pub const Chain = struct {
     //     return new_self;
     // }
 
-    pub fn baseStyle(self: *const Self, style_ptr: *const Fabric.Style) Self {
+    pub fn baseStyle(self: *const Self, style_ptr: *const Vapor.Style) Self {
         var new_self: Self = self.*;
         new_self._style = style_ptr;
         return new_self;
@@ -1026,8 +1033,8 @@ pub const Chain = struct {
     /// This function takes a const pointer to a Style Struct, and returns the body function callback
     /// This function is static, so any styles added via chaining methods will not be applied
     /// Use baseStyle to keep all chained additions
-    pub fn style(self: *const Self, style_ptr: *const Fabric.Style) *const fn (void) void {
-        var elem_decl = Fabric.ElementDecl{
+    pub fn style(self: *const Self, style_ptr: *const Vapor.Style) *const fn (void) void {
+        var elem_decl = Vapor.ElementDecl{
             .state_type = .static,
             .elem_type = self._elem_type,
             .text = self._text,
@@ -1064,10 +1071,10 @@ pub const Chain = struct {
         }
 
         if (self._elem_type != .CtxButton) {
-            const ui_node = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+            const ui_node = Vapor.LifeCycle.open(elem_decl) orelse unreachable;
             if (self._elem_type == .Button or self._elem_type == .ButtonCycle) {
                 if (self._options.?.on_press) |on_press| {
-                    Fabric.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
+                    Vapor.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
                         println("Button Function Registry {any}\n", .{err});
                     };
                 }
@@ -1075,16 +1082,16 @@ pub const Chain = struct {
         } else if (self._elem_type == .CtxButton) {
             const ui_node = self._ui_node orelse unreachable;
             if (style_ptr.id) |element_id| {
-                const kv = Fabric.ctx_registry.fetchRemove(hashKey(ui_node.uuid)) orelse unreachable;
-                Fabric.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
+                const kv = Vapor.ctx_registry.fetchRemove(hashKey(ui_node.uuid)) orelse unreachable;
+                Vapor.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
                     println("Button Function Registry {any}\n", .{err});
                     unreachable;
                 };
             }
         }
 
-        Fabric.LifeCycle.configure(elem_decl);
-        return Fabric.LifeCycle.close;
+        Vapor.LifeCycle.configure(elem_decl);
+        return Vapor.LifeCycle.close;
     }
 
     pub fn font(self: *const Self, font_size: u8, weight: ?u16, color: ?Color) Self {
@@ -1097,13 +1104,21 @@ pub const Chain = struct {
 
     pub fn pos(self: *const Self, position: types.Position) Self {
         var new_self: Self = self.*;
-        new_self._pos = position;
+        var new_position = new_self._pos orelse types.Position{};
+        new_position.top = position.top;
+        new_position.right = position.right;
+        new_position.bottom = position.bottom;
+        new_position.left = position.left;
+        new_position.type = position.type;
+        new_self._pos = new_position;
         return new_self;
     }
 
-    pub fn zIndex(self: *const Self, z_index: ?f32) Self {
+    pub fn zIndex(self: *const Self, z_index: ?i16) Self {
         var new_self: Self = self.*;
-        new_self._z_index = z_index;
+        var position = new_self._pos orelse types.Position{};
+        position.z_index = z_index;
+        new_self._pos = position;
         return new_self;
     }
 
@@ -1227,7 +1242,6 @@ pub const Chain = struct {
         if (mutable_style.margin == null) mutable_style.margin = self._margin;
         if (mutable_style.size == null) mutable_style.size = self._size;
         if (mutable_style.transition == null) mutable_style.transition = self._transition;
-        if (mutable_style.z_index == null) mutable_style.z_index = self._z_index;
         if (mutable_style.blur == null) mutable_style.blur = self._blur;
 
         // if (self._tooltip) |_tooltip| {
@@ -1244,7 +1258,7 @@ pub const Chain = struct {
             mutable_style.id = _id;
         }
 
-        const elem_decl = Fabric.ElementDecl{
+        const elem_decl = Vapor.ElementDecl{
             .state_type = .static,
             ._elem_type = self._elem_type,
             ._text = self._text,
@@ -1257,10 +1271,10 @@ pub const Chain = struct {
         };
 
         if (self._elem_type != .CtxButton) {
-            const ui_node = Fabric.LifeCycle.open(elem_decl) orelse unreachable;
+            const ui_node = Vapor.LifeCycle.open(elem_decl) orelse unreachable;
             if (self._elem_type == .Button or self._elem_type == .ButtonCycle) {
                 if (self._options.?.on_press) |on_press| {
-                    Fabric.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
+                    Vapor.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
                         println("Button Function Registry {any}\n", .{err});
                     };
                 }
@@ -1268,26 +1282,26 @@ pub const Chain = struct {
         } else if (self._elem_type == .CtxButton) {
             const ui_node = self._ui_node orelse unreachable;
             if (elem_decl.style.?.style_id) |element_id| {
-                const kv = Fabric.ctx_registry.fetchRemove(hashKey(ui_node.uuid)) orelse unreachable;
-                Fabric.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
+                const kv = Vapor.ctx_registry.fetchRemove(hashKey(ui_node.uuid)) orelse unreachable;
+                Vapor.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
                     println("Button Function Registry {any}\n", .{err});
                     unreachable;
                 };
             }
         }
 
-        Fabric.LifeCycle.configure(elem_decl);
-        return Fabric.LifeCycle.close;
+        Vapor.LifeCycle.configure(elem_decl);
+        return Vapor.LifeCycle.close;
     }
 
     pub fn plain(self: *const Self) void {
-        const elem_decl = Fabric.ElementDecl{
+        const elem_decl = Vapor.ElementDecl{
             ._state_type = self._state_type,
             ._elem_type = self._elem_type,
             ._text = self._text,
         };
-        _ = Fabric.LifeCycle.open(elem_decl);
-        Fabric.LifeCycle.configure(elem_decl);
-        Fabric.LifeCycle.close({});
+        _ = Vapor.LifeCycle.open(elem_decl);
+        Vapor.LifeCycle.configure(elem_decl);
+        Vapor.LifeCycle.close({});
     }
 };

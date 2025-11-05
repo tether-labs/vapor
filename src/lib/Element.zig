@@ -1,9 +1,9 @@
 const types = @import("types.zig");
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const UINode = @import("UITree.zig").UINode;
 const ElementType = @import("types.zig").ElementType;
 const std = @import("std");
-const isWasi = Fabric.isWasi;
+const isWasi = Vapor.isWasi;
 const Wasm = @import("wasm");
 const Event = @import("Event.zig");
 const utils = @import("utils.zig");
@@ -57,6 +57,7 @@ pub const Element = struct {
     _node_ptr: ?*UINode = null,
     text: []const u8 = "",
     on_change: ?*const fn (event: *Event) void = null,
+    on_hover: ?*const fn (event: *Event) void = null,
     on_submit: ?*const fn (event: *Event) void = null,
     on_focus: ?*const fn (event: *Event) void = null,
     on_blur: ?*const fn (event: *Event) void = null,
@@ -80,7 +81,7 @@ pub const Element = struct {
     }
     pub fn scrollTop(self: *Element, value: u32) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
         const attribute: []const u8 = "scrollTop";
@@ -90,7 +91,7 @@ pub const Element = struct {
 
     pub fn toOffsetWidth(self: *Element, value: u32) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
         const attribute: []const u8 = "offsetWidth";
@@ -100,15 +101,15 @@ pub const Element = struct {
 
     pub fn getAttributeNumber(self: *Element, attribute: []const u8) u32 {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return 0;
         };
-        return Fabric.getAttributeWasmNumber(id.ptr, id.len, attribute.ptr, attribute.len);
+        return Vapor.getAttributeWasmNumber(id.ptr, id.len, attribute.ptr, attribute.len);
     }
 
     pub fn mutate(self: *Element, attribute: []const u8, value: u32) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
         mutateDomElement(id.ptr, id.len, attribute.ptr, attribute.len, value);
@@ -122,18 +123,18 @@ pub const Element = struct {
         cb: anytype,
     ) ?usize {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return null;
         };
-        return Fabric.elementInstEventListener(id, event_type, construct, cb);
+        return Vapor.elementInstEventListener(id, event_type, construct, cb);
     }
 
     pub fn addListener(self: *Element, event_type: types.EventType, cb: *const fn (event: *Event) void) ?usize {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return null;
         };
-        return Fabric.elementEventListener(id, event_type, cb);
+        return Vapor.elementEventListener(id, event_type, cb);
     }
 
     pub fn removeListener(
@@ -142,10 +143,10 @@ pub const Element = struct {
         cb_idx: usize,
     ) ?bool {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return null;
         };
-        return Fabric.destroyElementEventListener(id, event_type, cb_idx);
+        return Vapor.destroyElementEventListener(id, event_type, cb_idx);
     }
 
     pub fn removeInstListener(
@@ -154,15 +155,15 @@ pub const Element = struct {
         cb_idx: usize,
     ) ?bool {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return null;
         };
-        return Fabric.destroyElementInstEventListener(id, event_type, cb_idx);
+        return Vapor.destroyElementInstEventListener(id, event_type, cb_idx);
     }
 
     pub fn mutateStyle(self: *Element, style: *const Style) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
 
@@ -201,7 +202,7 @@ pub const Element = struct {
 
     pub fn scrollLeft(self: *Element, value: u32) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
         const attribute: []const u8 = "scrollLeft";
@@ -211,10 +212,10 @@ pub const Element = struct {
 
     pub fn getOffsets(self: *Element) ?Offsets {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return null;
         };
-        // const bounds_ptr = Fabric.getOffsets(id.ptr, @intCast(id.len));
+        // const bounds_ptr = Vapor.getOffsets(id.ptr, @intCast(id.len));
         const bounds_ptr = if (isWasi) {
             return Wasm.getOffsetsWasm(id.ptr, id.len);
         } else {
@@ -237,7 +238,7 @@ pub const Element = struct {
 
     pub fn getBoundingClientRect(self: *Element) ?Rect {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
 
@@ -269,15 +270,15 @@ pub const Element = struct {
 
     pub fn removeFromParent(self: *Element) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
-        Fabric.removeFromParent(id.ptr, id.len);
+        Vapor.removeFromParent(id.ptr, id.len);
     }
 
     pub fn clear(self: *Element) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
         const text = "";
@@ -285,7 +286,7 @@ pub const Element = struct {
     }
     pub fn setText(self: *Element, text: []const u8) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
         self.text = text;
@@ -294,7 +295,7 @@ pub const Element = struct {
 
     pub fn getInputValue(self: *Element) ?[]const u8 {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return null;
         };
         // const resp = if (isWasi) {
@@ -311,59 +312,130 @@ pub const Element = struct {
 
     pub fn addChild(self: *Element, childId: []const u8) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
-        Fabric.addChild(id.ptr, id.len, childId.ptr, childId.len);
+        Vapor.addChild(id.ptr, id.len, childId.ptr, childId.len);
     }
 
     pub fn focus(self: *Element) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
         if (self.element_type != .TextField) {
-            Fabric.println("Can only focus on TextField Element, add element Type Input\n", .{});
+            Vapor.println("Can only focus on TextField Element, add element Type Input\n", .{});
             return;
         }
-        // Fabric.addClass(id.ptr, id.len, classId.ptr, classId.len);
-        Fabric.focus(id);
+        // Vapor.addClass(id.ptr, id.len, classId.ptr, classId.len);
+        Vapor.focus(id);
     }
 
     pub fn focused(self: *Element) bool {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return false;
         };
-        return Fabric.focused(id);
+        return Vapor.focused(id);
     }
 
     pub fn addClass(self: *Element, classId: []const u8) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
-        }; // Fabric.addClass(id.ptr, id.len, classId.ptr, classId.len);
-        Fabric.addToClassesList(id, classId);
+        }; // Vapor.addClass(id.ptr, id.len, classId.ptr, classId.len);
+        Vapor.addToClassesList(id, classId);
     }
 
     pub fn removeClass(self: *Element, classId: []const u8) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
-        }; // Fabric.removeClass(id.ptr, id.len, classId.ptr, classId.len);
-        Fabric.addToRemoveClassesList(id, classId);
+        }; // Vapor.removeClass(id.ptr, id.len, classId.ptr, classId.len);
+        Vapor.addToRemoveClassesList(id, classId);
     }
 
     pub fn click(self: *Element) void {
         const id = self._get_id() orelse {
-            Fabric.printlnSrc("Id is null", .{}, @src());
+            Vapor.printlnSrc("Id is null", .{}, @src());
             return;
         };
         if (self.element_type != .Input) {
-            Fabric.println("Must be Input type", .{});
+            Vapor.println("Must be Input type", .{});
             return;
         }
-        Fabric.callClickWASM(id.ptr, id.len);
+        Vapor.callClickWASM(id.ptr, id.len);
+    }
+    pub fn startVideo(self: *Element) void {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        Wasm.startVideoWasm(id.ptr, id.len);
+    }
+
+    pub fn playVideo(self: *Element) void {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        Wasm.playVideoWasm(id.ptr, id.len);
+    }
+
+    pub fn pauseVideo(self: *Element) void {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        Wasm.pauseVideoWasm(id.ptr, id.len);
+    }
+
+    pub fn stopCamera(self: *Element) void {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        Wasm.stopCameraWasm(id.ptr, id.len);
+    }
+
+    pub fn seekVideo(self: *Element, time: f32) void {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        Wasm.seekVideoWasm(id.ptr, id.len, time);
+    }
+
+    pub fn setVolume(self: *Element, volume: f32) void {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        Wasm.setVolumeWasm(id.ptr, id.len, volume);
+    }
+
+    pub fn muteVideo(self: *Element) void {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        Wasm.muteVideoWasm(id.ptr, id.len);
+    }
+
+    pub fn getVideoDuration(self: *Element) f32 {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        return Wasm.getVideoDurationWasm(id.ptr, id.len);
+    }
+
+    pub fn getVideoCurrentTime(self: *Element) f32 {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        return Wasm.getVideoCurrentTimeWasm(id.ptr, id.len);
     }
 };
 
@@ -390,7 +462,7 @@ pub fn mutateDomElement(
         if (comptime std.debug.runtime_safety) {
             const id = id_ptr[0..id_len];
             const attr = attribute[0..attribute_len];
-            Fabric.println("DOM: Would set element '{s}' attribute '{s}' to {d}\n", .{ id, attr, value });
+            Vapor.println("DOM: Would set element '{s}' attribute '{s}' to {d}\n", .{ id, attr, value });
         }
         // No-op in non-WASM environments
     }
@@ -410,7 +482,7 @@ pub fn mutateDomElementStyle(
         if (comptime std.debug.runtime_safety) {
             const id = id_ptr[0..id_len];
             const attr = attribute[0..attribute_len];
-            Fabric.println("DOM: Would set element '{s}' style '{s}' to {d:.2}\n", .{ id, attr, value });
+            Vapor.println("DOM: Would set element '{s}' style '{s}' to {d:.2}\n", .{ id, attr, value });
         }
         // No-op in non-WASM environments
     }
@@ -432,7 +504,7 @@ pub fn mutateDomElementStyleString(
             const id = id_ptr[0..id_len];
             const attr = attribute[0..attribute_len];
             const value = value_ptr[0..value_len];
-            Fabric.println("DOM: Would set element '{s}' style '{s}' to '{s}'\n", .{ id, attr, value });
+            Vapor.println("DOM: Would set element '{s}' style '{s}' to '{s}'\n", .{ id, attr, value });
         }
         // No-op in non-WASM environments
     }
@@ -440,31 +512,43 @@ pub fn mutateDomElementStyleString(
 
 pub export fn getOnFocusCallback(self: *Element) u32 {
     const uuid = self._get_id() orelse {
-        Fabric.printlnSrcErr("Id is null", .{}, @src());
+        Vapor.printlnSrcErr("Id is null", .{}, @src());
         unreachable;
     };
     var onid = hashKey(uuid);
-    onid +%= hashKey(Fabric.on_focus_hash);
+    onid +%= hashKey(Vapor.on_focus_hash);
+    return onid;
+}
+
+pub export fn getOnHoverCallback(self: *Element) u32 {
+    const uuid = self._get_id() orelse {
+        Vapor.printlnSrcErr("Id is null", .{}, @src());
+        unreachable;
+    };
+    if (self.on_hover == null) return 0;
+    var onid = hashKey(uuid);
+    onid +%= hashKey(Vapor.on_hover_hash);
     return onid;
 }
 
 pub export fn getOnChangeCallback(self: *Element) u32 {
     const uuid = self._get_id() orelse {
-        Fabric.printlnSrcErr("Id is null", .{}, @src());
+        Vapor.printlnSrcErr("Id is null", .{}, @src());
         unreachable;
     };
+    if (self.on_change == null) return 0;
     var onid = hashKey(uuid);
-    onid +%= hashKey(Fabric.on_change_hash);
+    onid +%= hashKey(Vapor.on_change_hash);
     return onid;
 }
 
 pub export fn getOnBlurCallback(self: *Element) u32 {
     const uuid = self._get_id() orelse {
-        Fabric.printlnSrcErr("Id is null", .{}, @src());
+        Vapor.printlnSrcErr("Id is null", .{}, @src());
         unreachable;
     };
     var onid = hashKey(uuid);
-    onid +%= hashKey(Fabric.on_blur_hash);
+    onid +%= hashKey(Vapor.on_blur_hash);
     return onid;
 }
 

@@ -1,6 +1,6 @@
 const std = @import("std");
 const UINode = @import("UITree.zig").UINode;
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 const types = @import("types.zig");
 const InputParams = types.InputParams;
 var input: []const u8 = "";
@@ -121,9 +121,9 @@ pub export fn getOnInputCallback(ptr: ?*UINode) u32 {
     // //     },
     //     // .string => {
     //     //     if (input_params.string.onInput) |cb| {
-    //     //         const id = Fabric.events_callbacks.count() + 1;
-    //     //         Fabric.events_callbacks.put(id, cb) catch |err| {
-    //     //             Fabric.println("Event Callback Error: {any}\n", .{err});
+    //     //         const id = Vapor.events_callbacks.count() + 1;
+    //     //         Vapor.events_callbacks.put(id, cb) catch |err| {
+    //     //             Vapor.println("Event Callback Error: {any}\n", .{err});
     //     //             return 0;
     //     //         };
     //     //         return id;

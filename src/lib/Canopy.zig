@@ -3,14 +3,14 @@ const UIContext = @import("UITree.zig");
 const UINode = UIContext.UINode;
 const Types = @import("types.zig");
 const Engine = @This();
-const Fabric = @import("Fabric.zig");
+const Vapor = @import("Vapor.zig");
 
 pub fn createStack(ui_ctx: *UIContext, parent: *UINode) void {
     if (parent.children.items.len == 0) return;
 
     for (parent.children.items) |child| {
         ui_ctx.stackRegister(child) catch {
-            Fabric.println("Could not stack register\n", .{});
+            Vapor.println("Could not stack register\n", .{});
             unreachable;
         };
     }
@@ -90,7 +90,7 @@ pub fn calcWidth(ui_ctx: *UIContext) void {
 
 fn growWidths(ui_ctx: *UIContext, parent: *UINode) void {
     ui_ctx.stackRegister(parent) catch {
-        Fabric.println("Could not stack register\n", .{});
+        Vapor.println("Could not stack register\n", .{});
         unreachable;
     };
     if (parent.children.items.len == 0) return;
