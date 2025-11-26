@@ -22,6 +22,7 @@ pub fn isDesktop() bool {
 }
 
 pub fn isMobile() bool {
+    if (!Vapor.isWasi) return false;
     if (Vapor.browser_width < 786) {
         return true;
     } else {

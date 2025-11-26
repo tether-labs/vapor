@@ -160,7 +160,7 @@ const Route = struct {
     path: []const u8,
 };
 pub fn searchRoute(radix: *const Radix, path: []const u8) ?Route {
-    var node_path: std.array_list.Managed(u8) = std.array_list.Managed(u8).init(Vapor.frame_arena.getFrameAllocator());
+    var node_path: std.array_list.Managed(u8) = std.array_list.Managed(u8).init(Vapor.arena(.frame));
     // var param_args: ?*std.array_list.Managed(ParamInfo) = null;
     var node = radix.root;
     var start: usize = 1;

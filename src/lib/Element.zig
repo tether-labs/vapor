@@ -107,6 +107,23 @@ pub const Element = struct {
         return Vapor.getAttributeWasmNumber(id.ptr, id.len, attribute.ptr, attribute.len);
     }
 
+    pub fn cursorPosition(self: *Element) u32 {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrc("Id is null", .{}, @src());
+            return 0;
+        };
+        const attribute: []const u8 = "selectionStart";
+        return Wasm.getAttributeWasmNumber(id.ptr, id.len, attribute.ptr, attribute.len);
+    }
+
+    pub fn setCursorPosition(self: *Element, value: u32) void {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrc("Id is null", .{}, @src());
+            return;
+        };
+        Wasm.setCursorPositionWasm(id.ptr, id.len, value);
+    }
+
     pub fn mutate(self: *Element, attribute: []const u8, value: u32) void {
         const id = self._get_id() orelse {
             Vapor.printlnSrc("Id is null", .{}, @src());
@@ -117,24 +134,38 @@ pub const Element = struct {
     }
 
     pub fn addInstListener(
-        self: *Element,
+        self: *const Element,
         event_type: types.EventType,
-        construct: anytype,
         cb: anytype,
+        construct: anytype,
     ) ?usize {
-        const id = self._get_id() orelse {
-            Vapor.printlnSrc("Id is null", .{}, @src());
+        const ui_node = self._node_ptr orelse {
+            Vapor.printlnSrc("Node is null", .{}, @src());
             return null;
         };
-        return Vapor.elementInstEventListener(id, event_type, construct, cb);
+        return Vapor.elementInstEventListener(ui_node, event_type, construct, cb);
     }
 
+    // pub fn getElementUnderMouse(self: *Element) ?Element {
+    //     const ui_node = self._node_ptr orelse {
+    //         Vapor.printlnSrc("Node is null", .{}, @src());
+    //         return null;
+    //     };
+    //     const id_ptr = Wasm.getElementUnderMouse();
+    //     const id = std.mem.span(id_ptr);
+    //     defer Vapor.allocator_global.free(id);
+    // }
+
     pub fn addListener(self: *Element, event_type: types.EventType, cb: *const fn (event: *Event) void) ?usize {
-        const id = self._get_id() orelse {
-            Vapor.printlnSrc("Id is null", .{}, @src());
+        const ui_node = self._node_ptr orelse {
+            Vapor.printlnSrc("Node is null", .{}, @src());
             return null;
         };
-        return Vapor.elementEventListener(id, event_type, cb);
+        if (isWasi) {
+            return Vapor.elementEventListener(ui_node, event_type, cb);
+        } else {
+            return 0;
+        }
     }
 
     pub fn removeListener(
@@ -437,6 +468,14 @@ pub const Element = struct {
         };
         return Wasm.getVideoCurrentTimeWasm(id.ptr, id.len);
     }
+
+    pub fn translate3d(element: *Element, translation: Translate3d) void {
+        const id = element._get_id() orelse {
+            Vapor.printlnSrcErr("Id is null", .{}, @src());
+            unreachable;
+        };
+        Wasm.translate3dWasm(id.ptr, id.len, translation.toString().ptr, translation.toString().len);
+    }
 };
 
 pub fn setTextFieldValue(ptr: [*]const u8, len: u32, text_ptr: [*]const u8, text_len: u32) void {
@@ -467,6 +506,19 @@ pub fn mutateDomElement(
         // No-op in non-WASM environments
     }
 }
+
+const Translate3d = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    pub fn toString(self: *const Translate3d) []const u8 {
+        return Vapor.fmtln("translate3d({d}px, {d}px, 0)", .{
+            self.x,
+            self.y,
+                // self.z,
+        });
+    }
+};
 
 pub fn mutateDomElementStyle(
     id_ptr: [*]const u8,

@@ -13,6 +13,8 @@ const Element = @import("Element.zig").Element;
 pub const IconTokens = @import("user_config").IconTokens;
 const utils = @import("utils.zig");
 const hashKey = utils.hashKey;
+const Draggable = @import("Draggable.zig").Draggable;
+const onCreateNode = @import("Hooks.zig").onCreateNode;
 
 const HeaderSize = enum(u32) {
     XXLarge = 12,
@@ -124,34 +126,11 @@ pub inline fn Hooks(hooks: Vapor.HooksFuncs) fn (void) void {
     LifeCycle.configure(elem_decl);
     return LifeCycle.close;
 }
-
-export fn ctxButtonCallback(id_ptr: [*:0]u8) void {
+export fn ctxHooksMountedCallback(id_ptr: [*:0]u8) void {
     const id = std.mem.span(id_ptr);
-    defer Vapor.allocator_global.free(id);
-    const node = Vapor.ctx_registry.get(hashKey(id)) orelse return;
+    Vapor.printlnSrcErr("ERROR MUST REIMLEMENT", .{}, @src());
+    const node = Vapor.mounted_ctx_funcs.get(hashKey(id)) orelse return;
     @call(.auto, node.data.runFn, .{&node.data});
-}
-
-export fn ctxHooksMountedCallback(id: u32) void {
-    const node = Vapor.mounted_ctx_funcs.items[id - 1];
-    @call(.auto, node.data.runFn, .{&node.data});
-}
-
-export fn buttonCallback(id_ptr: [*:0]u8) void {
-    const id = std.mem.span(id_ptr);
-    defer Vapor.allocator_global.free(id);
-    Vapor.current_depth_node_id = std.mem.Allocator.dupe(Vapor.allocator_global, u8, id) catch return;
-    const func = Vapor.btn_registry.get(hashKey(id)) orelse return;
-    @call(.auto, func, .{});
-}
-
-export fn buttonCycleCallback(id_ptr: [*:0]u8) void {
-    const id = std.mem.span(id_ptr);
-    defer Vapor.allocator_global.free(id);
-    Vapor.current_depth_node_id = std.mem.Allocator.dupe(Vapor.allocator_global, u8, id) catch return;
-    const func = Vapor.btn_registry.get(hashKey(id)) orelse return;
-    @call(.auto, func, .{});
-    Vapor.cycle();
 }
 
 export fn hooksRemoveMountedKey(id_ptr: [*:0]u8) void {
@@ -171,14 +150,15 @@ export fn hooksMountedCallback(id_ptr: [*:0]u8) void {
     @call(.auto, kv.value, .{});
 }
 
-export fn callAllMountedCallbacks() void {
-    var itr = Vapor.mounted_funcs.iterator();
-    while (itr.next()) |entry| {
-        const func = entry.value_ptr.*;
-        @call(.auto, func, .{});
-    }
+export fn hooksMountedCtxCallback(id_ptr: [*:0]u8) void {
+    const id = std.mem.span(id_ptr);
+    defer Vapor.allocator_global.free(id);
+    const kv = Vapor.mounted_ctx_funcs.fetchRemove(hashKey(id)) orelse {
+        println("Mounted Ctx Function {s} not found\n", .{id});
+        return;
+    };
+    @call(.auto, kv.value.data.runFn, .{&kv.value.data});
 }
-
 export fn hooksCreatedCallback(id: u32) void {
     const func = Vapor.created_funcs.get(id).?;
     @call(.auto, func, .{});
@@ -265,6 +245,8 @@ pub const ChainClose = struct {
     _level: ?u8 = null,
     _video: ?*const types.Video = null,
     _font_family: []const u8 = "",
+    _value: ?*anyopaque = null,
+    _text_field_type: types.InputTypes = .string,
 
     pub fn Null() void {
         _ = LifeCycle.open(.{
@@ -278,17 +260,40 @@ pub const ChainClose = struct {
         LifeCycle.close({});
     }
 
-    pub fn Text(text: []const u8) Self {
+    pub fn Text(value: anytype) Self {
+        const text = blk: switch (@typeInfo(@TypeOf(value))) {
+            .pointer => |_| {
+                break :blk value;
+            },
+            .int => {
+                break :blk Vapor.fmtln("{any}", .{value});
+            },
+            else => {
+                Vapor.printlnErr("Text only accepts []const u8 or number types, NOT {any}", .{@TypeOf(value)});
+                return Self{ ._elem_type = .Text, .text = "" };
+            },
+        };
+        const elem_decl = ElementDecl{
+            .state_type = .static,
+            .elem_type = .Text,
+            .text = text,
+        };
+        const ui_node = LifeCycle.open(elem_decl) orelse {
+            Vapor.printlnSrcErr("Could not add component Link to lifecycle {any}\n", .{error.CouldNotAllocate}, @src());
+            unreachable;
+        };
+
         return Self{
             ._elem_type = .Text,
-            .text = if (Vapor.isGenerated) "" else text,
+            .text = text,
+            ._ui_node = ui_node,
         };
     }
 
     pub fn Code(text: []const u8) Self {
         return Self{
             ._elem_type = .Code,
-            .text = if (Vapor.isGenerated) "" else text,
+            .text = text,
         };
     }
 
@@ -313,7 +318,7 @@ pub const ChainClose = struct {
     }
 
     pub fn TextFmt(comptime fmt: []const u8, args: anytype) Self {
-        const allocator = Vapor.frame_arena.getFrameAllocator();
+        const allocator = Vapor.arena(.frame);
         const text = std.fmt.allocPrint(allocator, fmt, args) catch |err| {
             Vapor.printlnColor(
                 \\Error formatting text: {any}\n"
@@ -323,31 +328,18 @@ pub const ChainClose = struct {
             return Self{ ._elem_type = .Text, .text = "ERROR", ._state_type = .err };
         };
         Vapor.frame_arena.addBytesUsed(text.len);
-        return Self{ ._elem_type = .TextFmt, .text = if (Vapor.isGenerated) "" else text };
-    }
 
-    pub fn TextArea(textfield_type: types.InputTypes) Self {
         const elem_decl = ElementDecl{
             .state_type = .static,
-            ._elem_type = .TextArea,
+            .elem_type = .Text,
+            .text = text,
         };
-        const ui_node = Vapor.current_ctx.open(elem_decl) catch |err| {
-            println("{any}\n", .{err});
+        const ui_node = LifeCycle.open(elem_decl) orelse {
+            Vapor.printlnSrcErr("Could not add component Link to lifecycle {any}\n", .{error.CouldNotAllocate}, @src());
             unreachable;
         };
 
-        switch (textfield_type) {
-            .string => {
-                return Self{
-                    ._elem_type = .TextField,
-                    ._ui_node = ui_node,
-                };
-            },
-            else => {
-                unreachable;
-                // @compileError("TextField only accepts []const u8 or TextInput");
-            },
-        }
+        return Self{ ._elem_type = .TextFmt, .text = text, ._ui_node = ui_node };
     }
 
     pub fn TextField(textfield_type: types.InputTypes) Self {
@@ -355,8 +347,8 @@ pub const ChainClose = struct {
             .state_type = .static,
             .elem_type = .TextField,
         };
-        const ui_node = Vapor.current_ctx.open(elem_decl) catch |err| {
-            println("{any}\n", .{err});
+        const ui_node = LifeCycle.open(elem_decl) orelse {
+            Vapor.printlnSrcErr("{any}\n", .{error.CouldNotAllocate}, @src());
             unreachable;
         };
 
@@ -365,6 +357,7 @@ pub const ChainClose = struct {
                 return Self{
                     ._elem_type = .TextField,
                     ._ui_node = ui_node,
+                    ._text_field_type = .string,
                 };
             },
             else => {
@@ -374,7 +367,62 @@ pub const ChainClose = struct {
         }
     }
 
-    pub fn bind(self: *const Self, element: *Element) Self {
+    pub fn bind(self: *const Self, value: anytype) Self {
+        var new_self: Self = self.*;
+        if (self._elem_type != .TextField) {
+            Vapor.printlnErr("bindValue only works on TextField", .{});
+            return self.*;
+        }
+        if (@typeInfo(@TypeOf(value)) != .pointer) {
+            Vapor.printlnErr("bindValue only works on pointer types", .{});
+            return self.*;
+        }
+
+        const ui_node = self._ui_node orelse {
+            Vapor.printlnSrcErr("Node is null must ref() first, before setting onChange", .{}, @src());
+            unreachable;
+        };
+
+        switch (self._text_field_type) {
+            .string => {
+                if (@TypeOf(value.*) != []const u8) {
+                    Vapor.printlnErr("bindValue and TextField type mismatch", .{});
+                    return self.*;
+                }
+                Vapor.attachEventCtxCallback(ui_node, .input, struct {
+                    pub fn updateText(value_opaque: *anyopaque, evt: *Vapor.Event) void {
+                        const value_type: *[]const u8 = @ptrCast(@alignCast(value_opaque));
+                        value_type.* = evt.text();
+                        Vapor.print("No onChange updateText: {s}\n", .{value_type.*});
+                    }
+                }.updateText, value) catch |err| {
+                    Vapor.println("bindValue: Could not attach event callback {any}\n", .{err});
+                    unreachable;
+                };
+            },
+            .int => {
+                if (@TypeOf(value.*) != i32) {
+                    Vapor.printlnErr("bindValue and TextField type mismatch", .{});
+                    return self.*;
+                }
+            },
+            .float => {
+                if (@TypeOf(value.*) != f32) {
+                    Vapor.printlnErr("bindValue and TextField type mismatch", .{});
+                    return self.*;
+                }
+            },
+            else => {
+                Vapor.printlnErr("NOT IMPLEMENTED", .{});
+                return self.*;
+            },
+        }
+        new_self._value = @ptrCast(@alignCast(value));
+
+        return new_self;
+    }
+
+    pub fn ref(self: *const Self, element: *Element) Self {
         var new_self: Self = self.*;
         element.element_type = self._elem_type;
         new_self._element = element;
@@ -472,10 +520,34 @@ pub const ChainClose = struct {
 
             break :blk ui_node;
         };
-        Vapor.attachEventCallback(ui_node, .input, cb) catch |err| {
-            Vapor.println("ONLEAVE: Could not attach event callback {any}\n", .{err});
-            unreachable;
-        };
+
+        // If we have a binded value we instead create a wrapper ctx around the cb passed in
+        // this way we can update the binded values from the callback and call the developer's
+        // cb with the updated value
+        if (self._value) |value| {
+            switch (self._text_field_type) {
+                .string => {
+                    Vapor.attachEventCtxCallback(ui_node, .input, struct {
+                        pub fn updateText(value_opaque: *anyopaque, evt: *Vapor.Event) void {
+                            const value_type: *[]const u8 = @ptrCast(@alignCast(value_opaque));
+                            value_type.* = evt.text();
+                            Vapor.print("updateText: {s}\n", .{value_type.*});
+                            @call(.auto, cb, .{evt});
+                        }
+                    }.updateText, value) catch |err| {
+                        Vapor.println("bindValue: Could not attach event callback {any}\n", .{err});
+                        unreachable;
+                    };
+                },
+                else => return self.*,
+            }
+        } else {
+            Vapor.attachEventCallback(ui_node, .input, cb) catch |err| {
+                Vapor.println("ONLEAVE: Could not attach event callback {any}\n", .{err});
+                unreachable;
+            };
+        }
+
         return new_self;
     }
 
@@ -491,11 +563,11 @@ pub const ChainClose = struct {
     }
 
     pub fn Icon(token: *const IconTokens) Self {
-        if (Vapor.isWasi) {
-            return Self{ ._elem_type = .Icon, .href = token.web orelse "" };
-        } else {
-            return Self{ ._elem_type = .Icon, .href = token.svg orelse "" };
-        }
+        // if (Vapor.isWasi) {
+        return Self{ ._elem_type = .Icon, .href = token.web orelse "" };
+        // } else {
+        // return Self{ ._elem_type = .Icon, .href = token.svg orelse "" };
+        // }
     }
 
     pub fn Image(options: struct { src: []const u8 }) Self {
@@ -682,7 +754,13 @@ pub const ChainClose = struct {
         return new_self;
     }
 
-    pub fn close(self: *const Self) void {
+    pub fn interactive(self: *const Self) Self {
+        var new_self: Self = self.*;
+        new_self._interactive = true;
+        return new_self;
+    }
+
+    pub fn end(self: *const Self) void {
         var mutable_style = Style{};
         if (self._style) |style_ptr| {
             mutable_style = style_ptr.*;
@@ -719,6 +797,16 @@ pub const ChainClose = struct {
 
         if (self._ui_node == null) {
             _ = Vapor.LifeCycle.open(elem_decl) orelse unreachable;
+            // const Args = @TypeOf(value);
+            // Vapor.attachEventCtxCallback(ui_node, .input, struct {
+            //     pub fn updateText(evt: *Vapor.Event, value_opaque: Args) void {
+            //         value_opaque.* = evt.text();
+            //         Vapor.print("updateText: {s}\n", .{value_opaque.*});
+            //     }
+            // }.updateText, value) catch |err| {
+            //     Vapor.println("bindValue: Could not attach event callback {any}\n", .{err});
+            //     unreachable;
+            // };
         }
 
         Vapor.LifeCycle.configure(elem_decl);
@@ -803,6 +891,11 @@ const Tooltip = struct {
     delay: u32 = 300,
 };
 
+pub const BuilderType = union(enum) {
+    open: Chain,
+    close: ChainClose,
+};
+
 pub const Chain = struct {
     const Self = @This();
     _elem_type: Vapor.ElementType,
@@ -815,6 +908,7 @@ pub const Chain = struct {
     _ui_node: ?*UINode = null,
     _id: ?[]const u8 = null,
     _style: ?*const Vapor.Style = null,
+    _draggable: ?*Draggable = null,
     _element: ?*Element = null,
 
     _animation_enter: ?*const Vapor.Animation = null,
@@ -846,45 +940,22 @@ pub const Chain = struct {
     }
 
     pub fn Button(options: ButtonOptions) Self {
-        return Self{ ._elem_type = .Button, ._aria_label = options.aria_label, ._options = options };
-    }
+        const elem_decl = ElementDecl{
+            .state_type = .static,
+            .elem_type = .Button,
+            .aria_label = options.aria_label,
+        };
+        const ui_node = LifeCycle.open(elem_decl) orelse {
+            Vapor.printlnSrcErr("Could not add component Link to lifecycle {any}\n", .{error.CouldNotAllocate}, @src());
+            unreachable;
+        };
 
-    pub fn Hooks(_: Vapor.HooksFuncs) Self {
-        // const elem_decl = ElementDecl{
-        //     .state_type = .static,
-        //     .elem_type = .Hooks,
-        // };
-
-        // const ui_node = Vapor.LifeCycle.open(elem_decl) orelse {
-        //     println("Hooks: {any}\n", .{error.CouldNotAllocate});
-        //     unreachable;
-        // };
-        // if (hooks.mounted) |f| {
-        //     elem_decl.hooks.mounted_id = 1;
-        //     Vapor.print("Mounted Funcs {s}\n", .{ui_node.uuid});
-        //     Vapor.mounted_funcs.put(hashKey(ui_node.uuid), f) catch |err| {
-        //         println("Mount Function Registry {any}\n", .{err});
-        //     };
-        // }
-        // if (hooks.created) |f| {
-        //     elem_decl.hooks.created_id += 1;
-        //     Vapor.created_funcs.put(hashKey(ui_node.uuid), f) catch |err| {
-        //         println("Mount Function Registry {any}\n", .{err});
-        //     };
-        // }
-        // if (hooks.updated) |f| {
-        //     elem_decl.hooks.updated_id += 1;
-        //     Vapor.updated_funcs.put(hashKey(ui_node.uuid), f) catch |err| {
-        //         println("Mount Function Registry {any}\n", .{err});
-        //     };
-        // }
-        // if (hooks.destroy) |f| {
-        //     elem_decl.hooks.destroy_id += 1;
-        //     Vapor.destroy_funcs.put(hashKey(ui_node.uuid), f) catch |err| {
-        //         println("Mount Function Registry {any}\n", .{err});
-        //     };
-        // }
-        return Self{ ._elem_type = .Hooks };
+        return Self{
+            ._elem_type = .Button,
+            ._aria_label = options.aria_label,
+            ._options = options,
+            ._ui_node = ui_node,
+        };
     }
 
     pub fn CtxButton(func: anytype, args: anytype) Self {
@@ -932,12 +1003,59 @@ pub const Chain = struct {
         return Self{ ._elem_type = .ButtonCycle, ._aria_label = options.aria_label, ._options = options };
     }
 
-    pub const Box = Self{ ._elem_type = .FlexBox };
+    // pub const Box = Self{ ._elem_type = .FlexBox };
+    pub fn Box() Self {
+        const elem_decl = ElementDecl{
+            .state_type = .static,
+            .elem_type = .FlexBox,
+        };
+        const ui_node = LifeCycle.open(elem_decl) orelse {
+            Vapor.printlnSrcErr("Could not add component Link to lifecycle {any}\n", .{error.CouldNotAllocate}, @src());
+            unreachable;
+        };
+
+        return Self{
+            ._ui_node = ui_node,
+            ._elem_type = .FlexBox,
+        };
+    }
     pub const Section = Self{ ._elem_type = .Intersection };
-    pub const Center = Self{ ._elem_type = .FlexBox, ._flex_type = .Center };
-    pub const Stack = Self{ ._elem_type = .FlexBox, ._flex_type = .Stack };
+    // pub const Center = Self{ ._elem_type = .FlexBox, ._flex_type = .Center };
+    // pub const Stack = Self{ ._elem_type = .FlexBox, ._flex_type = .Stack };
     pub const List = Self{ ._elem_type = .List };
     pub const ListItem = Self{ ._elem_type = .ListItem };
+    pub fn Center() Self {
+        const elem_decl = ElementDecl{
+            .state_type = .static,
+            .elem_type = .FlexBox,
+        };
+        const ui_node = LifeCycle.open(elem_decl) orelse {
+            Vapor.printlnSrcErr("Could not add component Link to lifecycle {any}\n", .{error.CouldNotAllocate}, @src());
+            unreachable;
+        };
+
+        return Self{
+            ._ui_node = ui_node,
+            ._elem_type = .FlexBox,
+            ._flex_type = .Center,
+        };
+    }
+    pub fn Stack() Self {
+        const elem_decl = ElementDecl{
+            .state_type = .static,
+            .elem_type = .FlexBox,
+        };
+        const ui_node = LifeCycle.open(elem_decl) orelse {
+            Vapor.printlnSrcErr("Could not add component Link to lifecycle {any}\n", .{error.CouldNotAllocate}, @src());
+            unreachable;
+        };
+
+        return Self{
+            ._ui_node = ui_node,
+            ._elem_type = .FlexBox,
+            ._flex_type = .Stack,
+        };
+    }
     pub fn Link(options: struct { url: []const u8, aria_label: ?[]const u8 }) Self {
         const elem_decl = ElementDecl{
             .state_type = .static,
@@ -1029,6 +1147,119 @@ pub const Chain = struct {
         return new_self;
     }
 
+    pub fn onDragStart(self: *const Self, cb: fn (*Vapor.Event) void) Self {
+        var new_self: Self = self.*;
+
+        const ui_node = self._ui_node orelse blk: {
+            const ui_node = LifeCycle.open(ElementDecl{
+                .state_type = .static,
+                .elem_type = self._elem_type,
+            }) orelse {
+                Vapor.printlnSrcErr("Node is null", .{}, @src());
+                unreachable;
+            };
+            new_self._ui_node = ui_node;
+
+            break :blk ui_node;
+        };
+        Vapor.attachEventCallback(ui_node, .pointerdown, cb) catch |err| {
+            Vapor.println("ONDRAGSTART: Could not attach event callback {any}\n", .{err});
+            unreachable;
+        };
+
+        return new_self;
+    }
+
+    // pub fn onDrag(self: *const Self, cb: fn (*Vapor.Event) void) Self {
+    //     var new_self: Self = self.*;
+    //
+    //     const ui_node = self._ui_node orelse blk: {
+    //         const ui_node = LifeCycle.open(ElementDecl{
+    //             .state_type = .static,
+    //             .elem_type = self._elem_type,
+    //         }) orelse {
+    //             Vapor.printlnSrcErr("Node is null", .{}, @src());
+    //             unreachable;
+    //         };
+    //         new_self._ui_node = ui_node;
+    //
+    //         break :blk ui_node;
+    //     };
+    //     Vapor.attachEventCallback(ui_node, .pointermove, cb) catch |err| {
+    //         Vapor.println("ONDRAG: Could not attach event callback {any}\n", .{err});
+    //         unreachable;
+    //     };
+    //
+    //     return new_self;
+    // }
+
+    // pub fn draggable(self: *const Self) *const Self {
+    //     const element = self._element orelse {
+    //         Vapor.printlnSrcErr("Element is null must ref() first, before setting onChange", .{}, @src());
+    //         unreachable;
+    //     };
+    //
+    //     var ui_node = self._ui_node orelse {
+    //         Vapor.printlnSrcErr("Node is null must ref() first, before setting onChange", .{}, @src());
+    //         unreachable;
+    //     };
+    //
+    //     ui_node.hooks.created_id = 1;
+    //
+    //     onCreateNode(ui_node, struct {
+    //         pub fn attachDraggable(binded: *Vapor.Binded) void {
+    //             _ = Draggable.init(binded);
+    //         }
+    //     }.attachDraggable, .{element});
+    //     return self;
+    // }
+
+    pub fn createDraggable(self: *const Self, draggable_ptr: *Draggable) *const Self {
+        var new_self: Self = self.*;
+        var element = draggable_ptr.element;
+
+        var ui_node = self._ui_node orelse {
+            Vapor.printlnSrcErr("Node is null must ref() first, before setting onChange", .{}, @src());
+            unreachable;
+        };
+
+        ui_node.hooks.created_id = 1;
+        element.element_type = self._elem_type;
+        element._node_ptr = ui_node;
+        new_self._element = &element;
+        draggable_ptr.element = element;
+
+        onCreateNode(ui_node, struct {
+            pub fn attachDraggable(draggable: *Draggable) void {
+                draggable.addStartListener();
+            }
+        }.attachDraggable, .{draggable_ptr});
+        return self;
+    }
+
+    // pub fn onDragEnd(self: *const Self, cb: fn (*Vapor.Event) void) Self {
+    //     var new_self: Self = self.*;
+    //
+    //     const ui_node = self._ui_node orelse blk: {
+    //         const ui_node = LifeCycle.open(ElementDecl{
+    //             .state_type = .static,
+    //             .elem_type = self._elem_type,
+    //         }) orelse {
+    //             Vapor.printlnSrcErr("Node is null", .{}, @src());
+    //             unreachable;
+    //         };
+    //         new_self._ui_node = ui_node;
+    //
+    //         break :blk ui_node;
+    //     };
+    //     Vapor.attachEventCallback(ui_node, .pointerup, cb) catch |err| {
+    //         Vapor.println("ONDRAGEND: Could not attach event callback {any}\n", .{err});
+    //         unreachable;
+    //     };
+    //
+    //     return new_self;
+    // }
+
     pub fn RedirectLink(options: struct { url: []const u8, aria_label: ?[]const u8 }) Self {
         return Self{
             ._elem_type = .RedirectLink,
@@ -1048,10 +1279,50 @@ pub const Chain = struct {
         return new_self;
     }
 
-    pub fn bind(self: *const Self, element: *Element) Self {
+    // pub fn bind(self: *const Self, element: *Element) Self {
+    //     var new_self: Self = self.*;
+    //     element.element_type = self._elem_type;
+    //     new_self._element = element;
+    //
+    //     const ui_node = self._ui_node orelse blk: {
+    //         const ui_node = LifeCycle.open(ElementDecl{
+    //             .state_type = .static,
+    //             .elem_type = self._elem_type,
+    //         }) orelse {
+    //             Vapor.printlnSrcErr("Node is null", .{}, @src());
+    //             unreachable;
+    //         };
+    //         new_self._ui_node = ui_node;
+    //
+    //         break :blk ui_node;
+    //     };
+    //
+    //     element._node_ptr = ui_node orelse {
+    //         Vapor.printlnSrcErr("Node is null", .{}, @src());
+    //         unreachable;
+    //     };
+    //     const uuid = element._get_id() orelse {
+    //         Vapor.printlnSrcErr("Id is null", .{}, @src());
+    //         unreachable;
+    //     };
+    //     Vapor.element_registry.put(hashKey(uuid), element) catch unreachable;
+    //     return new_self;
+    // }
+
+    pub fn animationEnter(self: *const Self, animation_ptr: *const Vapor.Animation) Self {
         var new_self: Self = self.*;
-        element.element_type = self._elem_type;
-        new_self._element = element;
+        new_self._animation_enter = animation_ptr;
+        return new_self;
+    }
+
+    pub fn animationExit(self: *const Self, animation_ptr: *const Vapor.Animation) Self {
+        var new_self: Self = self.*;
+        new_self._animation_exit = animation_ptr;
+        return new_self;
+    }
+
+    pub fn ref(self: *const Self, element: *Element) Self {
+        var new_self: Self = self.*;
 
         const ui_node = self._ui_node orelse blk: {
             const ui_node = LifeCycle.open(ElementDecl{
@@ -1066,27 +1337,12 @@ pub const Chain = struct {
             break :blk ui_node;
         };
 
-        element._node_ptr = ui_node orelse {
-            Vapor.printlnSrcErr("Node is null", .{}, @src());
-            unreachable;
-        };
-        const uuid = element._get_id() orelse {
-            Vapor.printlnSrcErr("Id is null", .{}, @src());
-            unreachable;
-        };
+        element.element_type = self._elem_type;
+        element._node_ptr = ui_node;
+        new_self._element = element;
+
+        const uuid = ui_node.uuid;
         Vapor.element_registry.put(hashKey(uuid), element) catch unreachable;
-        return new_self;
-    }
-
-    pub fn animationEnter(self: *const Self, animation_ptr: *const Vapor.Animation) Self {
-        var new_self: Self = self.*;
-        new_self._animation_enter = animation_ptr;
-        return new_self;
-    }
-
-    pub fn animationExit(self: *const Self, animation_ptr: *const Vapor.Animation) Self {
-        var new_self: Self = self.*;
-        new_self._animation_exit = animation_ptr;
         return new_self;
     }
 
@@ -1162,6 +1418,12 @@ pub const Chain = struct {
         return new_self;
     }
 
+    pub fn interaction(self: *const Self, interactive: types.Interactive) Self {
+        var new_self: Self = self.*;
+        new_self._interactive = interactive;
+        return new_self;
+    }
+
     /// This function takes a const pointer to a Style Struct, and returns the body function callback
     /// This function is static, so any styles added via chaining methods will not be applied
     /// Use baseStyle to keep all chained additions
@@ -1217,6 +1479,13 @@ pub const Chain = struct {
                 Vapor.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
                     println("Button Function Registry {any}\n", .{err});
                     unreachable;
+                };
+            }
+        } else if (self._elem_type == .Button or self._elem_type == .ButtonCycle) {
+            const ui_node = self._ui_node orelse unreachable;
+            if (self._options.?.on_press) |on_press| {
+                Vapor.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
+                    println("Button Function Registry {any}\n", .{err});
                 };
             }
         }
@@ -1297,6 +1566,22 @@ pub const Chain = struct {
         return new_self;
     }
 
+    pub fn pointer(self: *const Self) Self {
+        var new_self: Self = self.*;
+        var visual = new_self._visual orelse types.Visual{};
+        visual.cursor = .pointer;
+        new_self._visual = visual;
+        return new_self;
+    }
+
+    pub fn noDecoration(self: *const Self) Self {
+        var new_self: Self = self.*;
+        var visual = new_self._visual orelse types.Visual{};
+        visual.text_decoration = .none;
+        new_self._visual = visual;
+        return new_self;
+    }
+
     pub fn hoverText(self: *const Self, color: Color) Self {
         var new_self: Self = self.*;
         new_self._interactive = .hover_text(color);
@@ -1321,6 +1606,42 @@ pub const Chain = struct {
         return new_self;
     }
 
+    pub fn pl(self: *const Self, value: u8) Self {
+        var new_self: Self = self.*;
+        if (new_self._padding == null) {
+            new_self._padding = .{};
+        }
+        new_self._padding.?.left = value;
+        return new_self;
+    }
+
+    pub fn pr(self: *const Self, value: u8) Self {
+        var new_self: Self = self.*;
+        if (new_self._padding == null) {
+            new_self._padding = .{};
+        }
+        new_self._padding.?.right = value;
+        return new_self;
+    }
+
+    pub fn pt(self: *const Self, value: u8) Self {
+        var new_self: Self = self.*;
+        if (new_self._padding == null) {
+            new_self._padding = .{};
+        }
+        new_self._padding.?.top = value;
+        return new_self;
+    }
+
+    pub fn pb(self: *const Self, value: u8) Self {
+        var new_self: Self = self.*;
+        if (new_self._padding == null) {
+            new_self._padding = .{};
+        }
+        new_self._padding.?.bottom = value;
+        return new_self;
+    }
+
     pub fn cursor(self: *const Self, value: types.Cursor) Self {
         var new_self: Self = self.*;
         var visual = new_self._visual orelse types.Visual{};
@@ -1338,6 +1659,17 @@ pub const Chain = struct {
     pub fn size(self: *const Self, dim: types.Size) Self {
         var new_self: Self = self.*;
         new_self._size = dim;
+        return new_self;
+    }
+
+    pub fn hw(self: *const Self, height_value: types.Sizing, width_value: types.Sizing) Self {
+        var new_self: Self = self.*;
+        if (new_self._size == null) {
+            new_self._size = .{ .width = width_value, .height = height_value };
+        } else {
+            new_self._size.?.width = width_value;
+            new_self._size.?.height = height_value;
+        }
         return new_self;
     }
 
@@ -1393,6 +1725,155 @@ pub const Chain = struct {
         var new_self: Self = self.*;
         new_self._list_style = value;
         return new_self;
+    }
+
+    pub fn end(self: *const Self) void {
+        var mutable_style = Style{};
+        if (self._style) |style_ptr| {
+            mutable_style = style_ptr.*;
+        }
+        if (mutable_style.position == null) mutable_style.position = self._pos;
+        if (mutable_style.visual == null) mutable_style.visual = self._visual;
+        if (mutable_style.interactive == null) mutable_style.interactive = self._interactive;
+        if (mutable_style.child_gap == null) mutable_style.child_gap = self._child_gap;
+        if (mutable_style.padding == null) mutable_style.padding = self._padding;
+        if (mutable_style.layout == null) mutable_style.layout = self._layout;
+        if (mutable_style.margin == null) mutable_style.margin = self._margin;
+        if (mutable_style.size == null) mutable_style.size = self._size;
+        if (mutable_style.transition == null) mutable_style.transition = self._transition;
+        if (mutable_style.flex_wrap == null) mutable_style.flex_wrap = self._flex_wrap;
+        mutable_style.direction = self._direction;
+        if (mutable_style.list_style == null) mutable_style.list_style = self._list_style;
+
+        // if (self._tooltip) |_tooltip| {
+        //     elem_decl.tooltip = &_tooltip;
+        // }
+
+        if (self._flex_type == .Center) {
+            mutable_style.layout = .center;
+        } else if (self._flex_type == .Stack) {
+            mutable_style.direction = .column;
+        }
+
+        if (self._id) |_id| {
+            mutable_style.id = _id;
+        }
+
+        const elem_decl = Vapor.ElementDecl{
+            .state_type = .static,
+            .elem_type = self._elem_type,
+            .text = self._text,
+            .style = &mutable_style,
+            .href = self._href,
+            .svg = self._svg,
+            .aria_label = self._aria_label,
+            .animation_enter = self._animation_enter,
+            .animation_exit = self._animation_exit,
+        };
+
+        if (self._ui_node == null) {
+            const ui_node = Vapor.LifeCycle.open(elem_decl) orelse unreachable;
+            if (self._elem_type == .Button or self._elem_type == .ButtonCycle) {
+                if (self._options.?.on_press) |on_press| {
+                    Vapor.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
+                        println("Button Function Registry {any}\n", .{err});
+                    };
+                }
+            }
+        } else if (self._elem_type == .CtxButton) {
+            const ui_node = self._ui_node orelse unreachable;
+            if (elem_decl.style.?.style_id) |element_id| {
+                const kv = Vapor.ctx_registry.fetchRemove(hashKey(ui_node.uuid)) orelse unreachable;
+                Vapor.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
+                    println("Button Function Registry {any}\n", .{err});
+                    unreachable;
+                };
+            }
+        } else if (self._elem_type == .Button or self._elem_type == .ButtonCycle) {
+            const ui_node = self._ui_node orelse unreachable;
+            if (self._options.?.on_press) |on_press| {
+                Vapor.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
+                    println("Button Function Registry {any}\n", .{err});
+                };
+            }
+        }
+
+        Vapor.LifeCycle.configure(elem_decl);
+        return Vapor.LifeCycle.close({});
+    }
+    pub fn children(self: *const Self, _: void) void {
+        var mutable_style = Style{};
+        if (self._style) |style_ptr| {
+            mutable_style = style_ptr.*;
+        }
+        if (mutable_style.position == null) mutable_style.position = self._pos;
+        if (mutable_style.visual == null) mutable_style.visual = self._visual;
+        if (mutable_style.interactive == null) mutable_style.interactive = self._interactive;
+        if (mutable_style.child_gap == null) mutable_style.child_gap = self._child_gap;
+        if (mutable_style.padding == null) mutable_style.padding = self._padding;
+        if (mutable_style.layout == null) mutable_style.layout = self._layout;
+        if (mutable_style.margin == null) mutable_style.margin = self._margin;
+        if (mutable_style.size == null) mutable_style.size = self._size;
+        if (mutable_style.transition == null) mutable_style.transition = self._transition;
+        if (mutable_style.flex_wrap == null) mutable_style.flex_wrap = self._flex_wrap;
+        mutable_style.direction = self._direction;
+        if (mutable_style.list_style == null) mutable_style.list_style = self._list_style;
+
+        // if (self._tooltip) |_tooltip| {
+        //     elem_decl.tooltip = &_tooltip;
+        // }
+
+        if (self._flex_type == .Center) {
+            mutable_style.layout = .center;
+        } else if (self._flex_type == .Stack) {
+            mutable_style.direction = .column;
+        }
+
+        if (self._id) |_id| {
+            mutable_style.id = _id;
+        }
+
+        const elem_decl = Vapor.ElementDecl{
+            .state_type = .static,
+            .elem_type = self._elem_type,
+            .text = self._text,
+            .style = &mutable_style,
+            .href = self._href,
+            .svg = self._svg,
+            .aria_label = self._aria_label,
+            .animation_enter = self._animation_enter,
+            .animation_exit = self._animation_exit,
+        };
+
+        if (self._ui_node == null) {
+            const ui_node = Vapor.LifeCycle.open(elem_decl) orelse unreachable;
+            if (self._elem_type == .Button or self._elem_type == .ButtonCycle) {
+                if (self._options.?.on_press) |on_press| {
+                    Vapor.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
+                        println("Button Function Registry {any}\n", .{err});
+                    };
+                }
+            }
+        } else if (self._elem_type == .CtxButton) {
+            const ui_node = self._ui_node orelse unreachable;
+            if (elem_decl.style.?.style_id) |element_id| {
+                const kv = Vapor.ctx_registry.fetchRemove(hashKey(ui_node.uuid)) orelse unreachable;
+                Vapor.ctx_registry.put(hashKey(element_id), kv.value) catch |err| {
+                    println("Button Function Registry {any}\n", .{err});
+                    unreachable;
+                };
+            }
+        } else if (self._elem_type == .Button or self._elem_type == .ButtonCycle) {
+            const ui_node = self._ui_node orelse unreachable;
+            if (self._options.?.on_press) |on_press| {
+                Vapor.btn_registry.put(hashKey(ui_node.uuid), on_press) catch |err| {
+                    println("Button Function Registry {any}\n", .{err});
+                };
+            }
+        }
+
+        Vapor.LifeCycle.configure(elem_decl);
+        return Vapor.LifeCycle.close({});
     }
 
     pub fn body(self: *const Self) *const fn (void) void {

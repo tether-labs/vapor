@@ -516,7 +516,7 @@ pub const ChainClose = struct {
     /// TextFmt takes a format string and a array of arguments and allocates a new string
     /// This string is handled by the Vapor engine and is not freed by the user
     pub fn TextFmt(comptime fmt: []const u8, args: anytype) Self {
-        const allocator = Vapor.frame_arena.getFrameAllocator();
+        const allocator = Vapor.arena(.frame);
         const text = std.fmt.allocPrint(allocator, fmt, args) catch |err| {
             Vapor.printlnColor(
                 \\Error formatting text: {any}\n"
@@ -532,7 +532,7 @@ pub const ChainClose = struct {
     /// TextFmt takes a format string and a array of arguments and allocates a new string
     /// This string is handled by the Vapor engine and is not freed by the user
     pub inline fn TextFmtErr(fmt: []const u8, args: anytype) Self {
-        // const allocator = Vapor.frame_arena.getFrameAllocator();
+        // const allocator = Vapor.arena(.frame);
         // const text = std.fmt.allocPrint(allocator, fmt, args) catch |err| {
         //     std.debug.print("Error formatting text: {any}\n", .{err});
         Vapor.printlnColor(

@@ -5,6 +5,7 @@ const utils = @import("utils.zig");
 const hashKey = utils.hashKey;
 const Writer = @import("Writer.zig");
 const StringData = @import("Pool.zig").StringData;
+const Packer = @import("Packer.zig");
 // const CompactStyle = @import("types.zig").CompactStyle;
 
 const types = @import("types.zig");
@@ -70,10 +71,11 @@ pub const UINode = struct {
     href: ?[]const u8 = null,
     index: usize = 0,
     hooks: HooksIds = .{},
-    input_params: ?*const InputParams = null,
+    text_field_params: ?types.TextFieldParams = null,
     event_type: ?types.EventType = null,
     state_type: types.StateType = .pure,
     aria_label: ?[]const u8 = null,
+    alt: ?[]const u8 = null,
     class: ?[]const u8 = null,
     animation_enter: ?*const Vapor.Animation = null,
     animation_exit: ?*const Vapor.Animation = null,
@@ -81,12 +83,15 @@ pub const UINode = struct {
     can_have_children: bool = true,
     children_count: usize = 0,
     finger_print: u32 = 0,
+    style_hash: u32 = 0,
+    style_changed: bool = false,
     hash: u32 = 0,
     level: ?u8 = null,
     video: ?types.Video = null,
     event_handlers: ?Vapor.EventHandlers = null,
     on_hover: bool = false,
     on_leave: bool = false,
+    name: ?[]const u8 = null,
 
     // nodes_flat_index: usize = 0,
     // tooltip: ?types.Tooltip = null,
@@ -99,7 +104,7 @@ pub const UINode = struct {
         if (parent.children == null) return error.AttemptedToAddChildToNonContainer;
         if (parent.children.?.items.len >= Vapor.page_node_count) return error.BufferOverflowIncreasePageNodeCount;
         parent.children_count += 1;
-        try parent.children.?.ensureUnusedCapacity(Vapor.frame_arena.getFrameAllocator(), 4);
+        try parent.children.?.ensureUnusedCapacity(Vapor.arena(.frame), 4);
         parent.children.?.appendBounded(child) catch {
             return error.BufferOverflowIncreasePageNodeCount;
         };
@@ -122,7 +127,7 @@ pub fn init(_: *UIContext, parent: ?*UINode, etype: EType) !*UINode {
         .type = etype,
     };
     if (etype != .Text and etype != .TextFmt) {
-        node.children = try std.ArrayListUnmanaged(*UINode).initCapacity(Vapor.frame_arena.getFrameAllocator(), 4);
+        node.children = try std.ArrayListUnmanaged(*UINode).initCapacity(Vapor.arena(.frame), 4);
     } else {
         node.can_have_children = false;
     }
@@ -132,7 +137,7 @@ pub fn init(_: *UIContext, parent: ?*UINode, etype: EType) !*UINode {
 
 /// initContext initializes the UIContext and its associated memory pools
 pub fn initContext(ui_ctx: *UIContext) !void {
-    const allocator = Vapor.frame_arena.getFrameAllocator();
+    const allocator = Vapor.arena(.frame);
     ui_ctx.* = .{
         .node_pool = std.heap.MemoryPool(UINode).init(allocator),
         .memory_pool = std.heap.MemoryPool(Item).init(allocator),
@@ -265,7 +270,7 @@ pub fn open(ui_ctx: *UIContext, elem_decl: ElemDecl) !*UINode {
     node.level = elem_decl.level;
 
     current_open.addChild(node) catch |err| {
-        Vapor.printlnSrcErr("Could not add child {any}", .{err}, @src());
+        // Vapor.printlnSrcErr("Could not add child {any}", .{err}, @src());
         return err;
     };
     ui_ctx.stackRegister(node) catch |err| {
@@ -280,15 +285,6 @@ pub fn open(ui_ctx: *UIContext, elem_decl: ElemDecl) !*UINode {
 
     setUUID(current_open, node);
 
-    // if (node_count >= nodes.len) {
-    //     Vapor.printlnErr("Page Node count is too small {d}", .{node_count});
-    // } else {
-    //     // node.nodes_flat_index = node_count;
-    //     nodes[node_count] = node;
-    //     node_count += 1;
-    // }
-
-    // Vapor.println("Open time {any}", .{Vapor.nowMs() - time});
     return node;
 }
 
@@ -342,7 +338,7 @@ fn getOrPutAndUpdateHash(
 // REFACTORED FUNCTIONS
 // -----------------------------------------------------------------------------
 
-pub fn checkVisual(visual: *const types.Visual, packet_visual: *types.PackedVisual) void {
+pub fn checkVisual(visual: *const types.Visual, packet_visual: *types.PackedVisual, _: types.ElementType) void {
     // Refactored to use the packColor helper
     if (visual.background) |background| {
         if (background.color) |color| {
@@ -351,17 +347,103 @@ pub fn checkVisual(visual: *const types.Visual, packet_visual: *types.PackedVisu
             packet_visual.background = background_color;
         } else if (background.layer) |layer| {
             switch (layer) {
-                .Grid => |grid| {
-                    packet_visual.background_grid.size = grid.size;
-                    packet_visual.background_grid.thickness = grid.thickness;
-                    var grid_color = packet_visual.background_grid.packed_color;
-                    packColor(grid.color, &grid_color);
-                    packet_visual.background_grid.packed_color = grid_color;
-                },
                 .Image => {},
+                else => {
+                    Vapor.printlnSrcErr("Not implemented yet", .{}, @src());
+                },
             }
         }
     }
+
+    // if (visual.layer) |layer| {
+    //     var packed_layers = Vapor.arena(.frame).alloc(types.PackedLayer, 1) catch unreachable;
+    //     switch (layer) {
+    //         .Grid => |grid| {
+    //             var packed_layer: types.PackedLayer = .{ .Grid = .{} };
+    //             packed_layer.Grid.size = grid.size;
+    //             packed_layer.Grid.thickness = grid.thickness;
+    //             var grid_color = packed_layer.Grid.packed_color;
+    //             packColor(grid.color, &grid_color);
+    //             packed_layer.Grid.packed_color = grid_color;
+    //             packed_layers[0] = packed_layer;
+    //         },
+    //         // .Image => {},
+    //         .Dot => |dots| {
+    //             var packed_layer: types.PackedLayer = .{ .Dot = .{} };
+    //             packed_layer.Dot.spacing = dots.spacing;
+    //             packed_layer.Dot.radius = dots.radius;
+    //             var dots_color = packed_layer.Dot.packed_color;
+    //             packColor(dots.color, &dots_color);
+    //             packed_layer.Dot.packed_color = dots_color;
+    //             packed_layers[0] = packed_layer;
+    //         },
+    //         .Gradient => |gradient| {
+    //             var packed_layer: types.PackedLayer = .{ .Gradient = .{} };
+    //             packed_layer.Gradient.type = gradient.type;
+    //             packed_layer.Gradient.direction = gradient.direction;
+    //             var gradient_colors = Vapor.arena(.frame).alloc(types.PackedColor, gradient.colors.len) catch unreachable;
+    //             for (gradient.colors, 0..) |color, j| {
+    //                 packColor(color, &gradient_colors[j]);
+    //             }
+    //             packed_layer.Gradient.colors_ptr = gradient_colors.ptr;
+    //             packed_layer.Gradient.colors_len = gradient_colors.len;
+    //             packed_layers[0] = packed_layer;
+    //         },
+    //         else => {
+    //             Vapor.printlnSrcErr("Not implemented yet {any}", .{layer}, @src());
+    //             // @compileError("Not implemented yet");
+    //         },
+    //     }
+    //     // packet_visual.packed_layers.items_ptr = packed_layers.ptr;
+    //     // packet_visual.packed_layers.len = packed_layers.len;
+    //     //
+    //     // if (element_type == .Text) {
+    //     //     packet_visual.is_text_gradient = true;
+    //     // }
+    // } else if (visual.layers) |_| {
+    //     // var packed_layers = Vapor.arena(.frame).alloc(types.PackedLayer, layers.len) catch unreachable;
+    //     // for (layers, 0..) |layer, i| {
+    //     //     switch (layer) {
+    //     //         .Grid => |grid| {
+    //     //             var packed_layer: types.PackedLayer = .{ .Grid = .{} };
+    //     //             packed_layer.Grid.size = grid.size;
+    //     //             packed_layer.Grid.thickness = grid.thickness;
+    //     //             var grid_color = packed_layer.Grid.packed_color;
+    //     //             packColor(grid.color, &grid_color);
+    //     //             packed_layer.Grid.packed_color = grid_color;
+    //     //             packed_layers[i] = packed_layer;
+    //     //         },
+    //     //         // .Image => {},
+    //     //         .Dot => |dots| {
+    //     //             var packed_layer: types.PackedLayer = .{ .Dot = .{} };
+    //     //             packed_layer.Dot.spacing = dots.spacing;
+    //     //             packed_layer.Dot.radius = dots.radius;
+    //     //             var dots_color = packed_layer.Dot.packed_color;
+    //     //             packColor(dots.color, &dots_color);
+    //     //             packed_layer.Dot.packed_color = dots_color;
+    //     //             packed_layers[0] = packed_layer;
+    //     //         },
+    //     //         .Gradient => |gradient| {
+    //     //             var packed_layer: types.PackedLayer = .{ .Gradient = .{} };
+    //     //             packed_layer.Gradient.type = gradient.type;
+    //     //             packed_layer.Gradient.direction = gradient.direction;
+    //     //             var gradient_colors = Vapor.arena(.frame).alloc(types.PackedColor, gradient.colors.len) catch unreachable;
+    //     //             for (gradient.colors, 0..) |color, j| {
+    //     //                 packColor(color, &gradient_colors[j]);
+    //     //             }
+    //     //             packed_layer.Gradient.colors_ptr = gradient_colors.ptr;
+    //     //             packed_layer.Gradient.colors_len = gradient_colors.len;
+    //     //             packed_layers[i] = packed_layer;
+    //     //         },
+    //     //         else => {
+    //     //             Vapor.printlnSrcErr("Not implemented yet {any}", .{layer}, @src());
+    //     //             // @compileError("Not implemented yet");
+    //     //         },
+    //     //     }
+    //     // }
+    //     // packet_visual.packed_layers.items_ptr = packed_layers.ptr;
+    //     // packet_visual.packed_layers.len = packed_layers.len;
+    // }
 
     if (visual.fill) |fill| {
         var fill_color = packet_visual.fill;
@@ -397,6 +479,10 @@ pub fn checkVisual(visual: *const types.Visual, packet_visual: *types.PackedVisu
         packet_visual.font_weight = font_weight;
     }
 
+    if (visual.outline) |outline| {
+        packet_visual.outline = outline;
+    }
+
     if (visual.font_style) |font_style| {
         packet_visual.font_style = font_style;
     }
@@ -411,17 +497,20 @@ pub fn checkVisual(visual: *const types.Visual, packet_visual: *types.PackedVisu
         packet_visual.opacity = opacity;
     }
 
+    if (visual.ellipsis) |ellipsis| {
+        packet_visual.ellipsis = ellipsis;
+    }
+
     if (visual.shadow) |shadow| {
         packet_visual.shadow = .{
             .blur = shadow.blur,
             .spread = shadow.spread,
             .top = shadow.top,
             .left = shadow.left,
-            .color = .{
-                .has_color = true,
-                .color = shadow.color.Literal,
-            },
         };
+        var shadow_color = packet_visual.text_color;
+        packColor(shadow.color, &shadow_color);
+        packet_visual.shadow.color = shadow_color;
     }
 
     if (visual.cursor) |cursor| {
@@ -435,6 +524,21 @@ pub fn checkVisual(visual: *const types.Visual, packet_visual: *types.PackedVisu
     if (visual.blur) |blur| {
         packet_visual.blur = blur;
     }
+
+    if (visual.caret) |caret| {
+        packet_visual.caret = .{
+            .type = caret.type,
+        };
+        if (caret.color == null) return;
+        var caret_color = packed_visual.caret.color;
+        packColor(caret.color.?, &caret_color);
+        packet_visual.caret.color = caret_color;
+    }
+
+    if (visual.white_space) |white_space| {
+        packet_visual.has_white_space = true;
+        packet_visual.white_space = white_space;
+    }
 }
 
 var packed_layout: types.PackedLayout = .{};
@@ -444,6 +548,7 @@ var packed_visual: types.PackedVisual = .{};
 var packed_animations: types.PackedAnimations = .{};
 var packed_interactive: types.PackedInteractive = .{};
 var packed_transition: types.PackedTransition = .{};
+var packed_layer: types.PackedLayer = .{ .Grid = .{} };
 
 pub var class_map: std.StringHashMap(StringData) = undefined;
 var buf: [128]u8 = undefined;
@@ -515,12 +620,23 @@ fn buildClassString(
 
 // TODO: Hashing the value is slow, we need to create a better hashmap system
 // running a comparison on each st.mem.bytes is expensive
-
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// NOTE: creating pointers to anyhting and then hashing will corrupt the memory, sicne the pointers are not static,
+/// they will appear different during runtime, for  hashing it should always be a static pointer
 pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
     const stack = ui_ctx.stack orelse unreachable;
     const current_open = stack.ptr orelse unreachable;
     const parent = current_open.parent orelse unreachable;
     const style = elem_decl.style;
+
+    if (elem_decl.elem_type == .ListItem) {
+        if (parent.type != .List) {
+            Vapor.printlnErr("ListItem must be a child of a List, Otherwise reconciliation will fail\n", .{});
+        }
+    }
+
     if (style != null and style.?.id != null) {
         current_open.uuid = style.?.id.?;
     }
@@ -534,8 +650,30 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
         current_open.finger_print +%= hashKey(text);
     }
 
+    if (elem_decl.text_field_params) |params| {
+        current_open.text_field_params = params;
+        switch (params) {
+            .string => |string| {
+                var value: []const u8 = "";
+                if (string.value_ptr) |ptr| {
+                    value = ptr[0..string.value_len];
+                }
+                var default_value: []const u8 = "";
+                if (string.default_ptr) |ptr| {
+                    default_value = ptr[0..string.default_len];
+                }
+                current_open.finger_print +%= hashKey(value);
+                current_open.finger_print +%= hashKey(default_value);
+                // current_open.finger_print +%= hashKey(string.default orelse "");
+                current_open.finger_print +%= @intFromEnum(string.type);
+            },
+            else => {},
+        }
+    }
+
     current_open.href = elem_decl.href;
     current_open.type = elem_decl.elem_type;
+    current_open.name = elem_decl.name;
 
     if (current_open.href) |href| {
         current_open.finger_print +%= hashKey(href);
@@ -570,6 +708,7 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
         packed_animations = .{};
         packed_interactive = .{};
         packed_transition = .{};
+        packed_layer = .{ .Grid = .{} };
 
         current_open.packed_field_ptrs = PackedFieldPtrs{};
         var hash_id: bool = false;
@@ -608,11 +747,11 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                 current_open.packed_field_ptrs.?.layout_ptr = getOrPutAndUpdateHash(
                     hash_l,
                     packed_layout,
-                    &Vapor.packed_layouts,
-                    &Vapor.packed_layouts_pool,
+                    &Packer.layouts,
+                    &Packer.layouts_pool,
                 ) catch unreachable;
             } else {
-                const packed_layout_ptr = Vapor.packed_layouts_pool.create() catch unreachable;
+                const packed_layout_ptr = Packer.layouts_pool.create() catch unreachable;
                 packed_layout_ptr.* = packed_layout;
                 current_open.packed_field_ptrs.?.layout_ptr = packed_layout_ptr;
             }
@@ -636,11 +775,11 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                 current_open.packed_field_ptrs.?.position_ptr = getOrPutAndUpdateHash(
                     hash_p,
                     packed_position,
-                    &Vapor.packed_positions,
-                    &Vapor.packed_positions_pool,
+                    &Packer.positions,
+                    &Packer.positions_pool,
                 ) catch unreachable;
             } else {
-                const packed_position_ptr = Vapor.packed_positions_pool.create() catch unreachable;
+                const packed_position_ptr = Packer.positions_pool.create() catch unreachable;
                 packed_position_ptr.* = packed_position;
                 current_open.packed_field_ptrs.?.position_ptr = packed_position_ptr;
             }
@@ -658,18 +797,18 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                 current_open.packed_field_ptrs.?.margins_paddings_ptr = getOrPutAndUpdateHash(
                     hash_mp,
                     packed_margins_paddings,
-                    &Vapor.packed_margins_paddings,
-                    &Vapor.packed_margins_paddings_pool,
+                    &Packer.margins_paddings,
+                    &Packer.margins_paddings_pool,
                 ) catch unreachable;
             } else {
-                const packed_margin_paddings_ptr = Vapor.packed_margins_paddings_pool.create() catch unreachable;
+                const packed_margin_paddings_ptr = Packer.margins_paddings_pool.create() catch unreachable;
                 packed_margin_paddings_ptr.* = packed_margins_paddings;
                 current_open.packed_field_ptrs.?.margins_paddings_ptr = packed_margin_paddings_ptr;
             }
         }
 
         // ** Packed Visual **
-        if (s.visual != null or s.list_style != null or s.white_space != null) {
+        if (s.visual != null or s.list_style != null) {
             if (current_open.type == .Button or current_open.type == .ButtonCycle or current_open.type == .CtxButton) {
                 if (!packed_visual.has_border_thickeness) {
                     packed_visual.has_border_thickeness = true;
@@ -679,19 +818,136 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
             }
             // packed_visual = .{};
 
-            if (s.visual) |visual| checkVisual(&visual, &packed_visual);
+            if (s.visual) |visual| checkVisual(&visual, &packed_visual, current_open.type);
 
-            if (s.white_space) |white_space| {
-                packed_visual.has_white_space = true;
-                packed_visual.white_space = white_space;
-            }
             if (s.list_style) |list_style| packed_visual.list_style = list_style;
-            if (s.outline) |outline| packed_visual.outline = outline;
 
             hash_v = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_visual));
 
             if (s.font_family) |font_family| {
-                hash_v +%= hashKey(font_family);
+                if (font_family.len > 0) {
+                    hash_v +%= hashKey(font_family);
+                }
+            }
+
+            if (s.visual) |visual| {
+                if (visual.layer) |layer| {
+                    var packed_layers = Vapor.arena(.frame).alloc(types.PackedLayer, 1) catch unreachable;
+                    switch (layer) {
+                        .Grid => |grid| {
+                            packed_layer = .{ .Grid = .{} };
+                            packed_layer.Grid.size = grid.size;
+                            packed_layer.Grid.thickness = grid.thickness;
+                            var grid_color = packed_layer.Grid.packed_color;
+                            packColor(grid.color, &grid_color);
+                            packed_layer.Grid.packed_color = grid_color;
+                            packed_layers[0] = packed_layer;
+                            hash_v +%= std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_layer));
+                        },
+                        .Lines => |lines| {
+                            packed_layer = .{ .Lines = .{} };
+                            packed_layer.Lines.spacing = lines.spacing;
+                            packed_layer.Lines.thickness = lines.thickness;
+                            packed_layer.Lines.direction = lines.direction;
+                            var lines_color = packed_layer.Lines.color;
+                            packColor(lines.color, &lines_color);
+                            packed_layer.Lines.color = lines_color;
+                            packed_layers[0] = packed_layer;
+                            hash_v +%= std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_layer));
+                        },
+                        // .Image => {},
+                        .Dot => |dots| {
+                            packed_layer = .{ .Dot = .{} };
+                            packed_layer.Dot.spacing = dots.spacing;
+                            packed_layer.Dot.radius = dots.radius;
+                            var dots_color = packed_layer.Dot.packed_color;
+                            packColor(dots.color, &dots_color);
+                            packed_layer.Dot.packed_color = dots_color;
+                            packed_layers[0] = packed_layer;
+                            hash_v +%= std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_layer));
+                        },
+                        .Gradient => |gradient| {
+                            packed_layer = .{ .Gradient = .{} };
+                            packed_layer.Gradient.type = gradient.type;
+                            packed_layer.Gradient.direction = gradient.direction;
+                            var gradient_colors = Vapor.arena(.frame).alloc(types.PackedColor, gradient.colors.len) catch unreachable;
+                            for (gradient.colors, 0..) |color, j| {
+                                packColor(color, &gradient_colors[j]);
+                            }
+                            packed_layer.Gradient.colors_ptr = gradient_colors.ptr;
+                            packed_layer.Gradient.colors_len = gradient_colors.len;
+                            packed_layers[0] = packed_layer;
+                            hash_v +%= std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_layer));
+                        },
+                        else => {
+                            Vapor.printlnSrcErr("Not implemented yet {any}", .{layer}, @src());
+                            // @compileError("Not implemented yet");
+                        },
+                    }
+                    packed_visual.packed_layers.items_ptr = packed_layers.ptr;
+                    packed_visual.packed_layers.len = packed_layers.len;
+                    //
+                    // if (element_type == .Text) {
+                    //     packet_visual.is_text_gradient = true;
+                    // }
+                } else if (visual.layers) |layers| {
+                    var packed_layers = Vapor.arena(.frame).alloc(types.PackedLayer, layers.len) catch unreachable;
+                    for (layers, 0..) |layer, i| {
+                        switch (layer) {
+                            .Grid => |grid| {
+                                packed_layer = .{ .Grid = .{} };
+                                packed_layer.Grid.size = grid.size;
+                                packed_layer.Grid.thickness = grid.thickness;
+                                var grid_color = packed_layer.Grid.packed_color;
+                                packColor(grid.color, &grid_color);
+                                packed_layer.Grid.packed_color = grid_color;
+                                packed_layers[i] = packed_layer;
+                                hash_v +%= std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_layer));
+                            },
+                            .Lines => |lines| {
+                                packed_layer = .{ .Lines = .{} };
+                                packed_layer.Lines.spacing = lines.spacing;
+                                packed_layer.Lines.thickness = lines.thickness;
+                                packed_layer.Lines.direction = lines.direction;
+                                var lines_color = packed_layer.Lines.color;
+                                packColor(lines.color, &lines_color);
+                                packed_layer.Lines.color = lines_color;
+                                packed_layers[i] = packed_layer;
+                                hash_v +%= std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_layer));
+                            },
+                            // .Image => {},
+                            .Dot => |dots| {
+                                packed_layer = .{ .Dot = .{} };
+                                packed_layer.Dot.spacing = dots.spacing;
+                                packed_layer.Dot.radius = dots.radius;
+                                var dots_color = packed_layer.Dot.packed_color;
+                                packColor(dots.color, &dots_color);
+                                packed_layer.Dot.packed_color = dots_color;
+                                packed_layers[i] = packed_layer;
+                                hash_v +%= std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_layer));
+                            },
+                            .Gradient => |gradient| {
+                                packed_layer = .{ .Gradient = .{} };
+                                packed_layer.Gradient.type = gradient.type;
+                                packed_layer.Gradient.direction = gradient.direction;
+                                var gradient_colors = Vapor.arena(.frame).alloc(types.PackedColor, gradient.colors.len) catch unreachable;
+                                for (gradient.colors, 0..) |color, j| {
+                                    packColor(color, &gradient_colors[j]);
+                                }
+                                packed_layer.Gradient.colors_ptr = gradient_colors.ptr;
+                                packed_layer.Gradient.colors_len = gradient_colors.len;
+                                packed_layers[i] = packed_layer;
+                                hash_v +%= std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_layer));
+                            },
+                            else => {
+                                Vapor.printlnSrcErr("Not implemented yet {any}", .{layer}, @src());
+                                // @compileError("Not implemented yet");
+                            },
+                        }
+                    }
+                    packed_visual.packed_layers.items_ptr = packed_layers.ptr;
+                    packed_visual.packed_layers.len = packed_layers.len;
+                }
             }
 
             if (s.transition) |transition| {
@@ -708,16 +964,18 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
             }
 
             if (s.font_family) |font_family| {
-                const ff_slice = Vapor.frame_arena.getFrameAllocator().dupe(u8, font_family) catch |err| {
-                    Vapor.printlnErr("Could not allocate font family {any}\n", .{err});
-                    unreachable;
-                };
-                packed_visual.font_family_ptr = ff_slice.ptr;
-                packed_visual.font_family_len = ff_slice.len;
+                if (font_family.len > 0) {
+                    const ff_slice = Vapor.arena(.frame).dupe(u8, font_family) catch |err| {
+                        Vapor.printlnErr("Could not allocate font family {any}\n", .{err});
+                        unreachable;
+                    };
+                    packed_visual.font_family_ptr = ff_slice.ptr;
+                    packed_visual.font_family_len = ff_slice.len;
+                }
             }
 
             if (!hash_id) {
-                if (Vapor.packed_visuals.get(hash_v) == null) {
+                if (Packer.visuals.get(hash_v) == null) {
                     // We only create the transition if there is no previous version
                     if (s.transition) |transition| {
                         // set is persitnant
@@ -728,11 +986,11 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                 current_open.packed_field_ptrs.?.visual_ptr = getOrPutAndUpdateHash(
                     hash_v,
                     packed_visual,
-                    &Vapor.packed_visuals,
-                    &Vapor.packed_visuals_pool,
+                    &Packer.visuals,
+                    &Packer.visuals_pool,
                 ) catch unreachable;
             } else {
-                const packed_visual_ptr = Vapor.packed_visuals_pool.create() catch unreachable;
+                const packed_visual_ptr = Packer.visuals_pool.create() catch unreachable;
 
                 packed_visual_ptr.* = packed_visual;
                 current_open.packed_field_ptrs.?.visual_ptr = packed_visual_ptr;
@@ -767,7 +1025,7 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                         }
                     }
                     var packed_hover: types.PackedVisual = .{};
-                    checkVisual(&hover, &packed_hover);
+                    checkVisual(&hover, &packed_hover, current_open.type);
                     packed_interactive.has_hover = true;
                     packed_interactive.hover = packed_hover;
                 }
@@ -785,7 +1043,7 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
 
                 if (interactive.focus) |focus| {
                     var packed_focus: types.PackedVisual = .{};
-                    checkVisual(&focus, &packed_focus);
+                    checkVisual(&focus, &packed_focus, current_open.type);
                     packed_interactive.has_focus = true;
                     packed_interactive.focus = packed_focus;
                 }
@@ -796,15 +1054,15 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                     current_open.packed_field_ptrs.?.interactive_ptr = getOrPutAndUpdateHash(
                         hash_i,
                         packed_interactive,
-                        &Vapor.packed_interactives,
-                        &Vapor.packed_interactives_pool,
+                        &Packer.interactives,
+                        &Packer.interactives_pool,
                     ) catch unreachable;
                 }
 
                 hash_a = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_animations));
 
                 if (!hash_id) {
-                    if (Vapor.packed_animations.get(hash_a) == null) {
+                    if (Packer.animations.get(hash_a) == null) {
                         // We only create the transform if there is no previous version
                         if (interactive.hover) |hover| {
                             if (hover.transform) |transform| {
@@ -818,8 +1076,8 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                         current_open.packed_field_ptrs.?.animations_ptr = getOrPutAndUpdateHash(
                             hash_a,
                             packed_animations,
-                            &Vapor.packed_animations,
-                            &Vapor.packed_animations_pool,
+                            &Packer.animations,
+                            &Packer.animations_pool,
                         ) catch unreachable;
                     }
                 }
@@ -832,6 +1090,14 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
         current_open.finger_print +%= hash_v;
         current_open.finger_print +%= hash_a;
         current_open.finger_print +%= hash_i;
+
+        current_open.style_hash +%= hash_l;
+        current_open.style_hash +%= hash_p;
+        current_open.style_hash +%= hash_mp;
+        current_open.style_hash +%= hash_v;
+        current_open.style_hash +%= hash_a;
+        current_open.style_hash +%= hash_i;
+
         if (s.style_id != null) {
             Vapor.generator.writeNodeStyle(current_open);
         } else {
@@ -867,6 +1133,7 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
 
     current_open.state_type = elem_decl.state_type;
     current_open.aria_label = elem_decl.aria_label;
+    current_open.alt = elem_decl.alt;
 
     return current_open;
 }
@@ -880,7 +1147,6 @@ pub fn close(ui_ctx: *UIContext) void {
         Vapor.printlnSrcErr("Depth is negative {}", .{uuid_depth}, @src());
     }
     ui_ctx.stackPop();
-    // Vapor.println("Close time {any}", .{Vapor.nowMs() - time});
 }
 
 pub fn endContext(ui_ctx: *UIContext) void {
@@ -902,7 +1168,7 @@ pub fn endContext(ui_ctx: *UIContext) void {
     const tree: *CommandsTree = ui_ctx.tree_memory_pool.create() catch unreachable;
     tree.* = .{
         .node = render_cmd,
-        .children = std.ArrayListUnmanaged(*CommandsTree).initCapacity(Vapor.frame_arena.getFrameAllocator(), 4) catch |err| {
+        .children = std.ArrayListUnmanaged(*CommandsTree).initCapacity(Vapor.arena(.frame), 4) catch |err| {
             Vapor.printlnSrcErr("Could not ensure capacity {any}\n", .{err}, @src());
             unreachable;
         },
@@ -939,7 +1205,7 @@ pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent:
     if (parent_op) |parent| {
         const parent_children = parent.children orelse return;
         if (parent_children.items.len > 0) {
-            ui_tree_parent.children = std.ArrayListUnmanaged(*CommandsTree).initCapacity(Vapor.frame_arena.getFrameAllocator(), 4) catch |err| {
+            ui_tree_parent.children = std.ArrayListUnmanaged(*CommandsTree).initCapacity(Vapor.arena(.frame), 4) catch |err| {
                 Vapor.printlnSrcErr("Could not ensure capacity {any}\n", .{err}, @src());
                 unreachable;
             };
@@ -958,6 +1224,7 @@ pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent:
                     .render_type = child.state_type,
                     .has_children = child.children != null,
                     .hash = child.hash,
+                    .style_changed = child.style_changed,
                     // .tooltip = child.tooltip,
                 };
 
@@ -988,12 +1255,12 @@ pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent:
                 const tree: *CommandsTree = Vapor.frame_arena.treeNodeAlloc() orelse return error.TreeNodeAllocFailed;
                 tree.* = .{
                     .node = render_cmd,
-                    .children = std.ArrayListUnmanaged(*CommandsTree).initCapacity(Vapor.frame_arena.getFrameAllocator(), 4) catch |err| {
+                    .children = std.ArrayListUnmanaged(*CommandsTree).initCapacity(Vapor.arena(.frame), 4) catch |err| {
                         Vapor.printlnSrcErr("Could not ensure capacity {any}\n", .{err}, @src());
                         unreachable;
                     },
                 };
-                ui_tree_parent.children.ensureUnusedCapacity(Vapor.frame_arena.getFrameAllocator(), 4) catch |err| {
+                ui_tree_parent.children.ensureUnusedCapacity(Vapor.arena(.frame), 4) catch |err| {
                     Vapor.printlnSrcErr("Could not ensure capacity {any}\n", .{err}, @src());
                     unreachable;
                 };

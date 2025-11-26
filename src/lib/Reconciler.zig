@@ -51,7 +51,7 @@ fn reconcileSameLength(old_items: []*UINode, new_items: []*UINode) void {
 
 /// Case: Keyed-diffing when old_items.len > new_items.len (Deletions)
 fn reconcileDeletions(old_items: []*UINode, new_items: []*UINode, _: *UINode) void {
-    var node_map = std.StringHashMap(usize).init(Vapor.frame_arena.getFrameAllocator());
+    var node_map = std.StringHashMap(usize).init(Vapor.arena(.frame));
     defer node_map.deinit();
 
     const len_old = old_items.len;
@@ -126,7 +126,7 @@ fn reconcileSame(old_items: []*UINode, new_items: []*UINode) void {
     // FIX: Create a local map.
     // NOTE: You MUST replace 'Vapor.allocator' with your actual allocator!
     // ---
-    var node_map = std.StringHashMap(usize).init(Vapor.frame_arena.getFrameAllocator());
+    var node_map = std.StringHashMap(usize).init(Vapor.arena(.frame));
     defer node_map.deinit();
 
     const len = old_items.len;
@@ -197,7 +197,7 @@ fn reconcileAdditions(old_items: []*UINode, new_items: []*UINode) void {
     // FIX: Create a local map.
     // NOTE: You MUST replace 'Vapor.allocator' with your actual allocator!
     // ---
-    var node_map = std.StringHashMap(usize).init(Vapor.frame_arena.getFrameAllocator());
+    var node_map = std.StringHashMap(usize).init(Vapor.arena(.frame));
     defer node_map.deinit();
 
     const len_old = old_items.len;
@@ -272,6 +272,7 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
     // --- 1. Reconcile current node properties ---
     // This logic is much flatter and easier to read.
     const changed = (new_node.finger_print != old_node.finger_print);
+    new_node.style_changed = (new_node.style_hash != old_node.style_hash);
 
     var is_dirty = changed or
         Vapor.rerender_everything or

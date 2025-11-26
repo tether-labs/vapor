@@ -56,6 +56,7 @@ const PropValue = struct {
         flex_wrap,
         alignment,
         layer,
+        dots,
         color,
         list_style,
         outline,
@@ -69,6 +70,9 @@ const PropValue = struct {
         opacity,
         font_style,
         aspect_ratio,
+        gradient,
+        layers,
+        caret,
     };
 
     // Union to hold the actual data
@@ -88,6 +92,7 @@ const PropValue = struct {
         flex_wrap: Types.FlexWrap,
         alignment: Types.Alignment,
         layer: Types.PackedGrid,
+        dots: Types.PackedDots,
         color: Types.PackedColor,
         list_style: Types.ListStyle,
         outline: Types.Outline,
@@ -101,6 +106,9 @@ const PropValue = struct {
         opacity: f32,
         font_style: Types.FontStyle,
         aspect_ratio: Types.AspectRatio,
+        gradient: Types.PackedGradient,
+        layers: Types.PackedLayers,
+        caret: Types.PackedCaret,
     };
 };
 
@@ -214,6 +222,9 @@ fn writePropValue(prop: []const u8, value: PropValue, writer: writer_t) void {
         .flex_wrap => flexWrapToCSS(value.data.flex_wrap, writer) catch {},
         .alignment => alignmentToCSS(value.data.alignment, writer) catch {},
         .layer => gridToCSS(value.data.layer, writer) catch {},
+        .dots => dotsToCSS(value.data.dots, writer) catch {},
+        .gradient => gradientToCSS(value.data.gradient, writer) catch {},
+        .layers => layersToCSS(value.data.layers, writer) catch {},
         .color => colorToCSS(value.data.color, writer) catch {},
         .list_style => listStyleToCSS(value.data.list_style, writer) catch {},
         .outline => outlineStyleToCSS(value.data.outline, writer) catch {},
@@ -222,9 +233,9 @@ fn writePropValue(prop: []const u8, value: PropValue, writer: writer_t) void {
         .transition => transitionStyleToCSS(value.data.transition, writer),
         .shadow => {
             const shadow = value.data.shadow;
-            writer.writeU8Num(shadow.left) catch {};
+            writer.writeI16(shadow.left) catch {};
             writer.write("px ") catch {};
-            writer.writeU8Num(shadow.top) catch {};
+            writer.writeI16(shadow.top) catch {};
             writer.write("px ") catch {};
             writer.writeU8Num(shadow.blur) catch {};
             writer.write("px ") catch {};
@@ -260,6 +271,7 @@ fn writePropValue(prop: []const u8, value: PropValue, writer: writer_t) void {
             }
         },
         .flex_type => flexTypeToCSS(value.data.flex_type, writer) catch {},
+        .caret => caretToCSS(value.data.caret, writer) catch {},
 
         .aspect_ratio => aspectRatioToCSS(value.data.aspect_ratio, writer) catch {},
         // This new case handles simple string values efficiently.
@@ -287,6 +299,7 @@ const timing_function_map = [_][]const u8{ "ease", "linear", "ease-in", "ease-ou
 const animation_direction_map = [_][]const u8{ "normal ", "reverse ", "forwards ", "alternate " };
 const font_style_map = [_][]const u8{ "default", "normal", "italic" };
 const aspect_ratio_map = [_][]const u8{ "none", "1 / 1", "3 / 4", "16 / 9" };
+const caret_map = [_][]const u8{ "none", "block", "line" };
 
 /// Generic helper to write a CSS string from a pre-defined map based on an enum's value.
 /// The `string_map` must have its string literals in the same order as the enum declaration.
@@ -439,7 +452,6 @@ fn gridToCSS(grid: Types.PackedGrid, writer: anytype) !void {
     writer.write("linear-gradient(90deg, ") catch {};
     const grid_color = grid.packed_color.has_color;
     if (grid_color) {
-        Vapor.println("Grid color {any}", .{grid.packed_color.color});
         const rgba = grid.packed_color.color;
         writeRgba(writer, rgba) catch {};
     } else {
@@ -455,7 +467,6 @@ fn gridToCSS(grid: Types.PackedGrid, writer: anytype) !void {
 
     writer.write("linear-gradient(180deg, ") catch {};
     if (grid_color) {
-        Vapor.println("Grid color {any}", .{grid.packed_color.color});
         const rgba = grid.packed_color.color;
         writeRgba(writer, rgba) catch {};
     } else {
@@ -467,14 +478,160 @@ fn gridToCSS(grid: Types.PackedGrid, writer: anytype) !void {
     writeRgba(writer, .{}) catch {};
     writer.writeByte(' ') catch {};
     writer.writeU8Num(grid.thickness) catch {};
-    writer.write("px);\n") catch {};
+    writer.write("px)") catch {};
+}
+
+fn dotsToCSS(dots: Types.PackedDots, writer: anytype) !void {
+    writer.write("radial-gradient(circle, ") catch {};
+    const dots_color = dots.packed_color.has_color;
+    if (dots_color) {
+        const rgba = dots.packed_color.color;
+        writeRgba(writer, rgba) catch {};
+    } else {
+        writeThematic(writer, dots.packed_color.token) catch {};
+    }
+    writer.writeByte(' ') catch {};
+    writer.writeF16(dots.radius) catch {};
+    writer.write("px, ") catch {};
+    writer.write("transparent") catch {};
+    writer.writeByte(' ') catch {};
+    writer.writeF16(0) catch {};
+    writer.write("px)") catch {};
+}
+
+fn gradientToCSS(gradient: Types.PackedGradient, writer: writer_t) !void {
+    switch (gradient.type) {
+        .linear => {
+            writer.write("linear-gradient(") catch {};
+        },
+        .radial => {
+            writer.write("radial-gradient(") catch {};
+        },
+        else => {
+            Vapor.printlnSrcErr("Gradient is not radius or linear", .{}, @src());
+        },
+    }
+    switch (gradient.direction.type) {
+        .to_top => writer.write("to top") catch {},
+        .to_bottom => writer.write("to bottom") catch {},
+        .to_left => writer.write("to left") catch {},
+        .to_right => writer.write("to right") catch {},
+        .angle => {
+            writer.writeF32(gradient.direction.angle) catch {};
+            writer.write("deg") catch {};
+        },
+        .none => {},
+    }
+    var colors = gradient.colors_ptr orelse {
+        Vapor.printlnSrcErr("Colors ptr is null", .{}, @src());
+        return;
+    };
+    for (colors[0..gradient.colors_len]) |color| {
+        writer.write(", ") catch {};
+        colorToCSS(color, writer) catch {};
+    }
+    writer.write(")") catch {};
+}
+
+fn linesToCSS(lines: Types.PackedLines, writer: anytype) !void {
+    writer.write("repeating-linear-gradient(") catch {};
+
+    switch (lines.direction) {
+        .horizontal => writer.write("0deg") catch {},
+        .vertical => writer.write("90deg") catch {},
+        .diagonal_up => writer.write("-45deg") catch {},
+        .diagonal_down => writer.write("45deg") catch {},
+    }
+
+    writer.write(", ") catch {};
+
+    const has_color = lines.color.has_color;
+    if (has_color) {
+        writeRgba(writer, lines.color.color) catch {};
+    } else {
+        writeThematic(writer, lines.color.token) catch {};
+    }
+
+    writer.write(" 0px, ") catch {};
+
+    if (has_color) {
+        writeRgba(writer, lines.color.color) catch {};
+    } else {
+        writeThematic(writer, lines.color.token) catch {};
+    }
+
+    writer.writeByte(' ') catch {};
+    writer.writeU8Num(lines.thickness) catch {};
+    writer.write("px, transparent ") catch {};
+    writer.writeU8Num(lines.thickness) catch {};
+    writer.write("px, transparent ") catch {};
+    writer.writeU8Num(lines.spacing) catch {};
+    writer.write("px)") catch {};
+}
+
+fn layersToCSS(packed_layers: Types.PackedLayers, writer: writer_t) !void {
+    // const start = writer.pos;
+    for (packed_layers.items_ptr.?[0..packed_layers.len], 0..) |layer, i| {
+        switch (layer) {
+            .Grid => |grid| {
+                try gridToCSS(grid, writer);
+            },
+            .Dot => |dots| {
+                try dotsToCSS(dots, writer);
+            },
+            .Lines => |lines| {
+                try linesToCSS(lines, writer);
+            },
+            .Gradient => |gradient| {
+                try gradientToCSS(gradient, writer);
+            },
+        }
+        if (i < packed_layers.len - 1) {
+            writer.write(", \n") catch {};
+        } else {
+            writer.write(";\n") catch {};
+        }
+    }
 
     writer.write("background-size: ") catch {};
-    writer.writeU16(grid.size) catch {};
-    writer.write("px ") catch {};
-    writer.writeU16(grid.size) catch {};
-    writer.write("px;\n") catch {};
+    for (packed_layers.items_ptr.?[0..packed_layers.len], 0..) |layer, i| {
+        switch (layer) {
+            .Grid => |grid| {
+                writer.writeU16(grid.size) catch {};
+                writer.write("px ") catch {};
+                writer.writeU16(grid.size) catch {};
+                writer.write("px, ") catch {};
+
+                writer.writeU16(grid.size) catch {};
+                writer.write("px ") catch {};
+                writer.writeU16(grid.size) catch {};
+                writer.write("px") catch {};
+            },
+            .Lines => |lines| {
+                writer.writeU16(lines.spacing) catch {};
+                writer.write("px ") catch {};
+                writer.writeU16(lines.spacing) catch {};
+                writer.write("px") catch {};
+            },
+            .Dot => |dots| {
+                writer.writeU16(dots.spacing) catch {};
+                writer.write("px ") catch {};
+                writer.writeU16(dots.spacing) catch {};
+                writer.write("px") catch {};
+            },
+            .Gradient => {
+                writer.write("100% 100%") catch {};
+            },
+        }
+        if (i < packed_layers.len - 1) {
+            writer.write(", \n") catch {};
+        } else {
+            writer.write(";\n") catch {};
+        }
+    }
+
     writer.write("background-position: center center") catch {};
+    // Vapor.printlnSrcErr("GradientToCSS {s}", .{writer.buffer[start..writer.pos]}, @src());
 }
 
 fn appearanceToCSS(appearance: Appearance, writer: anytype) !void {
@@ -511,6 +668,12 @@ fn transitionStyleToCSS(style: PackedTransition, writer: writer_t) void {
 // Function to convert ListStyle enum to CSS string
 fn cursorToCSS(cursor_type: Cursor, writer: anytype) !void {
     try writeMappedString(Cursor, cursor_type, &cursor_map, writer);
+}
+
+fn caretToCSS(caret: Types.PackedCaret, writer: anytype) !void {
+    // try writeMappedString(Types.CaretType, caret.type, &caret_map, writer);
+    // writer.writeByte(' ') catch {};
+    colorToCSS(caret.color, writer) catch {};
 }
 
 // Function to convert ListStyle enum to CSS string
@@ -587,11 +750,23 @@ pub fn generateVisual(visual: *const Types.PackedVisual, writer: writer_t) void 
     if (visual.background.has_color or visual.background.has_token) {
         writePropValue("background-color", .{ .tag = .color, .data = .{ .color = visual.background } }, writer);
     }
-    // else if (ptr.type == .Button or ptr.type == .CtxButton) {
-    //     _ = writer.write("background-color:rgba(0,0,0,0);\n") catch {};
+    // if (visual.background_gradient.type != .none) {
+    //     writePropValue("background-image", .{ .tag = .gradient, .data = .{ .gradient = visual.background_gradient } }, writer);
     // }
-    if (visual.background_grid.packed_color.has_color or visual.background_grid.packed_color.has_token) {
-        writePropValue("background-image", .{ .tag = .layer, .data = .{ .layer = visual.background_grid } }, writer);
+    // if (visual.background_grid.packed_color.has_color or visual.background_grid.packed_color.has_token) {
+    //     writePropValue("background-image", .{ .tag = .layer, .data = .{ .layer = visual.background_grid } }, writer);
+    // } else if (visual.background_dots.packed_color.has_color or visual.background_dots.packed_color.has_token) {
+    //     writePropValue("background-image", .{ .tag = .dots, .data = .{ .dots = visual.background_dots } }, writer);
+    // }
+
+    if (visual.packed_layers.items_ptr != null) {
+        writePropValue("background-image", .{ .tag = .layers, .data = .{ .layers = visual.packed_layers } }, writer);
+
+        if (visual.is_text_gradient) {
+            writer.write("background-clip: text;\n") catch {};
+            writer.write("-webkit-background-clip: text;\n") catch {};
+            writer.write("-webkit-text-fill-color: transparent;\n") catch {};
+        }
     }
 
     if (visual.blur > 0) {
@@ -610,6 +785,23 @@ pub fn generateVisual(visual: *const Types.PackedVisual, writer: writer_t) void 
         writer.writeU8Num(visual.font_size) catch {};
         writer.write("px;\n") catch {};
     }
+
+    if (visual.ellipsis != .none) {
+        switch (visual.ellipsis) {
+            .dot => {
+                writer.write("text-overflow: ellipsis;\n") catch {};
+                writer.write("overflow: hidden;\n") catch {};
+                writer.write("white-space: nowrap;\n") catch {};
+            },
+            .dash => {
+                writer.write("text-overflow: ---;\n") catch {};
+                writer.write("overflow: hidden;\n") catch {};
+                writer.write("white-space: nowrap;\n") catch {};
+            },
+            else => {},
+        }
+    }
+
     // if (visual.letter_spacing > 0) {
     //     writer.write("letter-spacing:") catch {};
     //     writer.writeI32(visual.letter_spacing) catch {};
@@ -684,7 +876,7 @@ pub fn generateVisual(visual: *const Types.PackedVisual, writer: writer_t) void 
 
     // Shadow
     if (visual.shadow.blur > 0 or visual.shadow.spread > 0 or
-        visual.shadow.top > 0 or visual.shadow.left > 0)
+        visual.shadow.top != 0 or visual.shadow.left != 0)
     {
         writePropValue("box-shadow", .{ .tag = .shadow, .data = .{ .shadow = visual.shadow } }, writer);
     }
@@ -705,6 +897,11 @@ pub fn generateVisual(visual: *const Types.PackedVisual, writer: writer_t) void 
 
     if (visual.has_transitions and visual.transitions.properties_ptr != null) {
         writePropValue("transition", .{ .tag = .transition, .data = .{ .transition = visual.transitions } }, writer);
+    }
+
+    // There is experimental support for caret type ie block or line
+    if (visual.caret.type != .none) {
+        writePropValue("caret-color", .{ .tag = .caret, .data = .{ .caret = visual.caret } }, writer);
     }
 }
 
@@ -761,6 +958,7 @@ pub fn generateLayout(layout_ptr: *const Types.PackedLayout, writer: *Writer) vo
         }
     } else if (size.width.type == .grow) {
         writer.write("flex: 1;\n") catch {};
+        // writer.write("min-width: 0;\n") catch {};
     }
 
     if (size.height.type != .none and size.height.type != .grow) {
@@ -776,6 +974,7 @@ pub fn generateLayout(layout_ptr: *const Types.PackedLayout, writer: *Writer) vo
         }
     } else if (size.height.type == .grow) {
         writer.write("flex: 1;\n") catch {};
+        // writer.write("min-height: 0;\n") catch {};
     }
     const scroll = layout_ptr.scroll;
     switch (scroll.x) {
@@ -977,7 +1176,7 @@ pub const Catalog = struct {
     themes: []const Types.ThemeDefinition,
 };
 
-var global_style: []const u8 = "";
+pub var global_style: []const u8 = "";
 var global_buffer: [4096]u8 = undefined;
 var has_default: bool = false;
 pub fn setGlobalStyleVariables(catalog: Catalog) void {

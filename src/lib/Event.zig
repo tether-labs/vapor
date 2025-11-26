@@ -5,6 +5,7 @@ const isWasi = Vapor.isWasi;
 
 pub const Event = @This();
 id: u32,
+type: Vapor.Types.EventType,
 pub fn element_id(evt: *Event) []const u8 {
     const key_str: []const u8 = "target";
     const resp = getEventData(evt.id, key_str.ptr, key_str.len);
@@ -16,6 +17,7 @@ pub fn key(evt: *Event) []const u8 {
     const resp = getEventData(evt.id, key_str.ptr, key_str.len);
     return std.mem.span(resp);
 }
+
 pub fn metaKey(evt: *Event) bool {
     const key_str: []const u8 = "metaKey";
     const resp = getEventData(evt.id, key_str.ptr, key_str.len);
@@ -29,6 +31,42 @@ pub fn text(evt: *Event) []const u8 {
     const resp = getEventDataInput(evt.id);
     return std.mem.span(resp);
 }
+
+pub fn formData(evt: *Event, form_value: anytype) ?@typeInfo(@TypeOf(form_value)).pointer.child {
+    if (isWasi) {
+        const handle = Wasm.formDataWasm(evt.id);
+        const obj = Vapor.finalizeObject(handle);
+        var cloned_form: @typeInfo(@TypeOf(form_value)).pointer.child = form_value.*;
+        const fields = @typeInfo(@TypeOf(cloned_form)).@"struct".fields;
+        inline for (fields, 0..) |field, i| {
+            const obj_value = obj.fields.items[i].value;
+            switch (@typeInfo(field.type)) {
+                .pointer => |ptr| {
+                    if (ptr.size == .slice) {
+                        @field(cloned_form, field.name) = obj_value.string;
+                    }
+                },
+                .int => {
+                    if (obj_value == .string) {
+                        @field(cloned_form, field.name) = std.fmt.parseInt(field.type, obj_value.string, 10) catch |err| blk: {
+                            Vapor.printlnErr("Error parsing int field {s} value {s} {any}", .{ field.name, obj_value.string, err });
+                            break :blk 0;
+                        };
+                    } else {
+                        @field(cloned_form, field.name) = @intCast(obj_value.int);
+                        Vapor.printlnSrcErr("WE NEED TO CHECK THIS SO THAT THE SIGNDNESS IS OKAY", .{}, @src());
+                    }
+                },
+                else => {
+                    Vapor.printlnErr("Cannot set non string or int float types TYPE: {any}", .{@TypeOf(obj_value)});
+                },
+            }
+        }
+        return cloned_form;
+    }
+    return null;
+}
+
 pub fn preventDefault(evt: *Event) void {
     if (isWasi) {
         Wasm.eventPreventDefault(evt.id);
@@ -97,5 +135,50 @@ pub fn getEventDataNumber(id: u32, ptr: [*]const u8, len: u32) f32 {
     } else {
         // Dummy implementation - return 0.0
         return 0.0;
+    }
+}
+
+export fn eventCallback(id: u32) void {
+    const evt_node = Vapor.events_callbacks.get(id) orelse unreachable;
+    var event = Event{
+        .id = id,
+        .type = evt_node.evt_type,
+    };
+    @call(.auto, evt_node.cb, .{&event});
+    if (Vapor.mode == .atomic and evt_node.evt_type != .pointermove and evt_node.ui_node.?.type != .Form) {
+        Vapor.cycle();
+    }
+}
+
+export fn eventInstCallback(id: u32) void {
+    const evt_node = Vapor.events_inst_callbacks.get(id).?;
+    var event = Event{
+        .id = id,
+        .type = evt_node.evt_type,
+    };
+    @call(.auto, evt_node.data.evt_cb, .{ &evt_node.data, &event });
+    if (Vapor.mode == .atomic and evt_node.evt_type != .pointermove and evt_node.evt_type != .submit) {
+        Vapor.cycle();
+    }
+}
+
+export fn registerAllListenerCallbacks() void {
+    if (!isWasi) return;
+    var evt_itr = Vapor.nodes_with_events.iterator();
+    while (evt_itr.next()) |entry| {
+        const ui_node = entry.value_ptr.*;
+        if (ui_node.event_handlers) |handlers| {
+            for (handlers.handlers.items) |handler| {
+                if (handler.ctx_aware) {
+                    const ctx_node: *const Vapor.CtxAwareEventNode = @ptrCast(@alignCast(handler.cb_opaque));
+                    @call(.auto, ctx_node.data.runFn, .{&ctx_node.data});
+                    // _ = Vapor.elementInstEventListener(ui_node.uuid, handler.type, ctx_node.data.arguments, ctx_node.data.runFn);
+                    // _ = Vapor.elementInstEventListener(ui_node.uuid, handler.type, handler.cb_opaque, evt_node.cb);
+                } else {
+                    const cb: *const fn (*Vapor.Event) void = @ptrCast(@alignCast(handler.cb_opaque));
+                    _ = Vapor.elementEventListener(ui_node, handler.type, cb);
+                }
+            }
+        }
     }
 }

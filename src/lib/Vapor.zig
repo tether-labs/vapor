@@ -20,13 +20,17 @@ const TrackingAllocator = @import("TrackingAllocator.zig");
 pub const KeyStone = @import("keystone/KeyStone.zig");
 pub const Wasm = @import("wasm");
 const getVisualStyle = @import("convertStyleCustomWriter.zig").getVisualStyle;
-const Bridge = @import("Bridge.zig");
+pub const Bridge = @import("Bridge.zig");
 pub const Event = @import("Event.zig");
 const Canopy = @import("Canopy.zig");
 const CSSGenerator = @import("CSSGenerator.zig");
 const hashKey = utils.hashKey;
 const Pool = @import("Pool.zig");
 const mutateDomElementStyleString = @import("Element.zig").mutateDomElementStyleString;
+const Static = @import("Static.zig");
+const HtmlGenerator = @import("HtmlGenerator.zig");
+const mode_options = @import("build_options");
+const Packer = @import("Packer.zig");
 
 const DebugLevel = enum(u8) { all = 0, debug = 1, info = 2, warn = 3, none = 4 };
 
@@ -83,7 +87,7 @@ pub var current_ctx: *UIContext = undefined;
 pub var pure_tree: PureTree = undefined;
 pub var error_tree: PureTree = undefined;
 pub var ctx_map: std.AutoHashMap(u32, *UIContext) = undefined;
-pub var page_map: std.AutoHashMap(u32, void) = undefined;
+pub var page_map: std.StringHashMap(void) = undefined;
 const LayoutItem = struct {
     reset: bool = false,
     call_fn: *const fn (*const fn () void) void,
@@ -97,19 +101,9 @@ pub var grain_rerender: bool = false;
 pub var grain_element_uuid: []const u8 = "";
 pub var current_depth_node_id: []const u8 = "";
 pub var router: Router = undefined;
-pub var packed_visuals: std.AutoHashMap(u32, *const types.PackedVisual) = undefined;
-pub var packed_layouts: std.AutoHashMap(u32, *const types.PackedLayout) = undefined;
-pub var packed_positions: std.AutoHashMap(u32, *const types.PackedPosition) = undefined;
-pub var packed_margins_paddings: std.AutoHashMap(u32, *const types.PackedMarginsPaddings) = undefined;
-pub var packed_animations: std.AutoHashMap(u32, *const types.PackedAnimations) = undefined;
-pub var packed_interactives: std.AutoHashMap(u32, *const types.PackedInteractive) = undefined;
-pub var packed_layouts_pool: std.heap.MemoryPool(types.PackedLayout) = undefined;
-pub var packed_positions_pool: std.heap.MemoryPool(types.PackedPosition) = undefined;
-pub var packed_margins_paddings_pool: std.heap.MemoryPool(types.PackedMarginsPaddings) = undefined;
-pub var packed_visuals_pool: std.heap.MemoryPool(types.PackedVisual) = undefined;
-pub var packed_animations_pool: std.heap.MemoryPool(types.PackedAnimations) = undefined;
-pub var packed_interactives_pool: std.heap.MemoryPool(types.PackedInteractive) = undefined;
+
 pub var element_registry: std.AutoHashMap(u32, *Element) = undefined;
+pub var response_registry: std.AutoHashMap(u32, Kit.Response) = undefined;
 
 var serious_error: bool = false;
 
@@ -139,83 +133,27 @@ pub fn getWindowPath() []const u8 {
     }
 }
 
-pub fn setLocalStorageString(key: []const u8, value: []const u8) void {
-    if (isWasi) {
-        Wasm.setLocalStorageStringWasm(key.ptr, key.len, value.ptr, value.len);
-    }
-}
-
-pub fn persist(key: []const u8, value: anytype) void {
-    switch (@TypeOf(value)) {
-        i32, u32, usize, f32 => Wasm.setLocalStorageNumberWasm(key.ptr, key.len, value),
-        []const u8 => Wasm.setLocalStorageStringWasm(key.ptr, key.len, value.ptr, value.len),
+pub fn store(key: []const u8, value: anytype) void {
+    if (!isWasi) return;
+    switch (@typeInfo(@TypeOf(value))) {
+        .int, .float => Wasm.setLocalStorageNumberWasm(key.ptr, key.len, value),
+        .pointer => |ptr| {
+            switch (ptr.size) {
+                .slice => {
+                    Wasm.setLocalStorageStringWasm(key.ptr, key.len, value.ptr, value.len);
+                },
+                else => {
+                    Wasm.setLocalStorageStringWasm(key.ptr, key.len, value.ptr, value.len);
+                },
+            }
+        },
         else => {
-            Vapor.printlnErr("Cannot store non string or int float types", .{});
+            Vapor.printlnErr("Cannot store non string or int float types TYPE: {any}", .{@TypeOf(value)});
         },
     }
 }
 
-pub fn getPersistBytes(key: []const u8) ?[]const u8 {
-    return getLocalStorageString(key);
-}
-
-pub fn getPersist(comptime T: type, key: []const u8) ?T {
-    if (isWasi) {
-        switch (T) {
-            i32 => return Wasm.getLocalStorageI32Wasm(key.ptr, key.len),
-            u32 => return Wasm.getLocalStorageU32Wasm(key.ptr, key.len),
-            usize => return Wasm.getLocalStorageUIntWasm(key.ptr, key.len),
-            f32 => return Wasm.getLocalStorageF32Wasm(key.ptr, key.len),
-            []const u8 => {
-                const value = Wasm.getLocalStorageStringWasm(key.ptr, key.len);
-                const value_string = std.mem.span(value);
-                if (std.mem.eql(u8, value_string, "null")) {
-                    return null;
-                } else {
-                    return value_string;
-                }
-            },
-            else => {
-                Vapor.printlnErr("Cannot get non string or int float types", .{});
-                return null;
-            },
-        }
-    }
-    return null;
-}
-
-pub fn removePersist(key: []const u8) void {
-    if (isWasi) {
-        Wasm.removeLocalStorageWasm(key.ptr, key.len);
-    }
-}
-
-pub fn getLocalStorageString(key: []const u8) ?[]const u8 {
-    if (isWasi) {
-        const value = Wasm.getLocalStorageStringWasm(key.ptr, key.len);
-        const value_string = std.mem.span(value);
-        if (std.mem.eql(u8, value_string, "null")) {
-            return null;
-        } else {
-            return value_string;
-        }
-    }
-    return null;
-}
-
-pub fn removeLocalStorage(key: []const u8) void {
-    if (isWasi) {
-        Wasm.removeLocalStorageWasm(key.ptr, key.len);
-    }
-}
-
-pub fn setLocalStorageNumber(key: []const u8, value: u32) void {
-    if (isWasi) {
-        Wasm.setLocalStorageNumberWasm(key.ptr, key.len, value);
-    }
-}
-
-const EventHandler = struct {
+pub const EventHandler = struct {
     type: EventType,
     ctx_aware: bool = false,
     cb_opaque: *const anyopaque,
@@ -224,125 +162,26 @@ const EventHandler = struct {
 pub const EventHandlers = struct { handlers: std.ArrayListUnmanaged(EventHandler) };
 
 pub const Action = struct {
+    dynamic_object: ?*DynamicObject = null,
     runFn: ActionProto,
     deinitFn: NodeProto,
 };
 
-pub const ActionProto = *const fn (*Action) void;
-pub const NodeProto = *const fn (*Node) void;
-
 pub const Node = struct { data: Action };
 
-const UniformCallbackFn = fn (context: anyopaque) void;
+pub const ActionProto = *const fn (*Action) void;
+pub const NodeProto = *const fn (*Node) void;
 
 pub fn ArgsTuple(comptime Fn: type) type {
     const out = std.meta.ArgsTuple(Fn);
     return if (std.meta.fields(out).len == 0) @TypeOf(.{}) else out;
 }
 
-const Options = struct {
-    ArgsT: ?type = null,
-};
+pub var callback_registry: std.AutoHashMap(u32, *const fn () void) = undefined;
+pub var ctx_callback_registry: std.AutoHashMap(u32, *Node) = undefined;
 
-const UniformClosure = struct {
-    // Func: type,
-    // ArgsT: type,
-    // /// If the function this signature represents is compile-time known,
-    // /// it can be held here.
-    // func_ptr: ?type = null,
-    //
-    // Pointer to the actual function to be called.
-    func: ?*anyopaque = null,
-    // Type-erased pointer to the arguments for that function.
-    context: *anyopaque,
-    // A function pointer to correctly deallocate the context.
-    // deinit_context_fn: fn (allocator: std.mem.Allocator, context: anyopaque) void,
-
-    // This is the single, non-generic run function.
-    pub fn run(self: *const UniformClosure) void {
-        @call(.auto, self.func, .{self.context});
-    }
-
-    // // Step 4
-    // // Here we pass the func and determine the args type
-    // // here we check if the Func passed is a type or a function itself
-    // pub fn init(comptime Func: anytype, options: Options) Signature {
-    //     const FuncT = if (@TypeOf(Func) == type) Func else @TypeOf(Func);
-    //     return .{
-    //         .Func = FuncT,
-    //         .YieldT = options.YieldT,
-    //         .InjectT = options.InjectT,
-    //         // ArgsT is the options if set, in our case options is .{}
-    //         // hence we set the type of ArgsT to FuncT arguments
-    //         .ArgsT = options.ArgsT orelse ArgsTuple(FuncT),
-    //         // Here we set the val to the Func itselft so pub "fn incr() void {}" for example
-    //         .func_ptr = if (@TypeOf(Func) == type) null else struct {
-    //             const val = Func;
-    //         },
-    //     };
-    // }
-};
-
-// This is the Node that will be stored in your registry.
-const CtxNode = struct {
-    // ... other node data
-    closure: UniformClosure,
-};
-
-// A generic function to register any callback.
-pub fn registerCallback(
-    // The UI element's ID (we'll change this to u32 later).
-    id: []const u8,
-    // The actual function the user wants to call.
-    comptime func: anytype,
-    // The arguments for that function.
-    args: anytype,
-) !void {
-    // 1. Define a type for the arguments' pointer.
-    const Args = @TypeOf(args);
-    const PtrArgs = *const Args;
-
-    // 2. Allocate memory for the arguments and copy them over.
-    const args_ptr = try Vapor.allocator_global.create(Args);
-    args_ptr.* = args;
-
-    // 3. Create the wrapper function that matches our uniform signature.
-    // This wrapper casts the `anyopaque` back to the correct type.
-    const wrapperFn = struct {
-        fn run(context: anyopaque) void {
-            const typed_context: PtrArgs = @ptrCast(@alignCast(context));
-            @call(.auto, func, typed_context.*);
-        }
-    }.run;
-
-    // 5. Create the UniformClosure instance.
-    const closure = UniformClosure{
-        .func = wrapperFn,
-        .context = args_ptr,
-    };
-
-    // 6. Create the VaporNode instance.
-    const node_with_closure = try Vapor.allocator_global.create(CtxNode);
-    node_with_closure.* = CtxNode{
-        .closure = closure,
-        // ... other node data
-    };
-
-    // Now you would create your VaporNode and put it in the registry.
-    try Vapor.ctx_registry.put(id, node_with_closure);
-    // ...
-}
-
-pub var btn_registry: std.AutoHashMap(u32, *const fn () void) = undefined;
-pub var time_out_registry: std.AutoHashMap(u32, *const fn () void) = undefined;
-pub var ctx_registry: std.AutoHashMap(u32, *Node) = undefined;
-pub var time_out_ctx_registry: std.AutoHashMap(usize, *Node) = undefined;
-pub var callback_registry: std.AutoHashMap(u32, *Node) = undefined;
-
-pub const OpaqueNode = struct { data: struct { runFn: *const fn (*anyopaque) void } };
-pub var opaque_registry: std.AutoHashMap(u32, *OpaqueNode) = undefined;
 pub var fetch_registry: std.AutoHashMap(u32, *Kit.FetchNode) = undefined;
-pub const EventNode = struct { cb: *const fn (*Event) void, ui_node: ?*UINode = null };
+pub const EventNode = struct { cb: *const fn (*Event) void, ui_node: ?*UINode = null, evt_type: EventType };
 pub var events_callbacks: std.AutoHashMap(u32, EventNode) = undefined;
 pub var nodes_with_events: std.AutoHashMap(u32, *UINode) = undefined;
 pub var node_events_callbacks: std.AutoHashMap(u32, *CtxAwareEventNode) = undefined;
@@ -350,24 +189,28 @@ pub var events_inst_callbacks: std.AutoHashMap(u32, *EvtInstNode) = undefined;
 pub var hooks_inst_callbacks: std.AutoHashMap(u32, *const fn (HookContext) void) = undefined;
 pub var mounted_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var on_end_funcs: std.array_list.Managed(*const fn () void) = undefined;
+pub var on_end_ctx_funcs: std.array_list.Managed(*Node) = undefined;
 pub var on_commit_funcs: std.array_list.Managed(*const fn () void) = undefined;
-pub var mounted_ctx_funcs: std.array_list.Managed(*Node) = undefined;
+pub var mounted_ctx_funcs: std.AutoHashMap(u32, *Node) = undefined;
 pub var created_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var updated_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var destroy_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 const RemovedNode = struct { uuid: []const u8, index: usize };
+pub const ObserverNode = union(enum) {
+    type: ElementType,
+    uuid: []const u8,
+};
 pub var removed_nodes: std.array_list.Managed(RemovedNode) = undefined;
+pub var observer_nodes: std.StringHashMap(std.array_list.Managed(ObserverNode)) = undefined;
 pub var added_nodes: std.array_list.Managed(RenderCommand) = undefined;
 pub var dirty_nodes: std.array_list.Managed(RenderCommand) = undefined;
 // Potential nodes is an set to chekc if the potential nodes that are either shifted or removed on in the dom currently
 // instead of an active set, we only record the nodes that are different from the current tree
-pub var potential_nodes: std.StringHashMap(void) = undefined;
+// pub var potential_nodes: std.StringHashMap(void) = undefined;
 const Class = struct {
     element_id: []const u8,
     style_id: []const u8,
 };
-pub var classes_to_add: std.array_list.Managed(Class) = undefined;
-pub var classes_to_remove: std.array_list.Managed(Class) = undefined;
 pub var component_subscribers: std.array_list.Managed(*Rune.ComponentNode) = undefined;
 // pub var grain_subs: std.array_list.Managed(*GrainStruct.ComponentNode) = undefined;
 pub var animations: std.StringHashMap(Animation) = undefined;
@@ -376,54 +219,83 @@ var callback_count: u32 = 0;
 const ContinuationFn = *const fn () void;
 
 // Global array to store continuations
-pub var continuations: [64]?ContinuationFn = undefined;
 
 pub var allocator_global: std.mem.Allocator = undefined;
 pub var browser_width: f32 = 0;
 pub var browser_height: f32 = 0;
-pub var page_node_count: usize = 256;
+pub var page_node_count: u32 = 256;
 const FrameAllocator = @import("FrameAllocator.zig");
 pub var frame_arena: FrameAllocator = undefined;
 
 pub fn getFrameAllocator() std.mem.Allocator {
-    return frame_arena.getFrameAllocator();
+    return arena(.frame);
 }
 
-pub fn frameList(comptime T: type) std.array_list.Managed(T) {
+const ArenaType = enum {
+    frame,
+    view,
+    persist,
+    scratch,
+    request,
+};
+
+pub fn arena(arena_type: ArenaType) std.mem.Allocator {
+    return switch (arena_type) {
+        .frame => frame_arena.frameAllocator(),
+        .view => frame_arena.viewAllocator(),
+        .persist => frame_arena.persistentAllocator(),
+        .request => frame_arena.requestAllocator(),
+        .scratch => {
+            Vapor.printlnSrcErr("Scratch is yet to be implemented", .{}, @src());
+            unreachable;
+        },
+    };
+}
+
+pub fn array(comptime T: type, arena_type: ArenaType) Array(T) {
     var array_list: std.array_list.Managed(T) = undefined;
-    array_list = std.array_list.Managed(T).init(frame_arena.getFrameAllocator());
+    const allocator = arena(arena_type);
+    array_list = std.array_list.Managed(T).init(allocator);
     return array_list;
 }
 
-pub fn getPersistentAllocator() std.mem.Allocator {
-    return frame_arena.persistentAllocator();
-}
-
-pub fn getRouteAllocator() std.mem.Allocator {
-    return frame_arena.getRouteAllocator();
-}
-
-pub fn getFrameArena() *FrameAllocator {
-    return &frame_arena;
-}
+pub const Array = std.array_list.Managed;
 
 pub const VaporConfig = struct {
-    screen_width: f32,
-    screen_height: f32,
-    allocator: std.mem.Allocator,
-    page_node_count: usize = 256,
+    // screen_width: f32,
+    // screen_height: f32,
+    page_node_count: u32 = 256,
+    mode: Mode = .retained,
+};
+
+const Mode = enum {
+    immediate,
+    atomic,
+    retained,
+    static,
 };
 
 pub var pool: Pool = undefined;
+pub var mode: Mode = .static;
 pub fn init(config: VaporConfig) void {
-    browser_width = config.screen_width;
-    browser_height = config.screen_height;
+    switch (builtin.target.cpu.arch) {
+        .wasm32 => {
+            allocator_global = std.heap.wasm_allocator;
+        },
+        else => {
+            allocator_global = std.heap.c_allocator;
+        },
+    }
+    if (isWasi) {
+        browser_width = Wasm.windowWidth();
+        browser_height = Wasm.windowHeight();
+    }
     page_node_count = config.page_node_count;
-    allocator_global = config.allocator;
+    mode = config.mode;
 
     // Init the frame allocator;
     // This adds 500B
-    frame_arena = FrameAllocator.init(config.allocator, page_node_count);
+    frame_arena = FrameAllocator.init(allocator_global, page_node_count);
     // The persistent allocator is used for the Initialization of the registries as these persist over the lifetime of the program.
     var allocator = frame_arena.persistentAllocator();
 
@@ -433,8 +305,9 @@ pub fn init(config: VaporConfig) void {
     };
 
     // >1kb
-    initPackedData(allocator);
-    initPools(allocator);
+    Packer.init(allocator);
+    // initPackedData(allocator);
+    // initPools(allocator);
     // 20kb
     initRegistries(allocator);
     // >1kb
@@ -458,12 +331,11 @@ pub fn init(config: VaporConfig) void {
     animations = std.StringHashMap(Animation).init(allocator);
     component_subscribers = std.array_list.Managed(*Rune.ComponentNode).init(allocator);
     removed_nodes = std.array_list.Managed(RemovedNode).init(allocator);
+    observer_nodes = std.StringHashMap(std.array_list.Managed(ObserverNode)).init(allocator);
     added_nodes = std.array_list.Managed(RenderCommand).init(allocator);
     dirty_nodes = std.array_list.Managed(RenderCommand).init(allocator);
-    potential_nodes = std.StringHashMap(void).init(allocator);
+    // potential_nodes = std.StringHashMap(void).init(allocator);
     // grain_subs = std.array_list.Managed(*GrainStruct.ComponentNode).init(allocator);
-    classes_to_add = std.array_list.Managed(Class).init(allocator);
-    classes_to_remove = std.array_list.Managed(Class).init(allocator);
     element_registry = std.AutoHashMap(u32, *Element).init(allocator);
 
     // Init Context Data
@@ -473,40 +345,33 @@ pub fn init(config: VaporConfig) void {
     // UIContext.nodes = allocator.alloc(*UINode, config.page_node_count) catch unreachable;
 
     UIContext.indexes = std.AutoHashMap(u32, usize).init(allocator);
-    // @memset(UIContext.common_nodes, 0);
-    // for (0..continuations.len) |i| {
-    //     continuations[i] = null;
-    // }
 
     // this adds 7kb
-    _ = getStyle(null); // 16kb
-    _ = getVisualStyle(null, 0); // 20kb
-    if (isWasi) {
-        _ = Bridge.getRenderTreePtr();
-    }
+    // _ = getStyle(null); // 16kb
+    // _ = getVisualStyle(null, 0); // 20kb
+    _ = getAriaLabel(null); // < 1kb
     // _ = getFocusStyle(null); // 20kb
     // _ = getFocusWithinStyle(null); // 20kb
     // this adds 4kb
     // _ = createInput(null); // 20kb
     // _ = getInputType(null); // 5kb
     // _ = getInputSize(null); // 5kb
-    _ = getAriaLabel(null); // < 1kb
 
     if (build_options.enable_debug) {
-        // eventListener(.keydown, Debugger.onKeyPress);
         printlnColor("-----------Debug Mode----------", .{}, .hex("#F6820C"));
     }
     // printDebug() catch unreachable;
 }
 
+export fn renderUI(route: [*:0]u8) void {
+    Vapor.renderCycle(route);
+}
+
 fn initRegistries(persistent_allocator: std.mem.Allocator) void {
-    btn_registry = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
-    time_out_registry = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
-    ctx_registry = std.AutoHashMap(u32, *Node).init(persistent_allocator); // this adds like 30kb
-    time_out_ctx_registry = std.AutoHashMap(usize, *Node).init(persistent_allocator);
-    callback_registry = std.AutoHashMap(u32, *Node).init(persistent_allocator);
-    opaque_registry = std.AutoHashMap(u32, *OpaqueNode).init(persistent_allocator);
+    callback_registry = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
+    ctx_callback_registry = std.AutoHashMap(u32, *Node).init(persistent_allocator);
     fetch_registry = std.AutoHashMap(u32, *Kit.FetchNode).init(persistent_allocator);
+    // response_registry = std.AutoHashMap(u32, Kit.Response).init(persistent_allocator);
 }
 
 fn initCalls(persistent_allocator: std.mem.Allocator) void {
@@ -517,11 +382,9 @@ fn initCalls(persistent_allocator: std.mem.Allocator) void {
     hooks_inst_callbacks = std.AutoHashMap(u32, *const fn (HookContext) void).init(persistent_allocator);
     mounted_funcs = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
     on_end_funcs = std.array_list.Managed(*const fn () void).init(persistent_allocator);
+    on_end_ctx_funcs = std.array_list.Managed(*Node).init(persistent_allocator);
     on_commit_funcs = std.array_list.Managed(*const fn () void).init(persistent_allocator);
-    mounted_ctx_funcs = std.array_list.Managed(*Node).initCapacity(persistent_allocator, 32) catch |err| {
-        println("Could not init Ctx Hooks {any}\n", .{err});
-        return;
-    };
+    mounted_ctx_funcs = std.AutoHashMap(u32, *Node).init(persistent_allocator);
     destroy_funcs = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
     updated_funcs = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
     created_funcs = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
@@ -529,29 +392,10 @@ fn initCalls(persistent_allocator: std.mem.Allocator) void {
 
 fn initContextData(persistent_allocator: std.mem.Allocator) void {
     ctx_map = std.AutoHashMap(u32, *UIContext).init(persistent_allocator);
-    page_map = std.AutoHashMap(u32, void).init(persistent_allocator);
+    page_map = std.StringHashMap(void).init(persistent_allocator);
     layout_map = std.AutoHashMap(u32, LayoutItem).init(persistent_allocator);
     page_deinit_map = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
 }
-
-fn initPackedData(persistent_allocator: std.mem.Allocator) void {
-    packed_visuals = std.AutoHashMap(u32, *const types.PackedVisual).init(persistent_allocator);
-    packed_layouts = std.AutoHashMap(u32, *const types.PackedLayout).init(persistent_allocator);
-    packed_positions = std.AutoHashMap(u32, *const types.PackedPosition).init(persistent_allocator);
-    packed_margins_paddings = std.AutoHashMap(u32, *const types.PackedMarginsPaddings).init(persistent_allocator);
-    packed_animations = std.AutoHashMap(u32, *const types.PackedAnimations).init(persistent_allocator);
-    packed_interactives = std.AutoHashMap(u32, *const types.PackedInteractive).init(persistent_allocator);
-}
-
-fn initPools(persistent_allocator: std.mem.Allocator) void {
-    packed_layouts_pool = std.heap.MemoryPool(types.PackedLayout).init(persistent_allocator);
-    packed_positions_pool = std.heap.MemoryPool(types.PackedPosition).init(persistent_allocator);
-    packed_margins_paddings_pool = std.heap.MemoryPool(types.PackedMarginsPaddings).init(persistent_allocator);
-    packed_visuals_pool = std.heap.MemoryPool(types.PackedVisual).init(persistent_allocator);
-    packed_animations_pool = std.heap.MemoryPool(types.PackedAnimations).init(persistent_allocator);
-    packed_interactives_pool = std.heap.MemoryPool(types.PackedInteractive).init(persistent_allocator);
-}
-
 /// The LifeCycle struct
 /// allows control over ui node in the tree
 /// exposes open, configure, and close, must be called in this order to attach the node to the tree
@@ -590,11 +434,14 @@ pub fn cycle() void {
         // render_phase = .generating;
         Wasm.requestRerenderWasm();
     }
-    // } else if (render_phase == .committing) {
-    //     const route_ptr = frame_arena.getFrameAllocator().dupeZ(u8, current_route) catch unreachable;
-    //     defer frame_arena.getFrameAllocator().free(route_ptr);
-    //     renderCycle(route_ptr.ptr);
-    // }
+}
+
+pub fn batch() void {
+    if (isWasi) {
+        Vapor.global_rerender = true;
+        // render_phase = .generating;
+        Wasm.requestRerenderWasm();
+    }
 }
 
 // /// Force rerender forces the entire dom tree to check props of all dynamic and pure components and rerender the ui
@@ -709,49 +556,53 @@ const RenderPhase = enum {
     idle, // Done
 };
 // pub var render_phase: RenderPhase = .idle;
+var changed_route: bool = false;
 pub fn renderCycle(route_ptr: [*:0]u8) void {
     frame_arena.beginFrame(); // For double-buffered approach
     const start = nowMs();
     const route = std.mem.span(route_ptr);
 
     if (!std.mem.eql(u8, current_route, route)) {
+        changed_route = true;
         // We need to start a new route allocator
         // otherwise we are on the same route
-        frame_arena.beginRoute();
+        frame_arena.beginView();
     }
 
     current_route = route;
     removed_nodes.clearRetainingCapacity();
     added_nodes.clearRetainingCapacity();
     dirty_nodes.clearRetainingCapacity();
-    potential_nodes.clearRetainingCapacity();
+    // potential_nodes.clearRetainingCapacity();
     node_events_callbacks.clearRetainingCapacity();
     events_callbacks.clearRetainingCapacity();
     nodes_with_events.clearRetainingCapacity();
     UIContext.indexes.clearRetainingCapacity();
+    // on_end_funcs.clearRetainingCapacity();
 
-    var ctx_itr = ctx_registry.iterator();
-    while (ctx_itr.next()) |entry| {
-        _ = entry.value_ptr.*;
-    }
-    ctx_registry.clearRetainingCapacity();
+    // var ctx_itr = ctx_callback_registry.iterator();
+    // while (ctx_itr.next()) |entry| {
+    //     _ = entry.value_ptr.*;
+    // }
+    // ctx_callback_registry.clearRetainingCapacity();
 
-    for (mounted_ctx_funcs.items) |node| {
-        node.data.deinitFn(node);
-    }
+    // for (mounted_ctx_funcs.items) |node| {
+    //     node.data.deinitFn(node);
+    // }
     mounted_ctx_funcs.clearRetainingCapacity();
 
     // Get the old context for current route
-    const old_route = router.searchRoute(route) orelse {
-        printlnWithColor("No Router found {s}\n", .{route}, "#FF3029", "ERROR");
-        printlnWithColor("Loading Error Page\n", .{}, "#FF3029", "ERROR");
-        // renderErrorPage(route);
-        return;
+    const old_route = router.searchRoute(route) orelse blk: {
+        printlnSrcErr("No Route found", .{}, @src());
+        break :blk router.searchRoute("/root/error") orelse {
+            printlnSrcErr("No Error Route found", .{}, @src());
+            return;
+        };
     };
     render_page = old_route.page;
     const old_ctx = current_ctx;
     // Create new context
-    const new_ctx: *UIContext = allocator_global.create(UIContext) catch {
+    const new_ctx: *UIContext = arena(.frame).create(UIContext) catch {
         println("Failed to allocate UIContext\n", .{});
         return;
     };
@@ -808,6 +659,7 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     // Replace old context with new context in the map
     clean_up_ctx = old_ctx;
     Timer.total_time = nowMs() - start;
+    changed_route = false;
     // _ = frame_arena.queryNodes();
     if (router.updateRouteTree(old_route.path, new_ctx)) {
         return;
@@ -820,55 +672,120 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     previous_route = current_route;
 }
 
-fn renderErrorPage(route: []const u8) void {
-    const local_allocator = std.heap.page_allocator;
-    // Get the old context for current route
-    const error_specific_route = std.fmt.allocPrint(local_allocator, "{s}/error", .{route}) catch return;
-    defer local_allocator.free(error_specific_route);
-    const old_route = router.searchRoute(error_specific_route) orelse blk: {
-        printlnWithColor("No Route Error Page Found\n", .{}, "#FF3029", "ERROR");
-        const default_error = router.searchRoute("/error") orelse {
-            printlnWithColor("No Default Error Page Found\n", .{}, "#FF3029", "ERROR");
-            serious_error = true;
-            return;
-        };
-        break :blk default_error;
-    };
-    render_page = old_route.page;
-    const old_ctx = current_ctx;
+// fn renderErrorPage(_: []const u8) void {
+//     // if (mode_options.static_mode) return;
+//     frame_arena.beginFrame(); // For double-buffered approach
+//     const start = nowMs();
+//     const route = "/root/error";
+//
+//     if (!std.mem.eql(u8, current_route, route)) {
+//         changed_route = true;
+//         // We need to start a new route allocator
+//         // otherwise we are on the same route
+//         frame_arena.beginView();
+//     }
+//
+//     current_route = route;
+//     removed_nodes.clearRetainingCapacity();
+//     added_nodes.clearRetainingCapacity();
+//     dirty_nodes.clearRetainingCapacity();
+//     // potential_nodes.clearRetainingCapacity();
+//     node_events_callbacks.clearRetainingCapacity();
+//     events_callbacks.clearRetainingCapacity();
+//     nodes_with_events.clearRetainingCapacity();
+//     UIContext.indexes.clearRetainingCapacity();
+//
+//     var ctx_itr = ctx_callback_registry.iterator();
+//     while (ctx_itr.next()) |entry| {
+//         _ = entry.value_ptr.*;
+//     }
+//     ctx_callback_registry.clearRetainingCapacity();
+//
+//     // for (mounted_ctx_funcs.items) |node| {
+//     //     node.data.deinitFn(node);
+//     // }
+//     mounted_ctx_funcs.clearRetainingCapacity();
+//
+//     // Get the old context for current route
+//     const old_route = router.searchRoute(route) orelse {
+//         printlnSrcErr("No Route found", .{}, @src());
+//         return;
+//     };
+//     render_page = old_route.page;
+//     const old_ctx = current_ctx;
+//     // Create new context
+//     const new_ctx: *UIContext = arena(.frame).create(UIContext) catch {
+//         println("Failed to allocate UIContext\n", .{});
+//         return;
+//     };
+//
+//     UIContext.initContext(new_ctx) catch |err| {
+//         println("Allocator ran out of space {any}\n", .{err});
+//         new_ctx.deinit();
+//         allocator_global.destroy(new_ctx);
+//         return;
+//     };
+//
+//     const old_root = old_ctx.root orelse return;
+//     const new_root = new_ctx.root orelse return;
+//     new_ctx.root.?.uuid = old_root.uuid;
+//
+//     current_ctx = new_ctx;
+//     var route_itr = std.mem.tokenizeScalar(u8, route, '/');
+//     var count: usize = 0;
+//     while (route_itr.next()) |_| {
+//         count += 1;
+//     }
+//     route_segments = allocator_global.alloc([]const u8, count) catch return;
+//     count = 0;
+//     route_itr.reset();
+//     while (route_itr.next()) |route_token| {
+//         route_segments[count] = route_token;
+//         count += 1;
+//     }
+//
+//     // Init the generator
+//     generator.init();
+//     next_layout_path_to_check = "";
+//
+//     const generation_start = nowMs();
+//     findResetLayout();
+//     // This calls the render tree, with render_page as the root function call
+//     // First it traverses the layouts calling them in order, and then it calls the render_page
+//     callNestedLayouts(); // 4.5ms
+//     Timer.generation_time = nowMs() - generation_start;
+//     // Debugger.render();
+//
+//     on_commit_funcs.clearRetainingCapacity();
+//
+//     const reconcile_start = nowMs();
+//     Reconciler.reconcile(old_ctx, new_ctx); // 3kb
+//     Timer.reconcile_time = nowMs() - reconcile_start;
+//     // We generate the render commands tree
+//     const commit_start = nowMs();
+//     endPage(new_ctx);
+//     Timer.commit_time = nowMs() - commit_start;
+//     // Vapor.println("Total {d}", .{frame_arena.queryBytesUsed()});
+//     if (!std.mem.eql(u8, previous_route, current_route)) {
+//         Vapor.has_dirty = true;
+//     }
+//
+//     // Replace old context with new context in the map
+//     clean_up_ctx = old_ctx;
+//     Timer.total_time = nowMs() - start;
+//     changed_route = false;
+//     // _ = frame_arena.queryNodes();
+//     if (router.updateRouteTree(old_route.path, new_ctx)) {
+//         return;
+//     }
+//
+//     allocator_global.free(route); // return host‑allocated buffer
+//     if (build_options.enable_debug and build_options.debug_level == .all) {
+//         frame_arena.printStats();
+//     }
+//     previous_route = current_route;
+// }
 
-    // Create new context
-    const new_ctx: *UIContext = allocator_global.create(UIContext) catch {
-        println("Failed to allocate UIContext\n", .{});
-        return;
-    };
-
-    UIContext.initContext(new_ctx) catch |err| {
-        println("Allocator ran out of space {any}\n", .{err});
-        new_ctx.deinit();
-        allocator_global.destroy(new_ctx);
-        return;
-    };
-    // Render the page with the new context
-    current_ctx = new_ctx;
-    @call(.auto, render_page, .{});
-    endPage(new_ctx);
-
-    // Reconcile between old and new
-    // Reconciler.reconcile(old_ctx, new_ctx);
-
-    // Replace old context with new context in the map
-    clean_up_ctx = old_ctx;
-
-    _ = router.addRoute(route, new_ctx, render_page) catch {
-        printlnSrcErr("Failed to update context map\n", .{}, @src());
-        new_ctx.deinit();
-        allocator_global.destroy(new_ctx);
-        return;
-    };
-
-    allocator_global.free(route); // return host‑allocated buffer
-}
 pub fn createPage(path: []const u8, page: fn () void, page_deinit: ?fn () void) !void {
     if (isWasi) {
         has_context = true;
@@ -880,22 +797,15 @@ pub fn createPage(path: []const u8, page: fn () void, page_deinit: ?fn () void) 
         return;
     };
 
-    // if (style) |s| {
-    //     // path_ctx.stack.?.ptr.?.style = s.*;
-    //     // path_ctx.root.?.style = s.*;
-    //     path_ctx.root.?.uuid = s.id orelse path_ctx.root.?.uuid;
-    // }
-
     current_ctx = path_ctx;
-    // try pure_tree.init(path_ctx.root.?, &allocator_global);
-    // try error_tree.init(path_ctx.root.?, &allocator_global);
 
     router.addRoute(path, path_ctx, page) catch |err| {
         println("Could not put route {any}\n", .{err});
     };
-    page_map.put(hashKey(path), {}) catch |err| {
+    page_map.put(path, {}) catch |err| {
         println("Could not put route {any}\n", .{err});
     };
+
     if (page_deinit) |de| {
         page_deinit_map.put(path, de) catch |err| {
             println("Could not put route {any}\n", .{err});
@@ -920,7 +830,9 @@ pub fn endPage(path_ctx: *UIContext) void {
 
     // This adds 2kb
     // UIContext.reconcileStyles();
-    generator.writeAllStyles();
+    if (changed_route) {
+        generator.writeAllStyles();
+    }
     // @memset(UIContext.seen_nodes, false);
     // UIContext.target_node_index = 0;
     // UIContext.reconcileSizes(path_ctx.root.?);
@@ -1103,6 +1015,7 @@ pub inline fn focused(element_uuid: []const u8) bool {
 }
 
 pub fn attachEventCtxCallback(ui_node: *UINode, event_type: EventType, cb: anytype, args: anytype) !void {
+    if (!isWasi) return;
     const onid = hashKey(ui_node.uuid);
 
     const Args = @TypeOf(args);
@@ -1114,7 +1027,7 @@ pub fn attachEventCtxCallback(ui_node: *UINode, event_type: EventType, cb: anyty
         fn runFn(data: *const Vapor.CtxAwareEvent) void {
             const run_node: *const Vapor.CtxAwareEventNode = @fieldParentPtr("data", data);
             const closure: *const @This() = @alignCast(@fieldParentPtr("run_node", run_node));
-            _ = Vapor.elementInstEventListener(closure.ui_node.uuid, closure.event_type, closure.arguments, cb);
+            _ = Vapor.elementInstEventListener(closure.ui_node, closure.event_type, closure.arguments, cb);
         }
     };
 
@@ -1130,13 +1043,19 @@ pub fn attachEventCtxCallback(ui_node: *UINode, event_type: EventType, cb: anyty
     };
 
     if (ui_node.event_handlers) |*handlers| {
-        handlers.handlers.ensureUnusedCapacity(frame_arena.getFrameAllocator(), 1) catch |err| {
+        for (handlers.handlers.items) |handler| {
+            if (handler.type == event_type) {
+                Vapor.getFrameAllocator().destroy(closure);
+                return error.EventCtxCallbackError;
+            }
+        }
+        handlers.handlers.ensureUnusedCapacity(arena(.frame), 1) catch |err| {
             printlnSrcErr("Event Callback Error: {any}\n", .{err}, @src());
             return error.EventCallbackError;
         };
         handlers.handlers.appendAssumeCapacity(.{ .type = event_type, .cb_opaque = @ptrCast(@alignCast(&closure.run_node)), .ctx_aware = true });
     } else {
-        var handlers = std.ArrayListUnmanaged(EventHandler).initCapacity(frame_arena.getFrameAllocator(), 1) catch |err| {
+        var handlers = std.ArrayListUnmanaged(EventHandler).initCapacity(arena(.frame), 1) catch |err| {
             printlnSrcErr("Event Callback Error: {any}\n", .{err}, @src());
             return error.EventCallbackError;
         };
@@ -1157,13 +1076,18 @@ pub fn attachEventCallback(ui_node: *UINode, event_type: EventType, cb: *const f
     const onid = hashKey(ui_node.uuid);
 
     if (ui_node.event_handlers) |*handlers| {
-        handlers.handlers.ensureUnusedCapacity(frame_arena.getFrameAllocator(), 1) catch |err| {
+        for (handlers.handlers.items) |handler| {
+            if (handler.type == event_type) {
+                return error.EventCallbackError;
+            }
+        }
+        handlers.handlers.ensureUnusedCapacity(arena(.frame), 1) catch |err| {
             printlnSrcErr("Event Callback Error: {any}\n", .{err}, @src());
             return error.EventCallbackError;
         };
         handlers.handlers.appendAssumeCapacity(.{ .type = event_type, .cb_opaque = @ptrCast(@alignCast(cb)) });
     } else {
-        var handlers = std.ArrayListUnmanaged(EventHandler).initCapacity(frame_arena.getFrameAllocator(), 1) catch |err| {
+        var handlers = std.ArrayListUnmanaged(EventHandler).initCapacity(arena(.frame), 1) catch |err| {
             printlnSrcErr("Event Callback Error: {any}\n", .{err}, @src());
             return error.EventCallbackError;
         };
@@ -1196,13 +1120,77 @@ pub inline fn elementEventListener(
 ) ?usize {
     var onid = hashKey(ui_node.uuid);
     onid +%= @intFromEnum(event_type);
-    events_callbacks.put(onid, .{ .cb = cb, .ui_node = ui_node }) catch |err| {
+    events_callbacks.put(onid, .{ .cb = cb, .ui_node = ui_node, .evt_type = event_type }) catch |err| {
         println("Event Callback Error: {any}\n", .{err});
     };
 
     const event_type_str = std.enums.tagName(types.EventType, event_type) orelse return null;
     Wasm.createElementEventListener(ui_node.uuid.ptr, ui_node.uuid.len, event_type_str.ptr, event_type_str.len, onid);
     return onid;
+}
+
+pub fn addGlobalListener(event_type: EventType, cb: EvtInstProto) ?usize {
+    const id = events_callbacks.count() + 1;
+    events_callbacks.put(id, .{ .cb = cb, .ui_node = null, .evt_type = event_type }) catch |err| {
+        println("Event Callback Error: {any}\n", .{err});
+        unreachable;
+    };
+
+    const event_type_str: []const u8 = std.enums.tagName(types.EventType, event_type) orelse return;
+    if (isWasi) {
+        Wasm.createEventListener(event_type_str.ptr, event_type_str.len, id);
+    }
+    return id;
+}
+
+pub fn removeGlobalListener(event_type: EventType, cb_idx: usize) ?bool {
+    const event_type_str = std.enums.tagName(types.EventType, event_type) orelse return null;
+    Wasm.removeEventListener(event_type_str.ptr, event_type_str.len, cb_idx);
+    if (events_inst_callbacks.remove(cb_idx)) {
+        return true;
+    }
+    return true;
+}
+
+pub fn addGlobalListenerCtx(event_type: EventType, cb: anytype, args: anytype) ?usize {
+    const Args = @TypeOf(args);
+    const Closure = struct {
+        arguments: Args,
+        evt_node: EvtInstNode = .{ .data = .{ .evt_cb = runFn, .deinit = deinitFn } },
+        //
+        fn runFn(evt_inst: *EvtInst, evt: *Event) void {
+            const evt_node: *EvtInstNode = @fieldParentPtr("data", evt_inst);
+            const closure: *@This() = @alignCast(@fieldParentPtr("evt_node", evt_node));
+            @call(.auto, cb, .{ closure.arguments, evt });
+        }
+        //
+        fn deinitFn(node: *EvtInstNode) void {
+            const closure: *@This() = @alignCast(@fieldParentPtr("evt_node", node));
+            Vapor.allocator_global.destroy(closure);
+        }
+    };
+
+    const closure = Vapor.allocator_global.create(Closure) catch |err| {
+        println("Error could not create closure {any}\n ", .{err});
+        unreachable;
+    };
+    closure.* = .{
+        .arguments = args,
+    };
+
+    closure.evt_node.evt_type = event_type;
+
+    const id = events_inst_callbacks.count() + 1;
+    events_inst_callbacks.put(id, &closure.evt_node) catch |err| {
+        println("Button Function Registry {any}\n", .{err});
+        unreachable;
+    };
+
+    const event_type_str: []const u8 = std.enums.tagName(types.EventType, event_type) orelse unreachable;
+    if (isWasi) {
+        Wasm.createEventListenerCtx(event_type_str.ptr, event_type_str.len, id);
+    }
+    return id;
 }
 
 pub const EvtInst = struct {
@@ -1213,7 +1201,7 @@ pub const EvtInst = struct {
 pub const EvtInstProto = *const fn (*EvtInst, *Event) void;
 pub const EvtInstNodeProto = *const fn (*EvtInstNode) void;
 
-pub const EvtInstNode = struct { data: EvtInst };
+pub const EvtInstNode = struct { data: EvtInst, evt_type: EventType = .none };
 
 pub const CtxAwareEventNode = struct { data: CtxAwareEvent };
 
@@ -1224,7 +1212,7 @@ pub const CtxAwareEvent = struct {
 pub const CtxAwareEventNodeProto = *const fn (*const CtxAwareEvent) void;
 
 pub inline fn elementInstEventListener(
-    element_uuid: []const u8,
+    ui_node: *UINode,
     event_type: types.EventType,
     arguments: anytype,
     cb: anytype,
@@ -1237,7 +1225,7 @@ pub inline fn elementInstEventListener(
         fn runFn(evt_inst: *EvtInst, evt: *Event) void {
             const evt_node: *EvtInstNode = @fieldParentPtr("data", evt_inst);
             const closure: *@This() = @alignCast(@fieldParentPtr("evt_node", evt_node));
-            @call(.auto, cb, .{ evt, closure.arguments });
+            @call(.auto, cb, .{ closure.arguments, evt });
         }
         fn deinitFn(_: *EvtInstNode) void {
             // const closure: *@This() = @alignCast(@fieldParentPtr("evt_node", evt_node));
@@ -1245,22 +1233,23 @@ pub inline fn elementInstEventListener(
         }
     };
 
-    const evt_closure = Vapor.frame_arena.getFrameAllocator().create(EvtClosure) catch |err| {
+    const evt_closure = Vapor.arena(.frame).create(EvtClosure) catch |err| {
         println("Error could not create closure {any}\n ", .{err});
         unreachable;
     };
     evt_closure.* = .{
         .arguments = arguments,
     };
+    evt_closure.evt_node.evt_type = event_type;
 
-    var onid = hashKey(element_uuid);
+    var onid = hashKey(ui_node.uuid);
     onid +%= @intFromEnum(event_type);
     events_inst_callbacks.put(onid, &evt_closure.evt_node) catch |err| {
         println("Event Callback Error: {any}\n", .{err});
     };
 
     const event_type_str = std.enums.tagName(types.EventType, event_type) orelse return null;
-    Wasm.createElementEventInstListener(element_uuid.ptr, element_uuid.len, event_type_str.ptr, event_type_str.len, onid);
+    Wasm.createElementEventInstListener(ui_node.uuid.ptr, ui_node.uuid.len, event_type_str.ptr, event_type_str.len, onid);
     return onid;
 }
 
@@ -1313,7 +1302,7 @@ pub inline fn eventListener(
     cb: *const fn (event: *Event) void,
 ) void {
     const id = events_callbacks.count() + 1;
-    events_callbacks.put(id, .{ .cb = cb, .ui_node = null }) catch |err| {
+    events_callbacks.put(id, .{ .cb = cb, .ui_node = null, .evt_type = event_type }) catch |err| {
         println("Event Callback Error: {any}\n", .{err});
     };
 
@@ -1350,34 +1339,165 @@ pub fn markChildrenNotDirty(node: *UINode) void {
 var buffer: [5_000_000]u8 = undefined;
 var writer: std.Io.Writer = undefined;
 var generated_file: std.fs.File = undefined;
-pub fn generateTextData() void {
-    generated_file = std.fs.cwd().createFile("dist/text_data.json", .{}) catch unreachable;
-    defer generated_file.close();
+pub fn generate() void {
+    std.fs.cwd().makeDir("static") catch |err| {
+        switch (err) {
+            error.PathAlreadyExists => {},
+            else => unreachable,
+        }
+    };
+
+    var css_variables = std.fs.cwd().createFile("static/style_variables.css", .{}) catch unreachable;
+    css_variables.writeAll(StyleCompiler.global_style) catch unreachable;
+    // // _ = frame_arena.queryNodes();
     var page_itr = page_map.iterator();
-    _ = generated_file.write("{\n") catch unreachable;
     while (page_itr.next()) |entry| {
         writer = std.io.Writer.fixed(&buffer);
         const route = entry.key_ptr.*;
-        const size = generated_file.getPos() catch unreachable;
-        if (size > 10) {
-            _ = writer.write(",\n") catch unreachable;
+        // Create the directory
+        const dir = std.fmt.allocPrint(allocator_global, "static{s}", .{route[5..]}) catch unreachable;
+        defer allocator_global.free(dir);
+
+        // Create directories
+        var sub_dirs = std.mem.tokenizeAny(u8, route[5..], "/");
+        var current_dir: []const u8 = "";
+        while (sub_dirs.next()) |sub_dir| {
+            current_dir = std.fmt.allocPrint(allocator_global, "{s}/{s}", .{ current_dir, sub_dir }) catch |err| {
+                std.debug.print("Error: {any}\n", .{err});
+                unreachable;
+            };
+            const total_dir = std.fmt.allocPrint(allocator_global, "static{s}", .{current_dir}) catch |err| {
+                std.debug.print("Error: {any}\n", .{err});
+                unreachable;
+            };
+            // Make sure the directory exists
+            std.fs.cwd().makeDir(total_dir) catch |err| {
+                switch (err) {
+                    error.PathAlreadyExists => {},
+                    else => unreachable,
+                }
+            };
         }
-        printUIRouteTree(route);
+        // Create the path
+        const path = std.fmt.allocPrint(allocator_global, "{s}/index.html", .{dir}) catch |err| {
+            std.debug.print("Error: {any}\n", .{err});
+            unreachable;
+        };
+        defer allocator_global.free(path);
+
+        // Create the static file
+        generated_file = std.fs.cwd().createFile(path, .{}) catch |err| {
+            std.debug.print("Create Error: {any} {s}\n", .{ err, path });
+            unreachable;
+        };
+        defer generated_file.close();
+
+        // Write the HTML
+        generateHtml(route, dir);
+        // Write to the file
         _ = generated_file.write(writer.buffer[0..writer.end]) catch unreachable;
     }
-    _ = generated_file.write("}\n") catch unreachable;
     // writer.flush() catch unreachable;
     // isGenerated = true;
 }
+
+pub fn generateHtml(route: []const u8, dir: []const u8) void {
+    frame_arena.beginFrame(); // For double-buffered approach
+
+    if (!std.mem.eql(u8, current_route, route)) {
+        changed_route = true;
+        // We need to start a new route allocator
+        // otherwise we are on the same route
+        frame_arena.beginView();
+    }
+
+    current_route = route;
+    removed_nodes.clearRetainingCapacity();
+    added_nodes.clearRetainingCapacity();
+    dirty_nodes.clearRetainingCapacity();
+    // potential_nodes.clearRetainingCapacity();
+    node_events_callbacks.clearRetainingCapacity();
+    events_callbacks.clearRetainingCapacity();
+    nodes_with_events.clearRetainingCapacity();
+    UIContext.indexes.clearRetainingCapacity();
+
+    // var ctx_itr = ctx_callback_registry.iterator();
+    // while (ctx_itr.next()) |entry| {
+    //     _ = entry.value_ptr.*;
+    // }
+    // ctx_callback_registry.clearRetainingCapacity();
+    // mounted_ctx_funcs.clearRetainingCapacity();
+
+    // Get the old context for current route
+    const old_route = router.searchRoute(route) orelse {
+        printlnWithColor("No Router found {s}\n", .{route}, "#FF3029", "ERROR");
+        printlnWithColor("Loading Error Page\n", .{}, "#FF3029", "ERROR");
+        return;
+    };
+    render_page = old_route.page;
+    const old_ctx = current_ctx;
+    // Create new context
+    const new_ctx: *UIContext = arena(.frame).create(UIContext) catch {
+        println("Failed to allocate UIContext\n", .{});
+        return;
+    };
+
+    UIContext.initContext(new_ctx) catch |err| {
+        println("Allocator ran out of space {any}\n", .{err});
+        new_ctx.deinit();
+        allocator_global.destroy(new_ctx);
+        return;
+    };
+
+    new_ctx.root.?.uuid = old_ctx.root.?.uuid;
+
+    current_ctx = new_ctx;
+    var route_itr = std.mem.tokenizeScalar(u8, route, '/');
+    var count: usize = 0;
+    while (route_itr.next()) |_| {
+        count += 1;
+    }
+    route_segments = allocator_global.alloc([]const u8, count) catch return;
+    count = 0;
+    route_itr.reset();
+    while (route_itr.next()) |route_token| {
+        route_segments[count] = route_token;
+        count += 1;
+    }
+
+    // Init the generator
+    generator.init();
+    next_layout_path_to_check = "";
+
+    findResetLayout();
+    // This calls the render tree, with render_page as the root function call
+    // First it traverses the layouts calling them in order, and then it calls the render_page
+    callNestedLayouts(); // 4.5ms
+    changed_route = false;
+    generator.writeAllStyles();
+    const css = generator.getCSS();
+    const style_path = std.fmt.allocPrint(allocator_global, "{s}/style.css", .{dir}) catch |err| {
+        std.debug.print("Error: {any}\n", .{err});
+        unreachable;
+    };
+    defer allocator_global.free(style_path);
+
+    var generated_css = std.fs.cwd().createFile(style_path, .{}) catch unreachable;
+    defer generated_css.close();
+    generated_css.writeAll(css) catch unreachable;
+
+    HtmlGenerator.generate(new_ctx.root.?, &writer, style_path);
+}
+
 pub fn printUIRouteTree(route: u32) void {
     frame_arena.beginFrame(); // For double-buffered approach
     current_route = route;
     // Vapor.btn_registry.clearRetainingCapacity();
     // Vapor.mounted_funcs.clearRetainingCapacity();
 
-    ctx_registry.clearRetainingCapacity();
+    // ctx_callback_registry.clearRetainingCapacity();
 
-    mounted_ctx_funcs.clearRetainingCapacity();
+    // mounted_ctx_funcs.clearRetainingCapacity();
 
     // Get the old context for current route
     const old_route = router.searchRoute(route) orelse {
@@ -1435,16 +1555,16 @@ pub fn printUIRouteTree(route: u32) void {
     // const valid_route = replace_dash(current_route) catch unreachable;
     // defer allocator_global.free(valid_route);
 
-    writer.print("\"{s}\":", .{current_route}) catch unreachable;
-    writer.writeAll("{\n") catch unreachable;
+    // writer.print("\"{s}\":", .{current_route}) catch unreachable;
+    // writer.writeAll("{\n") catch unreachable;
     printStaticTextNode(new_ctx.root.?);
-    writer.writeAll("}\n") catch unreachable;
+    // writer.writeAll("}\n") catch unreachable;
 }
 
 pub fn printUITree(node: *UINode) void {
-    if (node.dirty) {
-        println("UI: {s}", .{node.uuid});
-    }
+    // if (node.dirty) {
+    println("UI: {s}\n", .{node.uuid});
+    // }
     if (node.children) |children| {
         for (children.items) |child| {
             printUITree(child);
@@ -1645,6 +1765,7 @@ pub var layout_info = packed struct {
     tooltip_offset: u32,
     has_children_offset: u32,
     hash_offset: u32,
+    style_changed_offset: u32,
 }{
     .render_command_size = @sizeOf(RenderCommand),
 
@@ -1675,6 +1796,7 @@ pub var layout_info = packed struct {
     .tooltip_offset = @offsetOf(RenderCommand, "tooltip"),
     .has_children_offset = @offsetOf(RenderCommand, "has_children"),
     .hash_offset = @offsetOf(RenderCommand, "hash"),
+    .style_changed_offset = @offsetOf(RenderCommand, "style_changed"),
 };
 
 // Make sure this function is not evaluated at compile time
@@ -1719,12 +1841,23 @@ pub fn fmtln(
     comptime fmt: []const u8,
     args: anytype,
 ) []const u8 {
-    const allocator = frame_arena.getFrameAllocator();
+    const allocator = arena(.frame);
     const buf = std.fmt.allocPrint(allocator, fmt, args) catch |err| {
         println("Formatting, Error Could not format argument alloc Error details: {any}\n", .{err});
         return "";
     };
     return buf;
+}
+
+pub fn cloneFrame(
+    value: anytype,
+) []const u8 {
+    const T = @TypeOf(value);
+    if (T == []const u8) return fmtln("{s}", .{value});
+    const allocator = arena(.frame);
+    const memory: *@TypeOf(value) = allocator.create(T) catch unreachable;
+    memory.* = value;
+    return memory.*;
 }
 
 pub fn printlnErr(
@@ -1742,6 +1875,36 @@ pub fn printlnErr(
     }
 }
 
+pub fn printErr(
+    comptime fmt: []const u8,
+    args: anytype,
+) void {
+    if (isWasi and build_options.enable_debug) {
+        const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
+        const buf_with_src = std.fmt.allocPrint(allocator_global, "[Vapor] [%cERROR%c] {s}", .{buf[0..]}) catch return;
+        const style_1 = "color: #FF3029;";
+        const style_2 = "";
+        _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
+        allocator_global.free(buf_with_src);
+        allocator_global.free(buf);
+    }
+}
+
+pub fn printWarn(
+    comptime fmt: []const u8,
+    args: anytype,
+) void {
+    if (isWasi and build_options.enable_debug) {
+        const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
+        const buf_with_src = std.fmt.allocPrint(allocator_global, "[Vapor] [%cWARN%c] {s}", .{buf[0..]}) catch return;
+        const style_1 = "color: #FFA629;";
+        const style_2 = "";
+        _ = Wasm.consoleLogColoredWarnWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
+        allocator_global.free(buf_with_src);
+        allocator_global.free(buf);
+    }
+}
+
 pub fn printlnSrcErr(
     comptime fmt: []const u8,
     args: anytype,
@@ -1749,7 +1912,7 @@ pub fn printlnSrcErr(
 ) void {
     if (isWasi and build_options.enable_debug) {
         const buf = std.fmt.allocPrint(allocator_global, fmt, args) catch return;
-        const buf_with_src = std.fmt.allocPrint(allocator_global, "[Vapor] [%c{s}:{d}%c]\n[Vapor] [ERROR] {s}", .{ src.file, src.line, buf[0..] }) catch return;
+        const buf_with_src = std.fmt.allocPrint(allocator_global, "[Vapor] [%cERROR:{s}:{d}%c]\n{s}", .{ src.file, src.line, buf[0..] }) catch return;
         const style_1 = "color: #FF3029;";
         const style_2 = "";
         _ = Wasm.consoleLogColoredWasm(buf_with_src.ptr, buf_with_src.len, style_1[0..].ptr, style_1.len, style_2[0..].ptr, style_2.len);
@@ -1919,22 +2082,6 @@ pub fn println(
     }
 }
 
-pub fn addToClassesList(id: []const u8, style_id: []const u8) void {
-    const clta = Class{ .element_id = id, .style_id = style_id };
-    classes_to_add.append(clta) catch |err| {
-        println("Could not add to class_list: {any}\n", .{err});
-        return;
-    };
-}
-
-pub fn addToRemoveClassesList(id: []const u8, style_id: []const u8) void {
-    const cltr = Class{ .element_id = id, .style_id = style_id };
-    classes_to_remove.append(cltr) catch |err| {
-        println("Could not add to class_list: {any}\n", .{err});
-        return;
-    };
-}
-
 /// name: name of the interval
 /// cb: callback function
 /// args: arguments to pass to the callback function
@@ -1976,7 +2123,7 @@ pub fn loopInterval(name: []const u8, cb: anytype, args: anytype, delay: u32) vo
     }
 }
 
-pub fn registerCtxTimeout(ms: u32, cb: anytype, args: anytype) void {
+pub fn registerCtxTimeout(callback_name: []const u8, ms: u32, cb: anytype, args: anytype) void {
     const Args = @TypeOf(args);
     const Closure = struct {
         arguments: Args,
@@ -2002,21 +2149,28 @@ pub fn registerCtxTimeout(ms: u32, cb: anytype, args: anytype) void {
         .arguments = args,
     };
 
-    const id = time_out_ctx_registry.count() + 1;
-    time_out_ctx_registry.put(id, &closure.run_node) catch |err| {
+    const callback_id = hashKey(callback_name);
+    ctx_callback_registry.put(callback_id, &closure.run_node) catch |err| {
         println("Button Function Registry {any}\n", .{err});
     };
 
     if (isWasi) {
-        Wasm.timeoutCtx(ms, id);
+        Wasm.timeoutCtx(ms, callback_id);
     } else {
         return;
     }
 }
 
+pub fn cancelTimeout(callback_name: []const u8) void {
+    const callback_id = hashKey(callback_name);
+    if (isWasi) {
+        Wasm.cancelTimeoutWasm(callback_id);
+    }
+}
+
 pub fn registerTimeout(ms: u32, cb: *const fn () void) void {
-    const id = time_out_registry.count() + 1;
-    time_out_registry.put(id, cb) catch |err| {
+    const id = callback_registry.count() + 1;
+    callback_registry.put(id, cb) catch |err| {
         println("Button Function Registry {any}\n", .{err});
     };
     if (isWasi) {
@@ -2040,9 +2194,6 @@ pub fn getCookie(name: []const u8) ?[]const u8 {
     if (cookie == null) return null;
     return std.mem.span(cookie);
 }
-pub fn createCallback(cb: *const fn () void) void {
-    continuations[callback_count] = cb;
-}
 
 pub const Clipboard = struct {
     pub fn copy(text: []const u8) void {
@@ -2059,6 +2210,43 @@ pub fn onEnd(callback: *const fn () void) void {
     };
 }
 
+export fn clearOnEnd() void {
+    on_end_funcs.clearRetainingCapacity();
+}
+
+pub const Binded = Element;
+
+pub fn onEndCtx(callback: anytype, args: anytype) void {
+    const Args = @TypeOf(args);
+    const Closure = struct {
+        arguments: Args,
+        run_node: Vapor.Node = .{ .data = .{ .runFn = runFn, .deinitFn = deinitFn } },
+        //
+        fn runFn(action: *Vapor.Action) void {
+            const run_node: *Vapor.Node = @fieldParentPtr("data", action);
+            const closure: *@This() = @alignCast(@fieldParentPtr("run_node", run_node));
+            @call(.auto, callback, closure.arguments);
+        }
+        //
+        fn deinitFn(node: *Vapor.Node) void {
+            const closure: *@This() = @alignCast(@fieldParentPtr("run_node", node));
+            Vapor.allocator_global.destroy(closure);
+        }
+    };
+
+    const closure = Vapor.allocator_global.create(Closure) catch |err| {
+        println("Error could not create closure {any}\n ", .{err});
+        unreachable;
+    };
+    closure.* = .{
+        .arguments = args,
+    };
+
+    Vapor.on_end_ctx_funcs.append(&closure.run_node) catch |err| {
+        println("Hooks Function Registry {any}\n", .{err});
+    };
+}
+
 /// This hook takes a function callback and calls it after the virtual dom has been created
 /// WARNING: This is a dangerous hook, and can cause infinite loops
 pub fn onCommit(callback: *const fn () void) void {
@@ -2066,3 +2254,436 @@ pub fn onCommit(callback: *const fn () void) void {
         printlnErr("Button Function Registry {any}\n", .{err});
     };
 }
+
+pub export fn getRenderTreePtr() ?*UIContext.CommandsTree {
+    const tree_op = Vapor.current_ctx.ui_tree;
+
+    if (tree_op != null) {
+        // iterateTreeChildren(Vapor.current_ctx.ui_tree.?);
+        return Vapor.current_ctx.ui_tree.?;
+    }
+    return null;
+}
+
+pub export fn allocateLayoutInfo() *u8 {
+    const info_ptr: *u8 = @ptrCast(&Vapor.layout_info);
+    return info_ptr;
+}
+
+export fn allocUint8(length: u32) [*]const u8 {
+    const slice = Vapor.allocator_global.alloc(u8, length) catch
+        @panic("failed to allocate memory");
+    return slice.ptr;
+}
+
+export fn allocUint8Frame(length: u32) [*]const u8 {
+    const slice = Vapor.getFrameAllocator().alloc(u8, length) catch
+        @panic("failed to allocate memory");
+    return slice.ptr;
+}
+
+export fn getCSS() ?[*]const u8 {
+    return Vapor.generator.buffer[0..Vapor.generator.end].ptr;
+}
+
+export fn getCSSLen() usize {
+    return Vapor.generator.end;
+}
+
+pub export fn getRenderCommandPtr(tree: *CommandsTree) [*]u8 {
+    if (std.mem.eql(u8, tree.node.id, "global-style")) {
+        Vapor.println("getRenderCommandPtr {any}\n", .{tree.node.node_ptr.dirty});
+    }
+    return @ptrCast(tree.node);
+}
+
+export fn getTreeNodeChildrenCount(tree: *CommandsTree) usize {
+    return tree.children.items.len;
+}
+
+export fn getUiNodeChildrenCount(tree: *CommandsTree) usize {
+    if (tree.node.node_ptr.children == null) return 0;
+    return tree.node.node_ptr.children.?.items.len;
+}
+
+export fn getTreeNodeChild(tree: *CommandsTree, index: usize) *CommandsTree {
+    const child = tree.children.items[index];
+    return child;
+}
+
+// The first node needs to be marked as false always
+export fn markCurrentTreeNotDirty() void {
+    if (!Vapor.has_context) return;
+    const root = Vapor.current_ctx.root orelse return;
+    Vapor.markChildrenNotDirty(root);
+}
+
+export fn getRemovedNode(index: usize) [*]const u8 {
+    const node = Vapor.removed_nodes.items[index];
+    return node.uuid.ptr;
+}
+
+export fn getRemovedNodeIndex(index: usize) usize {
+    return Vapor.removed_nodes.items[index].index;
+}
+
+export fn getRemovedNodeLength(index: usize) usize {
+    return Vapor.removed_nodes.items[index].uuid.len;
+}
+
+// Export the size of a single RenderCommand for proper memory reading
+export fn getRenderCommandSize() usize {
+    return @sizeOf(RenderCommand);
+}
+
+export fn shouldRerender() bool {
+    return Vapor.global_rerender;
+}
+
+export fn rerenderEverything() bool {
+    return Vapor.rerender_everything;
+}
+
+export fn hasDirty() bool {
+    return Vapor.has_dirty;
+}
+
+export fn resetRerender() void {
+    Vapor.global_rerender = false;
+    Vapor.rerender_everything = false;
+    Vapor.has_dirty = false;
+}
+
+/// Calling route renderCycle will mark eveything as dirty
+export fn callRouteRenderCycle(ptr: [*:0]u8) void {
+    Packer.animations.clearRetainingCapacity();
+    Packer.layouts.clearRetainingCapacity();
+    Packer.positions.clearRetainingCapacity();
+    Packer.margins_paddings.clearRetainingCapacity();
+    Packer.visuals.clearRetainingCapacity();
+    Packer.interactives.clearRetainingCapacity();
+    UIContext.class_map.clearRetainingCapacity();
+    Vapor.pool.resetFreeList();
+    Vapor.renderCycle(ptr);
+    Vapor.markChildrenDirty(Vapor.current_ctx.root.?);
+    return;
+}
+
+export fn setRouteRenderTree(ptr: [*:0]u8) void {
+    Vapor.renderCycle(ptr);
+    return;
+}
+
+export fn setRerenderTrue() void {
+    Vapor.cycle();
+}
+
+export fn getDirtyValue(node: *UINode) bool {
+    return node.dirty;
+}
+
+export fn getRemovedNodeCount() usize {
+    return Vapor.removed_nodes.items.len;
+}
+
+export fn clearRemovedNodesretainingCapacity() void {
+    Vapor.removed_nodes.clearRetainingCapacity();
+}
+
+export fn onEndCallback() void {
+    const length = Vapor.on_end_funcs.items.len;
+    if (length == 0) return;
+    Vapor.println("onEndCallback {any}", .{length});
+    var i: usize = length - 1;
+    while (i >= 0) : (i -= 1) {
+        const call = Vapor.on_end_funcs.orderedRemove(i);
+        @call(.auto, call, .{});
+        if (i == 0) return;
+    }
+}
+
+export fn allocate(size: usize) ?[*]f32 {
+    const buf = Vapor.allocator_global.alloc(f32, size) catch |err| {
+        Vapor.println("{any}\n", .{err});
+        return null;
+    };
+    return buf.ptr;
+}
+
+export fn callbackCtx(callback_ptr: u32, object_ptr: ?*DynamicObject) void {
+    const node = Vapor.ctx_callback_registry.get(callback_ptr) orelse {
+        Vapor.printlnSrcErr("Callback not found\n", .{}, @src());
+        return;
+    };
+    node.data.dynamic_object = object_ptr;
+    @call(.auto, node.data.runFn, .{&node.data});
+    if (Vapor.mode == .atomic) {
+        Vapor.cycle();
+    }
+}
+
+pub fn alert(message: []const u8) void {
+    if (isWasi) {
+        Wasm.alertWasm(message.ptr, message.len);
+    }
+}
+
+// Zig Side
+const FieldType = enum {
+    string,
+    int,
+    float,
+    bool,
+};
+
+const Field = struct {
+    name: []const u8,
+    type: FieldType,
+    value: union(enum) {
+        string: []const u8,
+        int: i32,
+        float: f64,
+        bool: bool,
+    },
+};
+
+pub const DynamicObject = struct {
+    fields: std.array_list.Managed(Field),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) DynamicObject {
+        return .{
+            .fields = std.array_list.Managed(Field).init(allocator),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *DynamicObject) void {
+        self.fields.deinit();
+    }
+};
+
+pub fn convertFromDynamicToType(comptime T: type, dyn_object: *DynamicObject) T {
+    var new_object: T = undefined;
+    const fields = @typeInfo(T).@"struct".fields;
+    inline for (fields, 0..) |field, i| {
+        const dyn_field_value = dyn_object.fields.items[i].value;
+        const dyn_field_type = dyn_object.fields.items[i].type;
+        switch (@typeInfo(field.type)) {
+            .pointer => |ptr| {
+                if (ptr.size == .slice) {
+                    @field(new_object, field.name) = dyn_field_value.string;
+                } else {
+                    Vapor.printlnErr("Not implemented yet, TYPE: {any}", .{field.type});
+                }
+            },
+            .int => {
+                if (dyn_field_type == .int) {
+                    @field(new_object, field.name) = @as(field.type, @intCast(dyn_field_value.int));
+                } else {
+                    Vapor.printlnErr("Not implemented yet, TYPE: {any}", .{field.type});
+                }
+            },
+            .float => {
+                if (dyn_field_type == .float) {
+                    @field(new_object, field.name) = @as(field.type, @intCast(dyn_field_value.float));
+                } else {
+                    Vapor.printlnErr("Not implemented yet, TYPE: {any}", .{field.type});
+                }
+            },
+            .bool => {
+                if (dyn_field_type == .bool) {
+                    @field(new_object, field.name) = dyn_field_value.bool;
+                } else {
+                    Vapor.printlnErr("Not implemented yet, TYPE: {any}", .{field.type});
+                }
+            },
+            .@"struct" => {
+                if (dyn_field_type == .object) {
+                    @field(new_object, field.name) = convertFromDynamicToType(field.type, dyn_field_value.object);
+                } else {
+                    Vapor.printlnErr("Not implemented yet, TYPE: {any}", .{field.type});
+                }
+            },
+            else => {},
+        }
+    }
+    return new_object;
+}
+
+var current_object: ?*DynamicObject = null;
+
+export fn startObject() usize {
+    current_object = allocator_global.create(DynamicObject) catch return 0;
+    current_object.?.* = DynamicObject.init(allocator_global);
+    return @intFromPtr(current_object.?);
+}
+
+export fn addStringField(handle: i32, key_ptr: [*:0]u8, value_ptr: [*:0]u8) void {
+    const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
+    const key = std.mem.span(key_ptr);
+    const value = std.mem.span(value_ptr);
+
+    obj.fields.append(.{
+        .name = key,
+        .type = .string,
+        .value = .{ .string = value },
+    }) catch return;
+}
+
+export fn addIntField(handle: i32, key_ptr: [*:0]u8, value: i32) void {
+    const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
+    const key = std.mem.span(key_ptr);
+
+    obj.fields.append(.{
+        .name = key,
+        .type = .int,
+        .value = .{ .int = value },
+    }) catch return;
+}
+
+export fn addFloatField(handle: i32, key_ptr: [*:0]u8, value: f32) void {
+    const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
+    const key = std.mem.span(key_ptr);
+
+    obj.fields.append(.{
+        .name = key,
+        .type = .float,
+        .value = .{ .float = value },
+    }) catch return;
+}
+
+export fn addBoolField(handle: i32, key_ptr: [*:0]u8, value: bool) void {
+    const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
+    const key = std.mem.span(key_ptr);
+
+    obj.fields.append(.{
+        .name = key,
+        .type = .bool,
+        .value = .{ .bool = value },
+    }) catch return;
+}
+
+// Similar for float and bool fields...
+
+pub fn finalizeObject(handle: u32) *DynamicObject {
+    const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
+    return obj;
+}
+
+// Zig Side - Automatic struct introspection
+pub fn FieldDescriptor() type {
+    return extern struct {
+        name_ptr: [*]const u8,
+        name_len: u32,
+        offset: u32,
+        type_id: u8,
+        size: u32,
+        can_be_null: bool,
+    };
+}
+
+pub fn exportStruct(comptime T: type) type {
+    return struct {
+        pub var instance: T = undefined;
+        var descriptors: [@typeInfo(T).@"struct".fields.len]FieldDescriptor() = undefined;
+
+        pub fn init() void {
+            const fields = @typeInfo(T).@"struct".fields;
+            inline for (fields, 0..) |field, i| {
+                descriptors[i] = .{
+                    .name_ptr = field.name.ptr,
+                    .name_len = field.name.len,
+                    .offset = @offsetOf(T, field.name),
+                    .type_id = getTypeId(field.type),
+                    .size = @sizeOf(Kit.getUnderlyingType(field.type)),
+                    .can_be_null = @typeInfo(field.type) == .optional,
+                };
+            }
+        }
+
+        pub fn getInstancePtr() [*]const u8 {
+            return @ptrCast(&instance);
+        }
+
+        pub fn getFieldCount() u32 {
+            return @typeInfo(T).@"struct".fields.len;
+        }
+
+        pub fn getFieldDescriptor(index: u32) *const FieldDescriptor() {
+            return &descriptors[index];
+        }
+
+        fn getTypeId(comptime FT: type) u8 {
+            return switch (@typeInfo(Kit.getUnderlyingType(FT))) {
+                .int => |info| if (info.signedness == .unsigned) 1 else 2,
+                .float => 3,
+                .bool => 4,
+                .array => |arr| if (arr.child == u8) 5 else 6,
+                .pointer => 7,
+                .@"enum" => {
+                    return 8;
+                },
+                else => {
+                    return 0;
+                },
+            };
+        }
+    };
+}
+
+// // Usage
+// const UserExport = exportStruct(User);
+// pub fn initUser() void {
+//     UserExport.init();
+//     UserExport.instance = User{
+//         .id = 12345,
+//         .age = 25,
+//         .score = 98.5,
+//         .name = "John Doe".*,
+//         .is_active = true,
+//     };
+// }
+
+// // Export the stack pointer to JavaScript
+// export fn get_stack_pointer() usize {
+//     var stack_variable: u8 = 0;
+//     return @intFromPtr(&stack_variable);
+// }
+//
+// // Track heap allocations if using an allocator
+// var heap_allocated: usize = 0;
+//
+// export fn get_heap_size() usize {
+//     return heap_allocated;
+// }
+//
+// // Get current memory pages
+// export fn get_memory_pages() u32 {
+//     // This is a WASM builtin
+//     return @wasmMemorySize(0);
+// }
+//
+// // Try to grow memory
+// export fn try_grow_memory(pages: u32) isize {
+//     return @wasmMemoryGrow(0, pages);
+// }
+//
+// // More detailed memory info
+// export fn get_memory_info() void {
+//     const pages = @wasmMemorySize(0);
+//     const bytes = pages * 65536;
+//
+//     // Get stack pointer
+//     var stack_var: u8 = 0;
+//     const stack_ptr = @intFromPtr(&stack_var);
+//
+//     // If you know your stack base (depends on your setup)
+//     const STACK_BASE = 1048576; // Example: 1MB
+//     const stack_used = STACK_BASE - stack_ptr;
+//
+//     Vapor.print("Memory Pages: {}\n", .{pages});
+//     Vapor.print("Total Memory: {} KB\n", .{bytes / 1024});
+//     Vapor.print("Stack Pointer: 0x{x}\n", .{stack_ptr});
+//     Vapor.print("Approx Stack Used: {} KB\n", .{stack_used / 1024});
+// }

@@ -100,7 +100,7 @@ pub inline fn Code() fn (void) void {
     return Vapor.LifeCycle.close;
 }
 pub fn render(code_editor: *CodeEditor, _: f32) void {
-    Box.style(&.{
+    Box().style(&.{
         .size = .square_percent(100),
         .scroll = .scroll_y(),
         .show_scrollbar = false,
@@ -112,7 +112,7 @@ pub fn render(code_editor: *CodeEditor, _: f32) void {
         },
         .padding = .tb(10, 10),
     })({
-        Box.style(&.{
+        Box().style(&.{
             .layout = .x_between_center,
             .size = .w(.percent(100)),
             .padding = .tblr(0, 8, 12, 12),
@@ -120,25 +120,25 @@ pub fn render(code_editor: *CodeEditor, _: f32) void {
                 .border = .bottom(.palette(.disabled)),
             },
         })({
-            Box.style(&.{
+            Box().style(&.{
                 .size = .h(.percent(100)),
                 .child_gap = 8,
             })({
-                // Box.style(&.{
+                // Box().style(&.{
                 //     .size = .square_px(14),
                 //     .visual = .{ .border_radius = .all(0), .background = .hex("#FF0000") },
                 // })({});
-                // Box.style(&.{
+                // Box().style(&.{
                 //     .size = .square_px(14),
                 //     .visual = .{ .border_radius = .all(0), .background = .hex("#FFFF00") },
                 // })({});
-                // Box.style(&.{
+                // Box().style(&.{
                 //     .size = .square_px(14),
                 //     .visual = .{ .border_radius = .all(0), .background = .hex("#09FF00") },
                 // })({});
                 Text("Example").font(14, 600, .palette(.text_color)).close();
             });
-            Box.style(&.{
+            Box().style(&.{
                 .size = .w(.percent(10)),
                 .layout = .x_even_center,
             })({
@@ -187,7 +187,7 @@ pub fn render(code_editor: *CodeEditor, _: f32) void {
                 });
             });
         });
-        Box.style(&.{
+        Box().style(&.{
             .size = .square_percent(100),
             .scroll = .scroll_x(),
             .direction = .column,
@@ -203,7 +203,7 @@ pub fn render(code_editor: *CodeEditor, _: f32) void {
                     } else blk: {
                         break :blk Vapor.Types.Background.transparent;
                     };
-                    Box.style(&.{
+                    Box().style(&.{
                         .size = .h(.px(20)),
                         .white_space = .pre,
                         .layout = .left_center,

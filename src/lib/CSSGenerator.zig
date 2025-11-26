@@ -9,6 +9,7 @@ const Vapor = @import("Vapor.zig");
 const Writer = @import("Writer.zig");
 const KeyGenerator = @import("Key.zig").KeyGenerator;
 const Types = @import("types.zig");
+const Packer = @import("Packer.zig");
 
 const Generator = @This();
 buffer: [8192 * 12]u8 = undefined,
@@ -144,17 +145,17 @@ fn writeFullNodeRule(gen: *Generator, node: *UINode, selector: []const u8) void 
 
 /// REFACTORED: Now dramatically simpler, just calls the new helper.
 pub fn writeAllStyles(gen: *Generator) void {
-    const allocator = Vapor.frame_arena.getFrameAllocator();
+    const allocator = Vapor.arena(.frame);
     var key_buf: [128]u8 = undefined; // Shared buffer for key generation
 
-    writeCommonStyleGroup(gen, allocator, &Vapor.packed_layouts, "lay", &key_buf, writeLayout, null);
-    writeCommonStyleGroup(gen, allocator, &Vapor.packed_visuals, "vis", &key_buf, writeVisual, null);
-    writeCommonStyleGroup(gen, allocator, &Vapor.packed_positions, "pos", &key_buf, writePos, null);
-    writeCommonStyleGroup(gen, allocator, &Vapor.packed_margins_paddings, "mapa", &key_buf, writeMarginPaddings, null);
+    writeCommonStyleGroup(gen, allocator, &Packer.layouts, "lay", &key_buf, writeLayout, null);
+    writeCommonStyleGroup(gen, allocator, &Packer.visuals, "vis", &key_buf, writeVisual, null);
+    writeCommonStyleGroup(gen, allocator, &Packer.positions, "pos", &key_buf, writePos, null);
+    writeCommonStyleGroup(gen, allocator, &Packer.margins_paddings, "mapa", &key_buf, writeMarginPaddings, null);
 
     // Special cases with ":hover"
-    writeCommonStyleGroup(gen, allocator, &Vapor.packed_interactives, "intr", &key_buf, writeInteractive, ":hover");
-    writeCommonStyleGroup(gen, allocator, &Vapor.packed_animations, "anim", &key_buf, writeAnimation, ":hover");
+    writeCommonStyleGroup(gen, allocator, &Packer.interactives, "intr", &key_buf, writeInteractive, ":hover");
+    writeCommonStyleGroup(gen, allocator, &Packer.animations, "anim", &key_buf, writeAnimation, ":hover");
 }
 
 /// REFACTORED: Now uses the `writeFullNodeRule` helper.
@@ -179,6 +180,10 @@ pub fn writeNodeStyle(gen: *Generator, node: *UINode) void {
 pub fn printCSS(gen: *Generator) void {
     const buffer = gen.buffer[0..gen.end];
     Vapor.println("{s}", .{buffer});
+}
+
+pub fn getCSS(gen: *Generator) []const u8 {
+    return gen.buffer[0..gen.end];
 }
 
 /// Uses SIMD to check if a needle exists within a haystack.

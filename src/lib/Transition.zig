@@ -30,7 +30,7 @@ pub const TransitionState = packed union {
 
 pub const PackedTransition = packed struct {
     properties_ptr: ?*[]TransitionProperty = null,
-    properties_len: u32 = 0,
+    properties_len: usize = 0,
     duration: u32 = 300, // default 300ms
     timing: TimingFunction = .ease,
     delay: u32 = 0,

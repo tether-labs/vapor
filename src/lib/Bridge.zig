@@ -14,28 +14,16 @@ const Writer = @import("Writer.zig");
 const utils = @import("utils.zig");
 const hashKey = utils.hashKey;
 const Kit = @import("kit/Kit.zig");
-
-export fn eventCallback(id: u32) void {
-    const evt_node = Vapor.events_callbacks.get(id) orelse unreachable;
-    var event = Event{
-        .id = id,
-    };
-    @call(.auto, evt_node.cb, .{&event});
-}
-
-export fn eventInstCallback(id: u32) void {
-    const evt_node = Vapor.events_inst_callbacks.get(id).?;
-    var event = Event{
-        .id = id,
-    };
-    @call(.auto, evt_node.data.evt_cb, .{ &evt_node.data, &event });
-}
+const Packer = @import("Packer.zig");
 
 export fn hookInstCallback(id: u32) void {
     const hook_cb = Vapor.hooks_inst_callbacks.get(id).?;
     const params_str = Vapor.Kit.getWindowParams() orelse "";
-    const path = Kit.getWindowPath();
-    var params = std.StringHashMap([]const u8).init(Vapor.frame_arena.getFrameAllocator());
+    const path = Kit.getWindowPath() orelse {
+        Vapor.printlnSrcErr("Hooks ERROR: Could not get window path", .{}, @src());
+        return;
+    };
+    var params = std.StringHashMap([]const u8).init(Vapor.arena(.frame));
     if (params_str.len != 0) {
         params = Kit.parseParams(params_str, &Vapor.allocator_global) catch return orelse return;
     }
@@ -47,38 +35,6 @@ export fn hookInstCallback(id: u32) void {
     };
     @call(.auto, hook_cb, .{context});
 }
-
-pub export fn getRenderTreePtr() ?*UIContext.CommandsTree {
-    const tree_op = Vapor.current_ctx.ui_tree;
-
-    if (tree_op != null) {
-        // iterateTreeChildren(Vapor.current_ctx.ui_tree.?);
-        return Vapor.current_ctx.ui_tree.?;
-    }
-    return null;
-}
-
-pub export fn getRenderCommandPtr(tree: *CommandsTree) [*]u8 {
-    if (std.mem.eql(u8, tree.node.id, "global-style")) {
-        Vapor.println("getRenderCommandPtr {any}\n", .{tree.node.node_ptr.dirty});
-    }
-    return @ptrCast(tree.node);
-}
-
-export fn getTreeNodeChildrenCount(tree: *CommandsTree) usize {
-    return tree.children.items.len;
-}
-
-export fn getUiNodeChildrenCount(tree: *CommandsTree) usize {
-    if (tree.node.node_ptr.children == null) return 0;
-    return tree.node.node_ptr.children.?.items.len;
-}
-
-export fn getTreeNodeChild(tree: *CommandsTree, index: usize) *CommandsTree {
-    const child = tree.children.items[index];
-    return child;
-}
-
 export fn getCtxNodeChild(tree: *CommandsTree, index: usize) ?*CommandsTree {
     if (tree.node.node_ptr.children == null) return null;
     const ui_node = tree.node.node_ptr.children.?.items[index];
@@ -96,18 +52,6 @@ export fn getTreeNodeChildCommand(tree: *CommandsTree) *RenderCommand {
 
 export fn setDirtyToFalse(node: *UINode) void {
     node.dirty = false;
-}
-
-export fn getDirtyValue(node: *UINode) bool {
-    return node.dirty;
-}
-
-export fn getRemovedNodeCount() usize {
-    return Vapor.removed_nodes.items.len;
-}
-
-export fn clearRemovedNodesretainingCapacity() void {
-    Vapor.removed_nodes.clearRetainingCapacity();
 }
 
 export fn getDirtyNodeCount() usize {
@@ -144,9 +88,9 @@ export fn getNextSiblingLen(ui_node: *UINode) usize {
     return sibling.uuid.len;
 }
 
-export fn checkPotentialNode(node: *UINode) bool {
-    Vapor.potential_nodes.get(node.uuid) orelse return false;
-    return true;
+export fn checkPotentialNode(_: *UINode) bool {
+    // Vapor.potential_nodes.get(node.uuid) orelse return false;
+    return false;
 }
 
 export fn getNodeParentId(node: *UINode) ?[*]const u8 {
@@ -169,27 +113,6 @@ export fn markCurrentTreeDirty() void {
 export fn markUINodeTreeDirty(node: *UINode) void {
     Vapor.markChildrenDirty(node);
 }
-
-// The first node needs to be marked as false always
-export fn markCurrentTreeNotDirty() void {
-    if (!Vapor.has_context) return;
-    const root = Vapor.current_ctx.root orelse return;
-    Vapor.markChildrenNotDirty(root);
-}
-
-export fn getRemovedNode(index: usize) [*]const u8 {
-    const node = Vapor.removed_nodes.items[index];
-    return node.uuid.ptr;
-}
-
-export fn getRemovedNodeIndex(index: usize) usize {
-    return Vapor.removed_nodes.items[index].index;
-}
-
-export fn getRemovedNodeLength(index: usize) usize {
-    return Vapor.removed_nodes.items[index].uuid.len;
-}
-
 export fn inputCallback(id_ptr: [*:0]u8) void {
     const id = std.mem.span(id_ptr);
     defer Vapor.allocator_global.free(id);
@@ -205,107 +128,6 @@ export fn getElementPtr(id_ptr: [*:0]u8) ?*Vapor.Element {
     return element;
 }
 
-export fn registerAllListenerCallbacks() void {
-    // var itr = Vapor.node_events_callbacks.iterator();
-    // while (itr.next()) |entry| {
-    //     const ctx_node = entry.value_ptr.*;
-    //     @call(.auto, ctx_node.data.runFn, .{&ctx_node.data});
-    //     // if (element.on_blur) |on_blur| {
-    //     //     _ = element.addInstListener(.mouseleave, element, on_blur);
-    //     // }
-    //     // if (element.on_change) |on_change| {
-    //     //     _ = element.addInstListener(.change, element, on_change);
-    //     // }
-    //     // if (element.on_submit) |on_submit| {
-    //     //     _ = element.addInstListener(.submit, element, on_submit);
-    //     // }
-    // }
-
-    var evt_itr = Vapor.nodes_with_events.iterator();
-    while (evt_itr.next()) |entry| {
-        const ui_node = entry.value_ptr.*;
-        if (ui_node.event_handlers) |handlers| {
-            for (handlers.handlers.items) |handler| {
-                if (handler.ctx_aware) {
-                    const ctx_node: *const Vapor.CtxAwareEventNode = @ptrCast(@alignCast(handler.cb_opaque));
-                    @call(.auto, ctx_node.data.runFn, .{&ctx_node.data});
-                    // _ = Vapor.elementInstEventListener(ui_node.uuid, handler.type, ctx_node.data.arguments, ctx_node.data.runFn);
-                    // _ = Vapor.elementInstEventListener(ui_node.uuid, handler.type, handler.cb_opaque, evt_node.cb);
-                } else {
-                    const cb: *const fn (*Vapor.Event) void = @ptrCast(@alignCast(handler.cb_opaque));
-                    _ = Vapor.elementEventListener(ui_node, handler.type, cb);
-                }
-            }
-        }
-    }
-}
-
-/// Calling route renderCycle will mark eveything as dirty
-export fn callRouteRenderCycle(ptr: [*:0]u8) void {
-    Vapor.packed_animations.clearRetainingCapacity();
-    Vapor.packed_layouts.clearRetainingCapacity();
-    Vapor.packed_positions.clearRetainingCapacity();
-    Vapor.packed_margins_paddings.clearRetainingCapacity();
-    Vapor.packed_visuals.clearRetainingCapacity();
-    Vapor.packed_interactives.clearRetainingCapacity();
-    UIContext.class_map.clearRetainingCapacity();
-    Vapor.renderCycle(ptr);
-    Vapor.markChildrenDirty(Vapor.current_ctx.root.?);
-    return;
-}
-export fn setRouteRenderTree(ptr: [*:0]u8) void {
-    Vapor.renderCycle(ptr);
-    return;
-}
-
-export fn allocUint8(length: u32) [*]const u8 {
-    const slice = Vapor.allocator_global.alloc(u8, length) catch
-        @panic("failed to allocate memory");
-    return slice.ptr;
-}
-
-pub export fn allocateLayoutInfo() *u8 {
-    const info_ptr: *u8 = @ptrCast(&Vapor.layout_info);
-    return info_ptr;
-}
-
-// Export the size of a single RenderCommand for proper memory reading
-export fn getRenderCommandSize() usize {
-    return @sizeOf(RenderCommand);
-}
-
-export fn grainRerender() bool {
-    return Vapor.grain_rerender;
-}
-
-export fn resetGrainRerender() void {
-    Vapor.grain_rerender = false;
-}
-
-export fn shouldRerender() bool {
-    return Vapor.global_rerender;
-}
-
-export fn rerenderEverything() bool {
-    return Vapor.rerender_everything;
-}
-
-export fn hasDirty() bool {
-    return Vapor.has_dirty;
-}
-
-export fn resetRerender() void {
-    Vapor.global_rerender = false;
-    Vapor.rerender_everything = false;
-    Vapor.has_dirty = false;
-    // Vapor.render_phase = .idle;
-}
-
-export fn setRerenderTrue() void {
-    Vapor.cycle();
-}
-// Wrapper functions with dummy implementations for non-WASM targets
-
 export fn callback(callbackId: u32) void {
     const continuation = Vapor.continuations[callbackId];
     if (continuation) |cb| {
@@ -313,13 +135,6 @@ export fn callback(callbackId: u32) void {
     }
 }
 
-export fn allocate(size: usize) ?[*]f32 {
-    const buf = Vapor.allocator_global.alloc(f32, size) catch |err| {
-        Vapor.println("{any}\n", .{err});
-        return null;
-    };
-    return buf.ptr;
-}
 //
 // Global buffer to store the CSS string for returning to JavaScript
 var common_style_buffer: [8192 * 6]u8 = undefined;
@@ -479,23 +294,14 @@ export fn timeOutCtxCallback(id_ptr: [*:0]u8) void {
     @call(.auto, node.data.runFn, .{&node.data});
 }
 
-export fn callbackCtx(callback_ptr: [*:0]u8, data_ptr: [*:0]u8, is_in_view: bool, index: usize) void {
-    const callback_name = std.mem.span(callback_ptr);
-    const data = std.mem.span(data_ptr);
-    // defer Vapor.allocator_global.free(callback_name);
-    // defer Vapor.allocator_global.free(data);
-    const opaque_node = Vapor.opaque_registry.get(hashKey(callback_name)) orelse return;
-    var target = struct { url: []const u8, is_in_view: bool, index: usize }{ .url = data, .is_in_view = is_in_view, .index = index };
-    @call(.auto, opaque_node.data.runFn, .{@as(*anyopaque, @ptrCast(&target))});
-}
-
-export fn onEndCallback() void {
-    const length = Vapor.on_end_funcs.items.len;
+export fn onEndCtxCallback() void {
+    const length = Vapor.on_end_ctx_funcs.items.len;
+    Vapor.println("onEndCtxCallback {d}\n", .{length});
     if (length == 0) return;
     var i: usize = length - 1;
     while (i >= 0) : (i -= 1) {
-        const call = Vapor.on_end_funcs.orderedRemove(i);
-        @call(.auto, call, .{});
+        const node = Vapor.on_end_ctx_funcs.orderedRemove(i);
+        @call(.auto, node.data.runFn, .{&node.data});
         if (i == 0) return;
     }
 }
@@ -504,6 +310,18 @@ export fn timeoutCtxCallBackId(id: usize) void {
     const node = Vapor.time_out_ctx_registry.get(id) orelse return;
     defer _ = Vapor.time_out_ctx_registry.remove(id);
     @call(.auto, node.data.runFn, .{&node.data});
+    if (Vapor.mode == .atomic) {
+        Vapor.cycle();
+    }
+}
+
+export fn timeoutCallBackId(id: usize) void {
+    const func = Vapor.time_out_registry.get(id) orelse return;
+    defer _ = Vapor.time_out_registry.remove(id);
+    @call(.auto, func, .{});
+    if (Vapor.mode == .atomic) {
+        Vapor.cycle();
+    }
 }
 
 // This function gets called from JavaScript when a timeout completes
@@ -515,26 +333,4 @@ export fn resumeExecution(callbackId: u32) void {
         // Call the continuation function
         func();
     }
-}
-
-export fn getCSS() ?[*]const u8 {
-    return Vapor.generator.buffer[0..Vapor.generator.end].ptr;
-}
-
-export fn getCSSLen() usize {
-    return Vapor.generator.end;
-}
-
-export fn getHeadingLevel(ptr: ?*UINode) u8 {
-    const node_ptr = ptr orelse return 0;
-    const heading = node_ptr.type == .Heading;
-    if (heading) {
-        return node_ptr.level orelse return 0;
-    }
-    return 0;
-}
-
-export fn getVideo(node_ptr: *UINode) ?*const Types.Video {
-    const video = node_ptr.video orelse return null;
-    return &video;
 }

@@ -7,25 +7,38 @@ const hashKey = utils.hashKey;
 
 pub const Kit = @This();
 
-pub fn glue(comptime T: type, slice: []const u8) !std.json.Parsed(T) {
+/// This function takes a slice of json and parses it into a struct
+/// # Parameters:
+/// - `T`: struct type
+/// - `slice`: []const u8,
+///
+/// # Returns:
+/// T: struct
+///
+/// # Usage:
+/// ```zig
+/// const my_struct = try Kit.glue(MyStruct, json_slice);
+/// ```
+/// NOTE: This function dellocates the parsed struct, after use, clone it if you need it beyond the scope of the function
+pub fn glue(comptime T: type, slice: []const u8) !T {
     const parsed = std.json.parseFromSlice(
         T,
-        Vapor.allocator_global,
+        Vapor.getFrameAllocator(),
         slice,
         .{},
     ) catch return error.MalformedJson;
 
-    return parsed;
+    return parsed.value;
 }
 
-fn getUnderlyingType(comptime T: type) type {
+pub fn getUnderlyingType(comptime T: type) type {
     return switch (@typeInfo(T)) {
         .optional => std.meta.Child(T),
         else => T,
     };
 }
 
-fn getUnderlyingValue(comptime T: type, comptime OT: type, v: OT) T {
+pub fn getUnderlyingValue(comptime T: type, comptime OT: type, v: OT) T {
     return switch (@typeInfo(OT)) {
         .optional => v.?,
         else => v,
@@ -149,7 +162,94 @@ pub const FetchNodeProto = *const fn (*FetchNode) void;
 
 pub const FetchNode = struct { data: FetchAction };
 
-pub fn fetch(url: []const u8, cb: *const fn () void, http_req: HttpReq) void {
+export fn scheduleTick(id: u32) void {
+    if (Vapor.response_registry.get(id)) |_| {
+        return;
+    }
+    if (isWasi) {
+        _ = Wasm.tick(id);
+    }
+}
+
+const Future = struct {
+    id: u32,
+    pub fn await(future: *@This()) ?Response {
+        if (Vapor.response_registry.get(future.id)) |resp| {
+            return resp;
+        }
+        _ = Wasm.tick(future.id);
+        return null;
+    }
+};
+
+pub fn fetchAwait(url: []const u8, http_req: HttpReq) *Future {
+    var writer = String.new();
+    writer.append_str("{\n\"method\": ");
+    writer.append_str("\"");
+    writer.append_str(@tagName(http_req.method));
+    writer.append_str("\"");
+    if (http_req.headers) |headers| {
+        writer.append_str(",\n\"headers\": {\n");
+        constructHeaders(headers, http_req.extra_headers, &writer);
+        writer.append_str("\n}");
+    } else if (http_req.extra_headers.len > 0) {
+        writer.append_str(",\n\"headers\": {\n");
+        var count: usize = 1;
+        for (http_req.extra_headers) |header| {
+            writer.append_str("\"");
+            writer.append_str(header.name);
+            writer.append_str("\"");
+            writer.append_str(": ");
+            writer.append_str("\"");
+            writer.append_str(header.value);
+            writer.append_str("\"");
+            if (count < http_req.extra_headers.len) {
+                writer.append_str(",\n");
+            }
+            count += 1;
+        }
+        writer.append_str("\n}");
+    }
+
+    if (http_req.credentials) |credentials| {
+        writer.append_str(",\n\"credentials\": ");
+        writer.append_str("\"");
+        writer.append_str(credentials);
+        writer.append_str("\"");
+    }
+
+    if (http_req.body) |body| {
+        writer.append_str(",\n\"body\": ");
+        switch (http_req.body_type) {
+            .string => {
+                writer.append_str("\"");
+                writer.append_str(body);
+                writer.append_str("\"");
+            },
+            .json => {
+                writer.append_str(body);
+            },
+        }
+    }
+    writer.append_str("\n}");
+
+    const final = writer.contents[0..writer.len];
+    const json = std.json.fmt(final, .{ .whitespace = .indent_1 }).value;
+
+    const id = Vapor.fetch_registry.count() + 1;
+
+    const future = Vapor.allocator_global.create(Future) catch |err| {
+        Vapor.println("Error could not create closure {any}\n ", .{err});
+        unreachable;
+    };
+    future.* = .{
+        .id = id,
+    };
+    fetchWasm(url.ptr, url.len, id, json.ptr, json.len);
+    return future;
+}
+
+pub fn fetch(url: []const u8, cb: fn (Response) void, http_req: HttpReq) void {
     var writer = String.new();
     writer.append_str("{\n\"method\": ");
     writer.append_str("\"");
@@ -226,6 +326,7 @@ pub fn fetch(url: []const u8, cb: *const fn () void, http_req: HttpReq) void {
         return;
     };
     fetchWasm(url.ptr, url.len, id, json.ptr, json.len);
+    // return id;
 }
 
 var last_time: i64 = 0;
@@ -280,6 +381,16 @@ pub fn navigate(path: []const u8) void {
     }
 }
 
+extern fn backWasm() void;
+
+pub fn back() void {
+    if (isWasi) {
+        backWasm();
+    } else {
+        Vapor.printlnSrc("Attempted to reroute, but not wasi", .{}, @src());
+    }
+}
+
 extern fn routePushWASM(
     path_ptr: [*]const u8,
     path_len: usize,
@@ -295,11 +406,11 @@ pub fn routePush(path: []const u8) void {
 
 extern fn getWindowInformationWasm() [*:0]u8;
 
-pub fn getWindowPath() []const u8 {
+pub fn getWindowPath() ?[]const u8 {
     if (isWasi) {
         return std.mem.span(getWindowInformationWasm());
     } else {
-        return "";
+        return null;
     }
 }
 
@@ -397,20 +508,67 @@ pub fn parseParams(url: []const u8, allocator: *std.mem.Allocator) !?std.StringH
     return params;
 }
 
-pub const Response = struct {
+pub const ResponseError = struct {
+    type: []const u8 = "",
+    message: []const u8 = "",
+};
+
+pub const OkResponse = struct {
     code: u32,
+    message: []const u8,
     type: []const u8,
-    text: []const u8,
+    ok: bool,
     body: []const u8,
 };
 
-export fn resumeCallback(_: u32, resp_ptr: [*:0]u8) void {
-    _ = std.mem.span(resp_ptr);
+pub const ErrResponse = struct {
+    code: u32,
+    type: []const u8,
+    message: []const u8,
+    ok: bool,
+};
+
+pub const Response = union(enum) {
+    ok: OkResponse,
+    err: ErrResponse,
+    pub fn isOk(self: Response) bool {
+        return switch (self) {
+            .ok => true,
+            else => false,
+        };
+    }
+
+    pub fn isErr(self: Response) bool {
+        return switch (self) {
+            .err => true,
+            else => false,
+        };
+    }
+};
+
+export fn resumeCallback(id: u32, resp_ptr: [*:0]u8) void {
+    const resp = std.mem.span(resp_ptr);
     // this std.json.parseFromSlice is extermely memory costly 43kb alone
-    // const parsed_value = std.json.parseFromSlice(Response, Vapor.allocator_global, resp, .{}) catch return;
-    // const json_resp: Response = parsed_value.value;
-    // const node = Vapor.fetch_registry.get(id) orelse return;
-    // @call(.auto, node.data.runFn, .{ &node.data, json_resp });
+    const parsed_value: std.json.Parsed(Response) = std.json.parseFromSlice(Response, Vapor.arena(.persist), resp, .{}) catch |err| {
+        Vapor.printlnSrcErr("Error could not parse response {any}\n", .{err}, @src());
+        return;
+    };
+
+    if (parsed_value.value == .err) {
+        Vapor.printlnErr("\nERROR CODE: {d}\nERROR TYPE: {s}\nERROR MESSAGE: {s}\n", .{
+            parsed_value.value.err.code,
+            parsed_value.value.err.type,
+            parsed_value.value.err.message,
+        });
+    }
+
+    const json_resp: Response = parsed_value.value;
+    // Vapor.response_registry.put(id, json_resp) catch |err| {
+    //     Vapor.println("Button Function Registry {any}\n", .{err});
+    //     return;
+    // };
+    const node = Vapor.fetch_registry.get(id) orelse return;
+    @call(.auto, node.data.runFn, .{ &node.data, json_resp });
 }
 
 pub const HttpReqOffset = struct {
@@ -668,7 +826,9 @@ const Param = struct {
 };
 
 pub fn scrollTo(x: f32, y: f32) void {
-    Wasm.scrollToWasm(x, y);
+    if (isWasi) {
+        Wasm.scrollToWasm(x, y);
+    }
 }
 
 pub const QueryBuilder = struct {
@@ -836,7 +996,7 @@ pub const QueryBuilder = struct {
     }
 };
 
-pub const ObserverOptions = packed struct {
+pub const ObserverOptions = struct {
     threshold: f32 = 0,
     rootMargin_top: i32 = 0,
     rootMargin_right: i32 = 0,
@@ -864,8 +1024,8 @@ pub const FieldType = enum(u8) {
 pub const FieldDescriptor = packed struct {
     field_type: FieldType,
     offset: u32,
-    name_ptr: u32,
-    name_len: u32,
+    name_ptr: usize,
+    name_len: usize,
 };
 
 // Generic schema generator
@@ -879,7 +1039,7 @@ pub fn StructSchema(comptime T: type) type {
             }
 
             const struct_fields = type_info.@"struct".fields;
-            fields = Vapor.frame_arena.persistentAllocator().alloc(FieldDescriptor, struct_fields.len) catch unreachable;
+            fields = Vapor.arena(.persist).alloc(FieldDescriptor, struct_fields.len) catch unreachable;
 
             inline for (struct_fields, 0..) |field, i| {
                 const field_type = mapZigTypeToFieldType(field.type);
@@ -927,6 +1087,35 @@ fn mapZigTypeToFieldType(comptime T: type) FieldType {
     };
 }
 
+/// Observer is a struct that allows you to observe the visibility of an element
+/// and call a callback when the element becomes visible or invisible
+/// # Parameters:
+/// - `name`: []const u8,
+/// - `callback`: anytype,
+/// - `options`: ObserverOptions,
+///
+/// # Returns:
+/// Observer
+///
+/// # Usage:
+/// ```zig
+/// const observer = Kit.Observer.new("my_observer", onObserver, .{ .threshold = 0.5 });
+///
+/// fn onObserver(target: Observer.Target) void {
+///     const target: Observer.Target = target;
+///     _ = target;
+/// }
+/// ``` NOTE: This function dellocates, after use, clone the fields if need them outsside the handler function
+/// # Example:
+/// ```zig
+/// const observer = Kit.Observer.new("my_observer", onObserver, .{ .threshold = 0.5 });
+///
+/// var target_link: []const u8 = "";
+/// fn onObserver(target: Observer.Target) void {
+///     const target: Observer.Target = target;
+///     target_link = Vapor.clone(target.url);
+/// }
+/// ```
 pub const Observer = struct {
     pub const Target = struct {
         url: []const u8,
@@ -935,55 +1124,112 @@ pub const Observer = struct {
     };
     name: []const u8,
     callback: *const fn (Target) void,
-    // _node: *Vapor.Node,
-    pub fn new(name: []const u8, callback: anytype, options: ObserverOptions) Observer {
+    oberver_nodes: std.array_list.Managed(Vapor.ObserverNode),
+
+    pub fn new(name: []const u8, callback: fn (Target) void, options: ObserverOptions) Observer {
         const Closure = struct {
-            opaque_node: Vapor.OpaqueNode = .{ .data = .{ .runFn = runFn } },
-            fn runFn(opaque_args: *anyopaque) void {
-                const target = @as(*const Target, @ptrCast(@alignCast(opaque_args))).*;
-                // const c_str: [*:0]const u8 = @as(?[*:0]const u8, @ptrCast(opaque_args)).?;
-                // 2. Create a valid Zig slice from the C-string
-                // const args: []const u8 = std.mem.span(c_str);
+            run_node: Vapor.Node = .{ .data = .{ .runFn = runFn, .deinitFn = deinitFn } },
+            fn runFn(action: *Vapor.Action) void {
+                const run_node: *Vapor.Node = @fieldParentPtr("data", action);
+                const object = run_node.data.dynamic_object orelse {
+                    Vapor.printlnSrcErr("Bridge: Observer callback called without object, this is a js side issue", .{}, @src());
+                    Vapor.printlnSrcErr("No object found", .{}, @src());
+                    return;
+                };
+                const target: Target = Vapor.convertFromDynamicToType(Target, object);
                 @call(.auto, callback, .{target});
             }
+            fn deinitFn(_: *Vapor.Node) void {}
         };
 
-        const closure = Vapor.frame_arena.persistentAllocator().create(Closure) catch |err| {
+        const closure = Vapor.arena(.persist).create(Closure) catch |err| {
             Vapor.println("Error could not create closure {any}\n ", .{err});
             unreachable;
         };
         closure.* = .{};
 
-        Vapor.opaque_registry.put(hashKey(name), &closure.opaque_node) catch |err| {
+        const hash = hashKey(name);
+        Vapor.ctx_callback_registry.put(hash, &closure.run_node) catch |err| {
             Vapor.println("Button Function Registry {any}\n", .{err});
         };
 
-        Wasm.createObserverWasm(name.ptr, name.len, &options);
+        if (isWasi) {
+            Wasm.createObserverWasm(hash, &options);
+        }
 
         return Observer{
             .name = name,
             .callback = callback,
+            .oberver_nodes = std.array_list.Managed(Vapor.ObserverNode).init(Vapor.arena(.persist)),
         };
     }
 
-    pub fn reinit(name: []const u8) void {
-        Wasm.reinitObserverWasm(name.ptr, name.len);
+    pub fn disconnect(self: *Observer) void {
+        if (!isWasi) return;
+        const hash = hashKey(self.name);
+        Wasm.reinitObserverWasm(hash);
     }
 
     pub fn destroy(name: []const u8) void {
+        if (!isWasi) return;
         Wasm.destroyObserverWasm(name.ptr, name.len);
     }
+
+    pub fn observe(self: *Observer, item: Vapor.ObserverNode, index: ?usize) void {
+        if (!isWasi) return;
+        self.oberver_nodes.append(item) catch unreachable;
+        const hash = hashKey(self.name);
+        switch (item) {
+            .uuid => |uuid| {
+                Wasm.observeWasm(hash, uuid.ptr, uuid.len, index orelse 0);
+            },
+            .type => |element_type| {
+                const element_type_str = @tagName(element_type);
+                Wasm.observeWasm(hash, element_type_str.ptr, element_type_str.len, index orelse 0);
+            },
+        }
+    }
+
+    // pub fn observe(self: *Observer, items: []const Vapor.ObserverNode) void {
+    //     self.oberver_nodes.appendSlice(items) catch unreachable;
+    //     Vapor.observer_nodes.put(self.name, self.oberver_nodes) catch unreachable;
+    //     Wasm.observeWasm(self.name.ptr, self.name.len);
+    // }
+
     // fn addCallBack(name: []const u8, cb: anytype, comptime T: type) void {}
 };
 
-const ObserverOptionsSchema = StructSchema(ObserverOptions);
-// Export schema getters with unique names
-export fn getObserverOptionsSchema() [*]FieldDescriptor {
-    ObserverOptionsSchema.init();
-    return ObserverOptionsSchema.getSchema().ptr;
+const ObserverExport = Vapor.exportStruct(ObserverOptions);
+pub export fn getObserverOptions(options: *ObserverOptions) [*]const u8 {
+    ObserverExport.init();
+    ObserverExport.instance = options.*;
+    return ObserverExport.getInstancePtr();
 }
 
-export fn getObserverOptionsSchemaLength() usize {
-    ObserverOptionsSchema.init();
-    return ObserverOptionsSchema.getSchemaLength();
+pub export fn getObserverFieldCount() u32 {
+    return ObserverExport.getFieldCount();
+}
+
+pub export fn getObserverFieldDescriptor(index: u32) ?*const Vapor.FieldDescriptor() {
+    return ObserverExport.getFieldDescriptor(index);
+}
+
+export fn getObserverNodeCount(observer_name: [*:0]u8) usize {
+    const name = std.mem.span(observer_name);
+    const nodes = Vapor.observer_nodes.get(name) orelse return 0;
+    return nodes.items.len;
+}
+
+export fn getObserverNode(observer_name: [*:0]u8, index: usize) ?[*]const u8 {
+    const name = std.mem.span(observer_name);
+    const nodes = Vapor.observer_nodes.get(name) orelse return null;
+    const node = nodes.items[index];
+    return node.uuid.ptr;
+}
+
+export fn getObserverNodeLength(observer_name: [*:0]u8, index: usize) usize {
+    const name = std.mem.span(observer_name);
+    const nodes = Vapor.observer_nodes.get(name) orelse return 0;
+    const node = nodes.items[index];
+    return node.uuid.len;
 }

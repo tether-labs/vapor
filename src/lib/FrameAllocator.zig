@@ -41,8 +41,9 @@ const FrameAllocator = @This();
 persistent_arena: Arena,
 frames: [2]FrameData,
 current_frame: usize = 0,
-routes: [2]FrameData,
+view: [2]FrameData,
 current_route: usize = 0,
+request_arena: Arena,
 
 pub fn init(backing_allocator: std.mem.Allocator, _: usize) FrameAllocator {
     // Vapor.println("Node count {d}", .{node_count});
@@ -77,10 +78,11 @@ pub fn init(backing_allocator: std.mem.Allocator, _: usize) FrameAllocator {
             .{ .arena = frame2_arena },
         },
         .persistent_arena = std.heap.ArenaAllocator.init(backing_allocator),
-        .routes = [_]FrameData{
+        .view = [_]FrameData{
             .{ .arena = previous_route_arena },
             .{ .arena = current_route_arena },
         },
+        .request_arena = std.heap.ArenaAllocator.init(backing_allocator),
     };
 }
 
@@ -90,12 +92,16 @@ pub fn deinit(self: *FrameAllocator) void {
     self.persistent_arena.deinit();
 }
 
-pub fn getFrameAllocator(self: *FrameAllocator) std.mem.Allocator {
+pub fn frameAllocator(self: *FrameAllocator) std.mem.Allocator {
     return self.frames[self.current_frame].arena.allocator();
 }
 
-pub fn getRouteAllocator(self: *FrameAllocator) std.mem.Allocator {
-    return self.routes[self.current_route].arena.allocator();
+pub fn requestAllocator(self: *FrameAllocator) std.mem.Allocator {
+    return self.request_arena.allocator();
+}
+
+pub fn viewAllocator(self: *FrameAllocator) std.mem.Allocator {
+    return self.view[self.current_route].arena.allocator();
 }
 
 pub fn incrementNodeCount(self: *FrameAllocator) void {
@@ -158,13 +164,13 @@ pub fn beginFrame(self: *FrameAllocator) void {
     self.current_frame = next_frame;
 }
 
-pub fn beginRoute(self: *FrameAllocator) void {
+pub fn beginView(self: *FrameAllocator) void {
     // Move to next frame
     const next_route = (self.current_route + 1) % 2;
 
     // Clear the route we're about to use
-    _ = self.routes[next_route].arena.reset(.retain_capacity);
-    self.routes[next_route].stats = .{};
+    _ = self.view[next_route].arena.reset(.retain_capacity);
+    self.view[next_route].stats = .{};
 
     self.current_route = next_route;
 }
