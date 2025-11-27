@@ -73,6 +73,7 @@ const PropValue = struct {
         gradient,
         layers,
         caret,
+        resize,
     };
 
     // Union to hold the actual data
@@ -87,7 +88,7 @@ const PropValue = struct {
         transform_origin: Types.TransformOrigin,
         margin: Types.Margin,
         pos: Types.Pos,
-        text_decoration: Types.TextDecoration,
+        text_decoration: Types.PackedTextDecoration,
         white_space: Types.WhiteSpace,
         flex_wrap: Types.FlexWrap,
         alignment: Types.Alignment,
@@ -109,6 +110,7 @@ const PropValue = struct {
         gradient: Types.PackedGradient,
         layers: Types.PackedLayers,
         caret: Types.PackedCaret,
+        resize: Types.Resize,
     };
 };
 
@@ -229,6 +231,7 @@ fn writePropValue(prop: []const u8, value: PropValue, writer: writer_t) void {
         .list_style => listStyleToCSS(value.data.list_style, writer) catch {},
         .outline => outlineStyleToCSS(value.data.outline, writer) catch {},
         .opacity => writer.writeF32(value.data.opacity) catch {},
+        .resize => resizeToCSS(value.data.resize, writer) catch {},
         // .animation_specs => animationToCSS(value.data.animation_specs, writer) catch {},
         .transition => transitionStyleToCSS(value.data.transition, writer),
         .shadow => {
@@ -286,7 +289,8 @@ const alignment_map = [_][]const u8{ "none", "center", "flex-start", "flex-end",
 const position_type_map = [_][]const u8{ "none", "relative", "absolute", "fixed", "sticky" };
 const float_type_map = [_][]const u8{ "top", "bottom", "left", "right" };
 const transform_origin_map = [_][]const u8{ "top", "bottom", "right", "left" };
-const text_decoration_map = [_][]const u8{ "default", "none", "inherit", "underline", "initial", "overline", "unset", "revert" };
+const text_decoration_type_map = [_][]const u8{ "default", "none", "inherit", "underline", "initial", "overline", "unset", "revert" };
+const text_decoration_style_map = [_][]const u8{ "default", "solid", "double", "dotted", "dashed", "wavy", "inherit", "initial", "revert", "unset" };
 const appearance_map = [_][]const u8{ "none", "auto", "button", "textfield", "menulist", "searchfield", "textarea", "checkbox", "radio", "inherit", "initial", "revert", "unset" };
 const outline_map = [_][]const u8{ "default", "none", "auto", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset", "inherit", "initial", "revert", "unset" };
 const cursor_map = [_][]const u8{ "default", "pointer", "help", "grab", "zoom-in", "zoom-out" };
@@ -300,6 +304,7 @@ const animation_direction_map = [_][]const u8{ "normal ", "reverse ", "forwards 
 const font_style_map = [_][]const u8{ "default", "normal", "italic" };
 const aspect_ratio_map = [_][]const u8{ "none", "1 / 1", "3 / 4", "16 / 9" };
 const caret_map = [_][]const u8{ "none", "block", "line" };
+const resize_map = [_][]const u8{ "default", "none", "both", "horizontal", "vertical" };
 
 /// Generic helper to write a CSS string from a pre-defined map based on an enum's value.
 /// The `string_map` must have its string literals in the same order as the enum declaration.
@@ -340,8 +345,17 @@ fn aspectRatioToCSS(aspect_ratio: Types.AspectRatio, writer: anytype) !void {
     try writeMappedString(Types.AspectRatio, aspect_ratio, &aspect_ratio_map, writer);
 }
 
-fn textDecoToCSS(deco: TextDecoration, writer: anytype) !void {
-    try writeMappedString(TextDecoration, deco, &text_decoration_map, writer);
+fn textDecoToCSS(deco: Types.PackedTextDecoration, writer: anytype) !void {
+    try writeMappedString(Types.TextDecorationType, deco.type, &text_decoration_type_map, writer);
+    if (deco.style != .default) {
+        try writer.writeByte(' ');
+        try writeMappedString(Types.TextDecorationStyle, deco.style, &text_decoration_style_map, writer);
+    }
+
+    if (deco.color.has_color or deco.color.has_token) {
+        try writer.writeByte(' ');
+        colorToCSS(deco.color, writer) catch {};
+    }
 }
 // Helper function to convert SizingType to CSS values
 fn sizingTypeToCSS(sizing: Sizing, writer: writer_t) !void {
@@ -676,6 +690,11 @@ fn caretToCSS(caret: Types.PackedCaret, writer: anytype) !void {
     colorToCSS(caret.color, writer) catch {};
 }
 
+fn resizeToCSS(resize: Types.Resize, writer: anytype) !void {
+    Vapor.print("Resize: {any}\n", .{resize});
+    try writeMappedString(Types.Resize, resize, &resize_map, writer);
+}
+
 // Function to convert ListStyle enum to CSS string
 fn listStyleToCSS(list_style: ListStyle, writer: anytype) !void {
     try writeMappedString(ListStyle, list_style, &list_style_map, writer);
@@ -882,7 +901,7 @@ pub fn generateVisual(visual: *const Types.PackedVisual, writer: writer_t) void 
     }
 
     // Text-Deco
-    if (visual.text_decoration != .default) {
+    if (visual.text_decoration.type != .default) {
         writePropValue("text-decoration", .{ .tag = .text_decoration, .data = .{ .text_decoration = visual.text_decoration } }, writer);
     }
 
@@ -902,6 +921,10 @@ pub fn generateVisual(visual: *const Types.PackedVisual, writer: writer_t) void 
     // There is experimental support for caret type ie block or line
     if (visual.caret.type != .none) {
         writePropValue("caret-color", .{ .tag = .caret, .data = .{ .caret = visual.caret } }, writer);
+    }
+
+    if (visual.resize != .default) {
+        writePropValue("resize", .{ .tag = .resize, .data = .{ .resize = visual.resize } }, writer);
     }
 }
 

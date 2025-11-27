@@ -518,7 +518,16 @@ pub fn checkVisual(visual: *const types.Visual, packet_visual: *types.PackedVisu
     }
 
     if (visual.text_decoration) |text_decoration| {
-        packet_visual.text_decoration = text_decoration;
+        packet_visual.text_decoration = .{
+            .type = text_decoration.type,
+            .style = text_decoration.style,
+        };
+
+        if (text_decoration.color) |color| {
+            var text_decoration_color = packet_visual.text_decoration.color;
+            packColor(color, &text_decoration_color);
+            packet_visual.text_decoration.color = text_decoration_color;
+        }
     }
 
     if (visual.blur) |blur| {
@@ -538,6 +547,10 @@ pub fn checkVisual(visual: *const types.Visual, packet_visual: *types.PackedVisu
     if (visual.white_space) |white_space| {
         packet_visual.has_white_space = true;
         packet_visual.white_space = white_space;
+    }
+
+    if (visual.resize) |resize| {
+        packet_visual.resize = resize;
     }
 }
 

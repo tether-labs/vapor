@@ -2,6 +2,8 @@ const std = @import("std");
 const Vapor = @import("Vapor.zig");
 const Wasm = @import("wasm");
 const isWasi = Vapor.isWasi;
+const utils = @import("utils.zig");
+const hashKey = utils.hashKey;
 
 pub const Event = @This();
 id: u32,
@@ -30,6 +32,57 @@ pub fn metaKey(evt: *Event) bool {
 pub fn text(evt: *Event) []const u8 {
     const resp = getEventDataInput(evt.id);
     return std.mem.span(resp);
+}
+
+pub const File = struct {
+    contents: []const u8,
+};
+
+pub fn readFile(evt: *Event, onload: fn ([]const u8) void) void {
+    if (isWasi) {
+        var callback_id = evt.id;
+        callback_id +%= hashKey("form");
+        const Closure = struct {
+            run_node: Vapor.Node = .{ .data = .{ .runFn = runFn, .deinitFn = deinitFn } },
+            fn runFn(action: *Vapor.Action) void {
+                const run_node: *Vapor.Node = @fieldParentPtr("data", action);
+                const object = run_node.data.dynamic_object orelse {
+                    Vapor.printlnSrcErr("Bridge: Observer callback called without object, this is a js side issue", .{}, @src());
+                    Vapor.printlnSrcErr("No object found", .{}, @src());
+                    return;
+                };
+                const file: File = Vapor.convertFromDynamicToType(File, object);
+                @call(.auto, onload, .{file.contents});
+            }
+            fn deinitFn(_: *Vapor.Node) void {}
+        };
+
+        const closure = Vapor.arena(.frame).create(Closure) catch |err| {
+            Vapor.printErr("Failed to create onload closure {any}\n", .{err});
+            return;
+        };
+        closure.* = .{};
+
+        Vapor.ctx_callback_registry.put(callback_id, &closure.run_node) catch |err| {
+            Vapor.printErr("Failed to register onload callback {any}\n", .{err});
+            return;
+        };
+
+        Wasm.readFileAsTextWasm(evt.id, 0, callback_id);
+    }
+    return;
+}
+
+export fn readObject(callback_ptr: u32, object_ptr: ?*Vapor.DynamicObject) void {
+    const node = Vapor.ctx_callback_registry.get(callback_ptr) orelse {
+        Vapor.printlnSrcErr("Callback not found\n", .{}, @src());
+        return;
+    };
+    node.data.dynamic_object = object_ptr;
+    @call(.auto, node.data.runFn, .{&node.data});
+    if (Vapor.mode == .atomic) {
+        Vapor.cycle();
+    }
 }
 
 pub fn formData(evt: *Event, form_value: anytype) ?@typeInfo(@TypeOf(form_value)).pointer.child {

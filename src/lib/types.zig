@@ -1375,7 +1375,35 @@ pub const Dim = struct {
     }
 };
 
-pub const TextDecoration = enum(u8) {
+pub const Resize = enum(u8) {
+    default,
+    none,
+    both,
+    horizontal,
+    vertical,
+};
+
+pub const TextDecoration = struct {
+    pub const none = TextDecoration{ .type = .none };
+    pub const overline = TextDecoration{ .type = .overline };
+    pub const underline = TextDecoration{ .type = .underline };
+    pub const line_through = TextDecoration{ .type = .line_through };
+    pub const blink = TextDecoration{ .type = .blink };
+    type: TextDecorationType = .none,
+    style: TextDecorationStyle = .default,
+    color: ?Color = null,
+};
+
+pub const TextDecorationStyle = enum(u8) {
+    default,
+    solid,
+    double,
+    dotted,
+    dashed,
+    wavy,
+};
+
+pub const TextDecorationType = enum(u8) {
     default,
     none,
     overline,
@@ -1811,6 +1839,8 @@ pub const Visual = struct {
     /// White space handling (normal, nowrap, pre, pre-wrap)
     white_space: ?WhiteSpace = null,
 
+    resize: ?Resize = null,
+
     pub fn font(size: u8, weight: ?u16, color: ?Color) Visual {
         return .{
             .font_size = size,
@@ -2032,6 +2062,12 @@ pub const PackedLayers = packed struct {
     len: usize = 0,
 };
 
+pub const PackedTextDecoration = packed struct {
+    type: TextDecorationType = .none,
+    style: TextDecorationStyle = .default,
+    color: PackedColor = .{},
+};
+
 pub const PackedVisual = packed struct {
     background: PackedColor = .{},
     packed_layers: PackedLayers = .{},
@@ -2048,7 +2084,7 @@ pub const PackedVisual = packed struct {
     has_opacity: bool = false,
     ellipsis: Ellipsis = .none,
     opacity: f16 = 1,
-    text_decoration: TextDecoration = .none,
+    text_decoration: PackedTextDecoration = .{},
     blur: u8 = 0,
     list_style: ListStyle = .default,
     outline: Outline = .default,
@@ -2064,6 +2100,7 @@ pub const PackedVisual = packed struct {
     transitions: PackedTransition = undefined,
     is_text_gradient: bool = false,
     caret: PackedCaret = .{},
+    resize: Resize = .default,
 };
 
 pub const PackedInteractive = packed struct {
@@ -2481,10 +2518,15 @@ const InputParamsCheckBox = struct {
     checkmark: ?Style = null,
 };
 
-const InputParamsFile = struct {
-    tag: ?[]const u8 = null,
-    required: ?bool = null,
-    disabled: ?bool = null,
+pub const InputParamsFile = struct {
+    type: InputTypes = .file,
+    // tag: ?[]const u8 = null,
+    // required: ?bool = null,
+    // disabled: ?bool = null,
+    default_ptr: ?[*]const u8 = null,
+    default_len: usize = 0,
+    value_ptr: ?[*]const u8 = null,
+    value_len: usize = 0,
 };
 
 pub const InputTypes = enum(u8) {
@@ -2510,7 +2552,7 @@ pub const TextFieldParams = union(enum) {
     password: InputParamsPassword,
     email: InputParamsEmail,
     telephone: InputParamsTelephone,
-    // file: InputParamsFile,
+    file: InputParamsFile,
 };
 
 pub const StateType = enum {

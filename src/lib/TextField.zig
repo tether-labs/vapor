@@ -153,6 +153,14 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
                         ._text_field_params = .{ .telephone = .{} },
                     };
                 },
+                .file => {
+                    return Self{
+                        ._elem_type = .TextField,
+                        ._ui_node = ui_node,
+                        ._text_field_type = .file,
+                        ._text_field_params = .{ .file = .{} },
+                    };
+                },
                 else => {
                     Vapor.printlnSrcErr("Error: TextField only accepts valid types, Not valid: {any}", .{textfield_type}, @src());
                     unreachable;
@@ -195,7 +203,15 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
                                 text_field_params.telephone.default_ptr = value.ptr;
                                 text_field_params.telephone.default_len = value.len;
                             },
-                            else => unreachable,
+                            .file => {
+                                text_field_params.file.default_ptr = value.ptr;
+                                text_field_params.file.default_len = value.len;
+                            },
+                            else => {
+                                Vapor.printlnSrcErr("Error: TextField only accepts valid types, Not valid: {any}", .{self._text_field_type}, @src());
+                                unreachable;
+                                // @compileError("TextField only accepts []const u8 or TextInput");
+                            },
                         }
                     } else {
                         Vapor.printlnErr("Cannot set integer placeholder on type: {any}", .{@typeInfo(V).pointer});
@@ -382,10 +398,10 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
             //         else => return self.*,
             //     }
             // } else {
-                Vapor.attachEventCallback(ui_node, .input, cb) catch |err| {
-                    Vapor.println("ONLEAVE: Could not attach event callback {any}\n", .{err});
-                    unreachable;
-                };
+            Vapor.attachEventCallback(ui_node, .input, cb) catch |err| {
+                Vapor.println("ONLEAVE: Could not attach event callback {any}\n", .{err});
+                unreachable;
+            };
             // }
 
             return new_self;
@@ -720,6 +736,14 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
             return new_self;
         }
 
+        pub fn resize(self: *const Self, value: types.Resize) Self {
+            var new_self: Self = self.*;
+            var visual = new_self._visual orelse types.Visual{};
+            visual.resize = value;
+            new_self._visual = visual;
+            return new_self;
+        }
+
         pub fn hoverBackground(self: *const Self, color: types.Background) Self {
             var new_self: Self = self.*;
             var _interactive = new_self._interactive orelse types.Interactive{};
@@ -970,6 +994,7 @@ const FieldExportInt = Vapor.exportStruct(types.InputParamsInt);
 const FieldExportPassword = Vapor.exportStruct(types.InputParamsPassword);
 const FieldExportEmail = Vapor.exportStruct(types.InputParamsEmail);
 const FieldExportTelephone = Vapor.exportStruct(types.InputParamsTelephone);
+const FieldExportFile = Vapor.exportStruct(types.InputParamsFile);
 
 pub export fn getTextFieldParams(node_ptr: ?*UINode) ?[*]const u8 {
     const text_field_params = node_ptr.?.text_field_params orelse return null;
@@ -999,6 +1024,11 @@ pub export fn getTextFieldParams(node_ptr: ?*UINode) ?[*]const u8 {
             FieldExportTelephone.instance = telephone;
             return FieldExportTelephone.getInstancePtr();
         },
+        .file => |file| {
+            FieldExportFile.init();
+            FieldExportFile.instance = file;
+            return FieldExportFile.getInstancePtr();
+        },
     }
     return null;
 }
@@ -1024,6 +1054,9 @@ pub export fn getTextFieldCount(node_ptr: *UINode) u32 {
         .telephone => {
             return FieldExportTelephone.getFieldCount();
         },
+        .file => {
+            return FieldExportFile.getFieldCount();
+        },
     }
     return 0;
 }
@@ -1045,6 +1078,9 @@ pub export fn getTextFieldDescriptor(node_ptr: ?*UINode, index: u32) ?*const Vap
         },
         .telephone => {
             return FieldExportTelephone.getFieldDescriptor(index);
+        },
+        .file => {
+            return FieldExportFile.getFieldDescriptor(index);
         },
     }
     return null;
