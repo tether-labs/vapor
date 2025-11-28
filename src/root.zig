@@ -43,6 +43,7 @@ pub const DateTime = @import("lib/DateTime.zig");
 pub const Animation = @import("lib/Animation.zig");
 pub const Transition = @import("lib/Transition.zig");
 pub const ThemeDefinition = Types.ThemeDefinition;
+pub const FileReader = @import("lib/File.zig").FileReader;
 // pub const Error = @import("lib/routes/nightwatch/Error.zig");
 
 const ComponentBuilder = @import("lib/Component.zig").Builder;
@@ -60,6 +61,7 @@ pub const onCommit = lib.onCommit;
 pub const mutateById = lib.mutateById;
 pub const Mark = @import("lib/Mark.zig");
 pub const print = lib.print;
+pub const printSrcErr = lib.printlnSrcErr;
 pub const cast = utils.cast;
 pub const alert = lib.alert;
 pub const Static = struct {

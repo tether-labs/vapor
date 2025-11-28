@@ -790,11 +790,22 @@ pub fn Builder(comptime state_type: types.StateType) type {
         }
 
         pub fn RedirectLink(options: LinkOptions) Self {
+            const elem_decl = ElementDecl{
+                .state_type = _state_type,
+                .elem_type = .RedirectLink,
+                .href = options.url,
+                .aria_label = options.aria_label,
+            };
+            const ui_node = LifeCycle.open(elem_decl) orelse {
+                Vapor.printlnSrcErr("Could not add component Link to lifecycle {any}\n", .{error.CouldNotAllocate}, @src());
+                unreachable;
+            };
+
             return Self{
+                ._ui_node = ui_node,
                 ._elem_type = .RedirectLink,
-                ._href = options.url,
-                // ._href = if (Vapor.isGenerated) "" else options.url,
                 ._aria_label = options.aria_label,
+                ._href = options.url,
             };
         }
 
