@@ -514,6 +514,7 @@ fn dotsToCSS(dots: Types.PackedDots, writer: anytype) !void {
 }
 
 fn gradientToCSS(gradient: Types.PackedGradient, writer: writer_t) !void {
+    // std.debug.print("Gradient Type Integer: {}\n", .{@intFromEnum(gradient.type)});
     switch (gradient.type) {
         .linear => {
             writer.write("linear-gradient(") catch {};

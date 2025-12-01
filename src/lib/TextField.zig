@@ -257,10 +257,10 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
                 return self.*;
             }
 
-            // const ui_node = self._ui_node orelse {
-            //     Vapor.printlnSrcErr("Node is null must ref() first, before setting onChange", .{}, @src());
-            //     unreachable;
-            // };
+            const ui_node = self._ui_node orelse {
+                Vapor.printlnSrcErr("Node is null must ref() first, before setting onChange", .{}, @src());
+                unreachable;
+            };
 
             switch (self._text_field_type) {
                 .string => {
@@ -270,14 +270,14 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
                     }
                     new_self._text_field_params.?.string.value_ptr = value.*.ptr;
                     new_self._text_field_params.?.string.value_len = value.*.len;
-                    // Vapor.attachEventCtxCallback(ui_node, .input, struct {
-                    //     pub fn updateText(value_type: *[]const u8, evt: *Vapor.Event) void {
-                    //         value_type.* = evt.text();
-                    //     }
-                    // }.updateText, value) catch |err| {
-                    //     Vapor.println("bindValue: Could not attach event callback {any}\n", .{err});
-                    //     unreachable;
-                    // };
+                    Vapor.attachEventCtxCallback(ui_node, .input, struct {
+                        pub fn updateText(value_type: *[]const u8, evt: *Vapor.Event) void {
+                            value_type.* = evt.text();
+                        }
+                    }.updateText, value) catch |err| {
+                        Vapor.println("bindValue: Could not attach event callback {any}\n", .{err});
+                        unreachable;
+                    };
                 },
                 .int => {
                     if (@TypeOf(value.*) != i32) {
@@ -998,7 +998,7 @@ const FieldExportFile = Vapor.exportStruct(types.InputParamsFile);
 
 pub export fn getTextFieldParams(node_ptr: ?*UINode) ?[*]const u8 {
     const text_field_params = node_ptr.?.text_field_params orelse return null;
-    switch (text_field_params) {
+    switch (text_field_params.*) {
         .string => |string| {
             FieldExportString.init();
             FieldExportString.instance = string;
@@ -1038,7 +1038,7 @@ pub export fn getTextFieldCount(node_ptr: *UINode) u32 {
         Vapor.printErr("Error: No text_field_params found {any}", .{node_ptr.type});
         return 0;
     };
-    switch (text_field_params) {
+    switch (text_field_params.*) {
         .string => {
             return FieldExportString.getFieldCount();
         },
@@ -1063,7 +1063,7 @@ pub export fn getTextFieldCount(node_ptr: *UINode) u32 {
 
 pub export fn getTextFieldDescriptor(node_ptr: ?*UINode, index: u32) ?*const Vapor.FieldDescriptor() {
     const text_field_params = node_ptr.?.text_field_params orelse return null;
-    switch (text_field_params) {
+    switch (text_field_params.*) {
         .string => {
             return FieldExportString.getFieldDescriptor(index);
         },

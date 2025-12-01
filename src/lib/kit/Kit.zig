@@ -245,7 +245,10 @@ pub fn fetchAwait(url: []const u8, http_req: HttpReq) *Future {
     future.* = .{
         .id = id,
     };
-    fetchWasm(url.ptr, url.len, id, json.ptr, json.len);
+
+    if (Vapor.isWasi) {
+        fetchWasm(url.ptr, url.len, id, json.ptr, json.len);
+    }
     return future;
 }
 
@@ -325,7 +328,9 @@ pub fn fetch(url: []const u8, cb: fn (Response) void, http_req: HttpReq) void {
         Vapor.println("Button Function Registry {any}\n", .{err});
         return;
     };
-    fetchWasm(url.ptr, url.len, id, json.ptr, json.len);
+    if (Vapor.isWasi) {
+        fetchWasm(url.ptr, url.len, id, json.ptr, json.len);
+    }
     // return id;
 }
 

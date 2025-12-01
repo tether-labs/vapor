@@ -12,6 +12,8 @@ pub const Draggable = struct {
     current_y: f32 = 0,
     delta_x: f32 = 0,
     delta_y: f32 = 0,
+    movement_x: f32 = 0,
+    movement_y: f32 = 0,
     is_dragging: bool = false,
     x: f32 = 0,
     y: f32 = 0,
@@ -148,9 +150,9 @@ pub const Draggable = struct {
         self.up_listener_id = Vapor.addGlobalListenerCtx(.pointerup, handlePointerUp, self) orelse unreachable;
 
         // User callback
-        // if (self.on_drag_start) |callback| {
-        //     callback(self, evt);
-        // }
+        if (self.on_drag_start) |callback| {
+            callback(self, evt);
+        }
 
         // Visual feedback
         // self.element.addClass("dragging");
@@ -167,6 +169,8 @@ pub const Draggable = struct {
         // Calculate delta
         var delta_x = evt.clientX() - self.initial_x;
         var delta_y = evt.clientY() - self.initial_y;
+        self.movement_x = evt.movementX();
+        self.movement_y = evt.movementY();
 
         self.delta_x = delta_x;
         self.delta_y = delta_y;

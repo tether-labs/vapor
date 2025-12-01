@@ -6,11 +6,12 @@ const hashKey = utils.hashKey;
 const Writer = @import("Writer.zig");
 const StringData = @import("Pool.zig").StringData;
 const Packer = @import("Packer.zig");
+const ClassType = @import("ClassCache.zig").ClassType;
 // const CompactStyle = @import("types.zig").CompactStyle;
 
 const types = @import("types.zig");
 
-const Item = struct {
+pub const Item = struct {
     ptr: ?*UINode,
     next: ?*Item = null,
 };
@@ -40,8 +41,8 @@ stack: ?*Item = null,
 root_stack_ptr: ?*Item = null,
 node_pool: std.heap.MemoryPool(UINode),
 memory_pool: std.heap.MemoryPool(Item),
-render_cmd_memory_pool: std.heap.MemoryPool(RenderCommand),
-tree_memory_pool: std.heap.MemoryPool(CommandsTree),
+// render_cmd_memory_pool: std.heap.MemoryPool(RenderCommand),
+// tree_memory_pool: std.heap.MemoryPool(CommandsTree),
 current_offset: f32 = 0,
 ui_tree: ?*CommandsTree = null,
 
@@ -64,58 +65,110 @@ pub const UINode = struct {
     dirty: bool = false,
     parent: ?*UINode = null,
     type: EType = EType.FlexBox,
-    children: ?std.ArrayListUnmanaged(*UINode) = null,
     text: ?[]const u8 = null,
     uuid: []const u8 = "",
-    uuid_buf: [64]u8 = undefined,
+    uuid_buf: [32]u8 = undefined,
     href: ?[]const u8 = null,
     index: usize = 0,
     hooks: HooksIds = .{},
-    text_field_params: ?types.TextFieldParams = null,
+    text_field_params: ?*types.TextFieldParams = null,
     event_type: ?types.EventType = null,
     state_type: types.StateType = .pure,
     aria_label: ?[]const u8 = null,
     alt: ?[]const u8 = null,
     class: ?[]const u8 = null,
-    animation_enter: ?*const Vapor.Animation = null,
-    animation_exit: ?*const Vapor.Animation = null,
+    // animation_enter: ?*const Vapor.Animation = null,
+    // animation_exit: ?*const Vapor.Animation = null,
     packed_field_ptrs: ?PackedFieldPtrs = null, // TODO: This is 28 bytes
-    can_have_children: bool = true,
     children_count: usize = 0,
     finger_print: u32 = 0,
     style_hash: u32 = 0,
     style_changed: bool = false,
+    props_hash: u32 = 0,
+    props_changed: bool = false,
     hash: u32 = 0,
     level: ?u8 = null,
-    video: ?types.Video = null,
-    event_handlers: ?Vapor.EventHandlers = null,
+    // video: ?types.Video = null,
+    event_handlers: ?*Vapor.EventHandlers = null,
     on_hover: bool = false,
     on_leave: bool = false,
     name: ?[]const u8 = null,
 
+    first_child: ?*UINode = null, // "child" in React terms
+    next_sibling: ?*UINode = null, // "sibling" in React terms
+    last_child: ?*UINode = null, // +4 bytes, but O(1) append
+
     // nodes_flat_index: usize = 0,
     // tooltip: ?types.Tooltip = null,
 
-    pub fn deinit(ui_node: *UINode) void {
-        ui_node.children.deinit();
-    }
-
-    pub fn addChild(parent: *UINode, child: *UINode) !void {
-        if (parent.children == null) return error.AttemptedToAddChildToNonContainer;
-        if (parent.children.?.items.len >= Vapor.page_node_count) return error.BufferOverflowIncreasePageNodeCount;
+    /// Add a child to this node (prepends - O(1))
+    /// Note: Children will be in reverse order of insertion
+    pub fn addChild(parent: *UINode, child: *UINode) void {
+        child.parent = parent;
+        child.next_sibling = parent.first_child;
+        parent.first_child = child;
         parent.children_count += 1;
-        try parent.children.?.ensureUnusedCapacity(Vapor.arena(.frame), 4);
-        parent.children.?.appendBounded(child) catch {
-            return error.BufferOverflowIncreasePageNodeCount;
-        };
     }
 
-    // pub fn orderedMove(node: *UINode) void {
-    //     const parent = node.parent orelse return;
-    //     var children = parent.children orelse return;
-    //     const index = node.finger_print % children.items.len;
-    //     children.insertBounded(, item: *UINode)
-    // }
+    pub fn appendChild(parent: *UINode, child: *UINode) void {
+        child.parent = parent;
+        child.next_sibling = null;
+        parent.children_count += 1;
+
+        if (parent.last_child) |last| {
+            last.next_sibling = child;
+        } else {
+            parent.first_child = child;
+        }
+        parent.last_child = child;
+    }
+
+    /// Get the next child (for iteration)
+    /// Usage:
+    ///   var child = node.first_child;
+    ///   while (child) |c| {
+    ///       // process c
+    ///       child = c.nextChild();
+    ///   }
+    pub fn nextChild(self: *UINode) ?*UINode {
+        return self.next_sibling;
+    }
+
+    /// Get child by index - O(n)
+    /// Returns null if index is out of bounds
+    pub fn childAt(self: *UINode, target_index: usize) ?*UINode {
+        var current = self.first_child;
+        var i: usize = 0;
+
+        while (current) |child| {
+            if (i == target_index) {
+                return child;
+            }
+            i += 1;
+            current = child.next_sibling;
+        }
+
+        return null;
+    }
+
+    /// Iterator for convenient for-loop syntax
+    /// Usage:
+    ///   for (node.children()) |child| {
+    ///       // process child
+    ///   }
+    pub fn children(self: *UINode) ChildIterator {
+        return .{ .current = self.first_child };
+    }
+
+    pub const ChildIterator = struct {
+        current: ?*UINode,
+
+        pub fn next(self: *ChildIterator) ?*UINode {
+            const node = self.current orelse return null;
+            self.current = node.next_sibling;
+            return node;
+        }
+    };
 };
 
 pub fn init(_: *UIContext, parent: ?*UINode, etype: EType) !*UINode {
@@ -126,12 +179,6 @@ pub fn init(_: *UIContext, parent: ?*UINode, etype: EType) !*UINode {
         .parent = parent,
         .type = etype,
     };
-    if (etype != .Text and etype != .TextFmt) {
-        node.children = try std.ArrayListUnmanaged(*UINode).initCapacity(Vapor.arena(.frame), 4);
-    } else {
-        node.can_have_children = false;
-    }
-
     return node;
 }
 
@@ -141,8 +188,8 @@ pub fn initContext(ui_ctx: *UIContext) !void {
     ui_ctx.* = .{
         .node_pool = std.heap.MemoryPool(UINode).init(allocator),
         .memory_pool = std.heap.MemoryPool(Item).init(allocator),
-        .render_cmd_memory_pool = std.heap.MemoryPool(RenderCommand).init(allocator),
-        .tree_memory_pool = std.heap.MemoryPool(CommandsTree).init(allocator),
+        // .render_cmd_memory_pool = std.heap.MemoryPool(RenderCommand).init(allocator),
+        // .tree_memory_pool = std.heap.MemoryPool(CommandsTree).init(allocator),
     };
 
     // Either change the init function to return a pointer directly
@@ -156,15 +203,6 @@ pub fn initContext(ui_ctx: *UIContext) !void {
     };
     ui_ctx.root_stack_ptr = item;
     ui_ctx.stack = item;
-    // node_count = 0;
-    // if (node_count >= nodes.len) {
-    //     Vapor.printlnErr("Page Node count is too small {d}", .{node_count});
-    // } else {
-    //     // nodes[node_count] = ui_ctx.root.?;
-    //     // ui_ctx.root.?.nodes_flat_index = node_count;
-    //     // seen_nodes[node_count] = true;
-    // }
-    // node_count += 1;
 
     packed_position = std.mem.zeroes(types.PackedPosition);
     packed_layout = std.mem.zeroes(types.PackedLayout);
@@ -172,12 +210,7 @@ pub fn initContext(ui_ctx: *UIContext) !void {
     packed_visual = std.mem.zeroes(types.PackedVisual);
     packed_animations = .{};
     packed_interactive = std.mem.zeroes(types.PackedInteractive);
-    // Vapor.println("Size Position: {any}", .{@bitSizeOf(types.PackedPosition)});
-    // Vapor.println("Size Layout: {any}", .{@bitSizeOf(types.PackedLayout)});
-    // Vapor.println("Size Margins Paddings: {any}", .{@bitSizeOf(types.PackedMarginsPaddings)});
-    // Vapor.println("Size Visual: {any}", .{@bitSizeOf(types.PackedVisual)});
-    // Vapor.println("Size Animations: {any}", .{@bitSizeOf(types.PackedAnimations)});
-    // Vapor.println("Size Interactive: {any}", .{@bitSizeOf(types.PackedInteractive)});
+    // debugPrintUINodeLayout();
 }
 
 pub fn deinit(_: *UIContext) void {
@@ -187,6 +220,7 @@ pub fn deinit(_: *UIContext) void {
 }
 
 pub fn stackRegister(ui_ctx: *UIContext, ui_node: *UINode) !void {
+    Vapor.frame_arena.incrementItemCount();
     const item: *Item = try ui_ctx.memory_pool.create();
     const current_stack = ui_ctx.stack;
     item.* = .{
@@ -210,38 +244,23 @@ var current_tree: usize = 0;
 pub var indexes: std.AutoHashMap(u32, usize) = undefined;
 fn setUUID(parent: *UINode, child: *UINode) void {
     uuid_depth += 1;
-    // const count = key_depth_map.get(hashKey(parent.uuid)) orelse blk: {
-    //     break :blk 0;
-    // };
-
     const component_count = indexes.get(hashKey(parent.uuid)) orelse blk: {
         break :blk 0;
     };
 
     // Set the keyGenerator count
-    // KeyGenerator.setCount(count);
     KeyGenerator.setComponentCount(component_count);
-    // KeyGenerator.resetCounter();
     const index: usize = parent.children_count;
     if (child.uuid.len > 0) {
-        // KeyGenerator.incrementComponentCount();
-        // KeyGenerator.incrementCount();
         child.index = index - 1;
     } else {
         KeyGenerator.incrementComponentCount();
-        // KeyGenerator.incrementCount();
-
-        // const buf: *[]u8 = Vapor.frame_arena.uuidAlloc() orelse unreachable;
         const key = KeyGenerator.generateKey(
             &child.uuid_buf,
             child.type,
             parent.uuid,
             uuid_depth,
         );
-        // const string_data = Vapor.pool.createString(key) catch |err| {
-        //     Vapor.printlnErr("Could not create string {any}\n", .{err});
-        //     unreachable;
-        // };
         child.uuid = key;
         child.index = KeyGenerator.getComponentCount() - 1;
         // we add this so that animations are sepeate, we need to be careful though since
@@ -249,10 +268,6 @@ fn setUUID(parent: *UINode, child: *UINode) void {
         // and then previous one uses an animation then that transistion and animation will be
         // applied to the new parent since it has the same class name and styling
     }
-    // Put the new keygenerator count in to the key_dpeht_map;
-    // key_depth_map.put(hashKey(parent.uuid), KeyGenerator.getCount()) catch |err| {
-    //     Vapor.printlnSrcErr("{any}", .{err}, @src());
-    // };
     indexes.put(hashKey(parent.uuid), KeyGenerator.getComponentCount()) catch |err| {
         Vapor.printlnSrcErr("{any}", .{err}, @src());
     };
@@ -269,10 +284,7 @@ pub fn open(ui_ctx: *UIContext, elem_decl: ElemDecl) !*UINode {
     var node = try ui_ctx.init(current_open, elem_decl.elem_type);
     node.level = elem_decl.level;
 
-    current_open.addChild(node) catch |err| {
-        // Vapor.printlnSrcErr("Could not add child {any}", .{err}, @src());
-        return err;
-    };
+    current_open.appendChild(node);
     ui_ctx.stackRegister(node) catch |err| {
         Vapor.printlnSrcErr("Could not register node {any}", .{err}, @src());
         return err;
@@ -563,8 +575,24 @@ var packed_interactive: types.PackedInteractive = .{};
 var packed_transition: types.PackedTransition = .{};
 var packed_layer: types.PackedLayer = .{ .Grid = .{} };
 
-pub var class_map: std.StringHashMap(StringData) = undefined;
+pub var element_style_hash_map: std.AutoHashMap(u32, [7]u32) = undefined;
+pub var global_classes: [7]u32 = .{ 0, 0, 0, 0, 0, 0, 0 };
 var buf: [128]u8 = undefined;
+
+/// Compares the old class hash with the new class hash and decrements the old class if it exists
+fn compareClobber(old_optional: ?[7]u32, new_class_hash: u32, index: usize, class_type: ClassType) !void {
+    if (old_optional) |old| {
+        if (old[index] != new_class_hash and old[index] != 0) {
+            try Vapor.class_cache.decrement(old[index]);
+            try Vapor.class_cache.set(new_class_hash, class_type);
+        }
+        return;
+    }
+
+    // If the old class is null we need to create a new class
+    try Vapor.class_cache.set(new_class_hash, class_type);
+}
+
 fn buildClassString(
     field_ptrs: *const PackedFieldPtrs,
     current_open: *UINode,
@@ -578,6 +606,9 @@ fn buildClassString(
     var writer: Writer = undefined;
     var writer_buf: [512]u8 = undefined;
     writer.init(&writer_buf);
+    const old_element_styles = element_style_hash_map.get(current_open.hash);
+
+    // var current_classes: ?[7][]const u8 = class_map.get(current_open.hash);
 
     if (current_open.class) |class| {
         writer.write(class) catch return error.CouldNotAllocate;
@@ -588,47 +619,68 @@ fn buildClassString(
         const common = KeyGenerator.generateHashKey(&buf, hash_l, "lay");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
+        global_classes[1] = hash_l;
+        try compareClobber(old_element_styles, hash_l, 1, .layout);
     }
 
     if (field_ptrs.position_ptr) |_| {
         const common = KeyGenerator.generateHashKey(&buf, hash_p, "pos");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
+        global_classes[2] = hash_p;
+        try compareClobber(old_element_styles, hash_p, 2, .position);
     }
 
     if (field_ptrs.margins_paddings_ptr) |_| {
         const common = KeyGenerator.generateHashKey(&buf, hash_m, "mapa");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
+        global_classes[3] = hash_m;
+        try compareClobber(old_element_styles, hash_m, 3, .margin_padding);
     }
 
     if (field_ptrs.visual_ptr) |_| {
         const common = KeyGenerator.generateHashKey(&buf, hash_v, "vis");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
+        global_classes[4] = hash_v;
+        try compareClobber(old_element_styles, hash_v, 4, .visual);
     }
 
     if (field_ptrs.animations_ptr) |_| {
         const common = KeyGenerator.generateHashKey(&buf, hash_a, "anim");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
+        global_classes[5] = hash_a;
+        try compareClobber(old_element_styles, hash_a, 5, .animation);
     }
 
     if (field_ptrs.interactive_ptr) |_| {
         const common = KeyGenerator.generateHashKey(&buf, hash_i, "intr");
         writer.write(common) catch return error.CouldNotAllocate;
         writer.writeByte(' ') catch return error.CouldNotAllocate;
+        global_classes[6] = hash_i;
+        try compareClobber(old_element_styles, hash_i, 6, .interactive);
     }
 
-    const string_data = class_map.get(writer.buffer[0..writer.pos]) orelse blk: {
-        const string_data = Vapor.pool.createString(writer.buffer[0..writer.pos]) catch |err| {
-            Vapor.printlnErr("Could not create string {any}\n", .{err});
-            return error.PoolCouldNotAllocate;
-        };
-        class_map.put(string_data.asSlice(), string_data) catch return error.PoolCouldNotAllocate;
-        break :blk string_data;
+    if (writer.buffer[0..writer.pos].len == 0) return;
+
+    // We store the new class hash and list inside the element_style_hash_map
+    // and clobber the old class if it exists this way we ensure each element has only one
+    try element_style_hash_map.put(current_open.hash, .{
+        global_classes[0],
+        global_classes[1],
+        global_classes[2],
+        global_classes[3],
+        global_classes[4],
+        global_classes[5],
+        global_classes[6],
+    });
+    const full_class = Vapor.arena(.frame).dupe(u8, writer.buffer[0..writer.pos]) catch |err| {
+        Vapor.printlnErr("Could not create string {any} To many classes have been created\n", .{err});
+        return err;
     };
-    current_open.class = string_data.asSlice();
+    current_open.class = full_class;
 }
 
 // TODO: Hashing the value is slow, we need to create a better hashmap system
@@ -664,7 +716,9 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
     }
 
     if (elem_decl.text_field_params) |params| {
-        current_open.text_field_params = params;
+        const text_field_params = Vapor.arena(.frame).create(types.TextFieldParams) catch unreachable;
+        text_field_params.* = params;
+        current_open.text_field_params = text_field_params;
         switch (params) {
             .string => |string| {
                 var value: []const u8 = "";
@@ -692,18 +746,19 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
         current_open.finger_print +%= hashKey(href);
     }
 
-    if (elem_decl.video) |video| {
-        current_open.video = video.*;
-        if (video.src) |src| {
-            current_open.finger_print +%= hashKey(src);
-        }
-        current_open.finger_print +%= @intFromBool(video.autoplay);
-        current_open.finger_print +%= @intFromBool(video.muted);
-        current_open.finger_print +%= @intFromBool(video.loop);
-        current_open.finger_print +%= @intFromBool(video.controls);
-    }
+    // if (elem_decl.video) |video| {
+    //     current_open.video = video.*;
+    //     if (video.src) |src| {
+    //         current_open.finger_print +%= hashKey(src);
+    //     }
+    //     current_open.finger_print +%= @intFromBool(video.autoplay);
+    //     current_open.finger_print +%= @intFromBool(video.muted);
+    //     current_open.finger_print +%= @intFromBool(video.loop);
+    //     current_open.finger_print +%= @intFromBool(video.controls);
+    // }
 
     current_open.hash = hashKey(current_open.uuid);
+    current_open.props_hash = current_open.finger_print;
     // current_open.finger_print +%= hashKey(current_open.uuid);
 
     if (style) |s| {
@@ -1112,7 +1167,12 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
         current_open.style_hash +%= hash_i;
 
         if (s.style_id != null) {
-            Vapor.generator.writeNodeStyle(current_open);
+            const class = current_open.class.?;
+            const new_class_hash = hashKey(class);
+            _ = Vapor.class_cache.get(new_class_hash) orelse {
+                Vapor.class_cache.set(new_class_hash, .defined) catch unreachable;
+                Vapor.generator.writeNodeStyle(current_open);
+            };
         } else {
             if (current_open.type == .Icon) {
                 current_open.class = elem_decl.href.?;
@@ -1137,13 +1197,13 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
         current_open.hooks = elem_decl.hooks;
     }
 
-    if (elem_decl.animation_enter) |animation_enter| {
-        current_open.animation_enter = animation_enter;
-    }
-    if (elem_decl.animation_exit) |animation_exit| {
-        current_open.animation_exit = animation_exit;
-    }
-
+    // if (elem_decl.animation_enter) |animation_enter| {
+    //     current_open.animation_enter = animation_enter;
+    // }
+    // if (elem_decl.animation_exit) |animation_exit| {
+    //     current_open.animation_exit = animation_exit;
+    // }
+    //
     current_open.state_type = elem_decl.state_type;
     current_open.aria_label = elem_decl.aria_label;
     current_open.alt = elem_decl.alt;
@@ -1218,7 +1278,7 @@ pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent:
     if (parent_op) |parent| {
         const parent_children = parent.children orelse return;
         if (parent_children.items.len > 0) {
-            ui_tree_parent.children = std.ArrayListUnmanaged(*CommandsTree).initCapacity(Vapor.arena(.frame), 4) catch |err| {
+            ui_tree_parent.children = std.ArrayListUnmanaged(*CommandsTree).initCapacity(Vapor.frame_arena.scratch_arena.allocator(), 4) catch |err| {
                 Vapor.printlnSrcErr("Could not ensure capacity {any}\n", .{err}, @src());
                 unreachable;
             };
@@ -1238,6 +1298,7 @@ pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent:
                     .has_children = child.children != null,
                     .hash = child.hash,
                     .style_changed = child.style_changed,
+                    .props_changed = child.props_changed,
                     // .tooltip = child.tooltip,
                 };
 
@@ -1273,7 +1334,7 @@ pub fn traverseChildren(ui_ctx: *UIContext, parent_op: ?*UINode, ui_tree_parent:
                         unreachable;
                     },
                 };
-                ui_tree_parent.children.ensureUnusedCapacity(Vapor.arena(.frame), 4) catch |err| {
+                ui_tree_parent.children.ensureUnusedCapacity(Vapor.frame_arena.scratch_arena.allocator(), 4) catch |err| {
                     Vapor.printlnSrcErr("Could not ensure capacity {any}\n", .{err}, @src());
                     unreachable;
                 };

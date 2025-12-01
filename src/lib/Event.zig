@@ -153,14 +153,23 @@ pub fn getEventDataNumber(id: u32, ptr: [*]const u8, len: u32) f32 {
 }
 
 export fn eventCallback(id: u32) void {
-    const evt_node = Vapor.events_callbacks.get(id) orelse unreachable;
+    const evt_node = Vapor.events_callbacks.get(id) orelse {
+        Vapor.printlnSrcErr("Event Callback not found\n", .{}, @src());
+        return;
+    };
     var event = Event{
         .id = id,
         .type = evt_node.evt_type,
     };
     @call(.auto, evt_node.cb, .{&event});
-    if (Vapor.mode == .atomic and evt_node.evt_type != .pointermove and evt_node.ui_node.?.type != .Form) {
-        Vapor.cycle();
+    if (Vapor.mode == .atomic and evt_node.evt_type != .pointermove) {
+        if (evt_node.ui_node) |node| {
+            if (node.type != .Form) {
+                Vapor.cycle();
+            }
+        } else {
+            Vapor.cycle();
+        }
     }
 }
 

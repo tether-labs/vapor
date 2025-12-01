@@ -3,6 +3,7 @@ const Vapor = @import("Vapor.zig");
 const UINode = @import("UITree.zig").UINode;
 const ElementType = @import("types.zig").ElementType;
 const Writer = @import("Writer.zig");
+const utils = @import("utils.zig");
 
 var hasher = std.hash.Wyhash.init(5213);
 var buf_128: [128]u8 = undefined;
@@ -100,11 +101,13 @@ pub const KeyGenerator = struct {
         hash: u32,
         tag: []const u8,
     ) []const u8 {
-        // writer.init(&buf_128);
+        var buf_short: [6]u8 = undefined;
+        const class_name = utils.hashToBase62(hash, &buf_short);
+
         writer.reset();
         writer.write(tag) catch "";
         writer.writeByte('_') catch "";
-        writer.writeU32(hash) catch "";
+        writer.write(class_name) catch "";
         const key = writer.buffer[0..writer.pos];
         @memcpy(buf[0..key.len], key);
         return buf[0..key.len];
@@ -219,8 +222,13 @@ pub const KeyGenerator = struct {
         writer.reset();
         writer.write(tag_name[0..@min(4, tag_name.len)]) catch "";
         writer.writeByte('_') catch "";
-        writer.writeU32(hash) catch "";
-        writer.write("-genk") catch "";
+
+        var buf_short: [6]u8 = undefined;
+        const class_name = utils.hashToBase62(hash, &buf_short);
+
+
+        writer.write(class_name) catch "";
+        writer.write("-gk") catch "";
         const key = writer.buffer[0..writer.pos];
         @memcpy(uuid_buf[0..key.len], key);
         return uuid_buf[0..key.len];

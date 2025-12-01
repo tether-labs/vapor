@@ -31,6 +31,7 @@ const Static = @import("Static.zig");
 const HtmlGenerator = @import("HtmlGenerator.zig");
 const mode_options = @import("build_options");
 const Packer = @import("Packer.zig");
+const ClassCache = @import("ClassCache.zig").ClassCache;
 
 const DebugLevel = enum(u8) { all = 0, debug = 1, info = 2, warn = 3, none = 4 };
 
@@ -192,6 +193,7 @@ pub var on_end_funcs: std.array_list.Managed(*const fn () void) = undefined;
 pub var on_end_ctx_funcs: std.array_list.Managed(*Node) = undefined;
 pub var on_commit_funcs: std.array_list.Managed(*const fn () void) = undefined;
 pub var mounted_ctx_funcs: std.AutoHashMap(u32, *Node) = undefined;
+pub var on_create_node_funcs: std.AutoHashMap(u32, *Node) = undefined;
 pub var created_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var updated_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var destroy_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
@@ -240,6 +242,7 @@ const ArenaType = enum {
 };
 
 pub fn arena(arena_type: ArenaType) std.mem.Allocator {
+    if (generating) return frame_arena.persistentAllocator();
     return switch (arena_type) {
         .frame => frame_arena.frameAllocator(),
         .view => frame_arena.viewAllocator(),
@@ -276,7 +279,8 @@ const Mode = enum {
 };
 
 pub var pool: Pool = undefined;
-pub var mode: Mode = .static;
+pub var mode: Mode = .atomic;
+pub var class_cache: ClassCache = undefined;
 pub fn init(config: VaporConfig) void {
     switch (builtin.target.cpu.arch) {
         .wasm32 => {
@@ -314,16 +318,21 @@ pub fn init(config: VaporConfig) void {
     initCalls(allocator);
     // >1kb
     initContextData(allocator);
-    UIContext.class_map = std.StringHashMap(Pool.StringData).init(allocator);
+    class_cache = ClassCache.init(allocator) catch |err| {
+        printlnErr("Could not init ClassCache {any}\n", .{err});
+        unreachable;
+    };
+    UIContext.element_style_hash_map = std.AutoHashMap(u32, [7]u32).init(allocator);
+    // UIContext.global_classes = std.array_list.Managed(u32).init(allocator);
 
     // UIContext.ui_nodes = allocator.alloc(UINode, config.page_node_count) catch unreachable;
 
-    // Init string pool adds 1kb
-    pool = Pool.init(allocator, page_node_count) catch |err| {
-        printlnErr("Could not init Pool {any}\n", .{err});
-        unreachable;
-    };
-    pool.initFreelist();
+    // // Init string pool adds 1kb
+    // pool = Pool.init(allocator, page_node_count) catch |err| {
+    //     printlnErr("Could not init Pool {any}\n", .{err});
+    //     unreachable;
+    // };
+    // pool.initFreelist();
     KeyGenerator.initWriter();
     // UIContext.debugPrintUINodeLayout();
 
@@ -385,6 +394,7 @@ fn initCalls(persistent_allocator: std.mem.Allocator) void {
     on_end_ctx_funcs = std.array_list.Managed(*Node).init(persistent_allocator);
     on_commit_funcs = std.array_list.Managed(*const fn () void).init(persistent_allocator);
     mounted_ctx_funcs = std.AutoHashMap(u32, *Node).init(persistent_allocator);
+    on_create_node_funcs = std.AutoHashMap(u32, *Node).init(persistent_allocator);
     destroy_funcs = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
     updated_funcs = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
     created_funcs = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
@@ -523,7 +533,7 @@ fn callNestedLayouts() void {
     }
 
     // Get the current layout
-    next_layout_path_to_check = std.fmt.allocPrint(allocator_global, "{s}/{s}", .{ next_layout_path_to_check, route_segments[0] }) catch return;
+    next_layout_path_to_check = fmtln("{s}/{s}", .{ next_layout_path_to_check, route_segments[0] });
     if (layout_map.get(hashKey(next_layout_path_to_check))) |entry| {
         const layout_path = next_layout_path_to_check; // "/root" or "/root/docs"
         const layout_fn = entry.call_fn;
@@ -559,6 +569,7 @@ const RenderPhase = enum {
 var changed_route: bool = false;
 pub fn renderCycle(route_ptr: [*:0]u8) void {
     frame_arena.beginFrame(); // For double-buffered approach
+    frame_arena.resetScratchArena();
     const start = nowMs();
     const route = std.mem.span(route_ptr);
 
@@ -575,7 +586,7 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     dirty_nodes.clearRetainingCapacity();
     // potential_nodes.clearRetainingCapacity();
     node_events_callbacks.clearRetainingCapacity();
-    events_callbacks.clearRetainingCapacity();
+    // events_callbacks.clearRetainingCapacity();
     nodes_with_events.clearRetainingCapacity();
     UIContext.indexes.clearRetainingCapacity();
     // on_end_funcs.clearRetainingCapacity();
@@ -639,6 +650,7 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     // This calls the render tree, with render_page as the root function call
     // First it traverses the layouts calling them in order, and then it calls the render_page
     callNestedLayouts(); // 4.5ms
+    // Vapor.println("Total {d}", .{frame_arena.queryBytesUsed()});
     Timer.generation_time = nowMs() - generation_start;
     // Debugger.render();
 
@@ -651,9 +663,12 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     const commit_start = nowMs();
     endPage(new_ctx);
     Timer.commit_time = nowMs() - commit_start;
-    // Vapor.println("Total {d}", .{frame_arena.queryBytesUsed()});
     if (!std.mem.eql(u8, previous_route, current_route)) {
         Vapor.has_dirty = true;
+    }
+
+    if (build_options.enable_debug and build_options.debug_level == .all) {
+        frame_arena.printStats();
     }
 
     // Replace old context with new context in the map
@@ -661,14 +676,12 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     Timer.total_time = nowMs() - start;
     changed_route = false;
     // _ = frame_arena.queryNodes();
+    class_cache.batchRemove();
     if (router.updateRouteTree(old_route.path, new_ctx)) {
         return;
     }
 
     allocator_global.free(route); // return host‑allocated buffer
-    if (build_options.enable_debug and build_options.debug_level == .all) {
-        frame_arena.printStats();
-    }
     previous_route = current_route;
 }
 
@@ -821,8 +834,8 @@ pub fn nowMs() f64 {
         return 0;
     }
 }
-pub fn endPage(path_ctx: *UIContext) void {
-    path_ctx.endContext();
+pub fn endPage(_: *UIContext) void {
+    // path_ctx.endContext();
     // TODO: We need to finish the layout engine for working with IOS
     // Canopy.createStack(path_ctx, path_ctx.root.?);
     // Canopy.calcWidth(path_ctx);
@@ -839,7 +852,7 @@ pub fn endPage(path_ctx: *UIContext) void {
     // @memset(UIContext.seen_nodes, false);
     // UIContext.target_node_index = 0;
     // UIContext.reconcileVisuals(path_ctx.root.?);
-    path_ctx.traverse();
+    // path_ctx.traverse();
 }
 
 pub fn end(vapor: *Vapor) !void {
@@ -1042,7 +1055,7 @@ pub fn attachEventCtxCallback(ui_node: *UINode, event_type: EventType, cb: anyty
         .event_type = event_type,
     };
 
-    if (ui_node.event_handlers) |*handlers| {
+    if (ui_node.event_handlers) |handlers| {
         for (handlers.handlers.items) |handler| {
             if (handler.type == event_type) {
                 Vapor.getFrameAllocator().destroy(closure);
@@ -1063,7 +1076,9 @@ pub fn attachEventCtxCallback(ui_node: *UINode, event_type: EventType, cb: anyty
             println("Event Callback Error: {any}\n", .{err});
             return error.EventCallbackError;
         };
-        ui_node.event_handlers = EventHandlers{ .handlers = handlers };
+        const event_handlers = arena(.frame).create(EventHandlers) catch unreachable;
+        event_handlers.* = .{ .handlers = handlers };
+        ui_node.event_handlers = event_handlers;
     }
 
     nodes_with_events.put(onid, ui_node) catch |err| {
@@ -1075,7 +1090,7 @@ pub fn attachEventCtxCallback(ui_node: *UINode, event_type: EventType, cb: anyty
 pub fn attachEventCallback(ui_node: *UINode, event_type: EventType, cb: *const fn (event: *Event) void) !void {
     const onid = hashKey(ui_node.uuid);
 
-    if (ui_node.event_handlers) |*handlers| {
+    if (ui_node.event_handlers) |handlers| {
         for (handlers.handlers.items) |handler| {
             if (handler.type == event_type) {
                 return error.EventCallbackError;
@@ -1095,7 +1110,9 @@ pub fn attachEventCallback(ui_node: *UINode, event_type: EventType, cb: *const f
             println("Event Callback Error: {any}\n", .{err});
             return error.EventCallbackError;
         };
-        ui_node.event_handlers = EventHandlers{ .handlers = handlers };
+        const event_handlers = arena(.frame).create(EventHandlers) catch unreachable;
+        event_handlers.* = .{ .handlers = handlers };
+        ui_node.event_handlers = event_handlers;
     }
 
     nodes_with_events.put(onid, ui_node) catch |err| {
@@ -1300,17 +1317,19 @@ pub inline fn registerHook(
 pub inline fn eventListener(
     event_type: types.EventType,
     cb: *const fn (event: *Event) void,
-) void {
-    const id = events_callbacks.count() + 1;
+) ?u32 {
+    var id: u32 = events_callbacks.count() + 1;
+    id +%= @intFromEnum(event_type);
     events_callbacks.put(id, .{ .cb = cb, .ui_node = null, .evt_type = event_type }) catch |err| {
         println("Event Callback Error: {any}\n", .{err});
+        return null;
     };
 
-    const event_type_str: []const u8 = std.enums.tagName(types.EventType, event_type) orelse return;
+    const event_type_str: []const u8 = std.enums.tagName(types.EventType, event_type) orelse return null;
     if (isWasi) {
         Wasm.createEventListener(event_type_str.ptr, event_type_str.len, id);
     }
-    return;
+    return id;
 }
 
 // The first node needs to be marked as false always
@@ -1318,10 +1337,9 @@ pub fn markChildrenDirty(node: *UINode) void {
     if (node.parent != null) {
         node.dirty = true;
     }
-    if (node.children) |children| {
-        for (children.items) |child| {
-            markChildrenDirty(child);
-        }
+    var children = node.children();
+    while (children.next()) |child| {
+        markChildrenDirty(child);
     }
 }
 // The first node needs to be marked as false always
@@ -1329,17 +1347,19 @@ pub fn markChildrenNotDirty(node: *UINode) void {
     if (node.parent != null) {
         node.dirty = false;
     }
-    if (node.children) |children| {
-        for (children.items) |child| {
-            markChildrenNotDirty(child);
-        }
+    var children = node.children();
+    while (children.next()) |child| {
+        markChildrenNotDirty(child);
     }
 }
 
 var buffer: [5_000_000]u8 = undefined;
 var writer: std.Io.Writer = undefined;
 var generated_file: std.fs.File = undefined;
+var generating: bool = false;
 pub fn generate() void {
+    Vapor.println("Generating... {any}\n", .{mode_options.static_mode});
+    generating = true;
     std.fs.cwd().makeDir("static") catch |err| {
         switch (err) {
             error.PathAlreadyExists => {},
@@ -1397,6 +1417,7 @@ pub fn generate() void {
         // Write to the file
         _ = generated_file.write(writer.buffer[0..writer.end]) catch unreachable;
     }
+    generating = false;
     // writer.flush() catch unreachable;
     // isGenerated = true;
 }
@@ -1641,8 +1662,8 @@ fn collectComponentIds(node: *UINode, selected_type: ElementType, component_ids:
     if (node.type == selected_type) {
         component_ids.append(node.uuid) catch unreachable;
     }
-    if (node.children == null) return;
-    for (node.children.?.items) |child| {
+    var children = node.children();
+    while (children.next()) |child| {
         collectComponentIds(child, selected_type, component_ids);
     }
 }
@@ -1727,6 +1748,40 @@ pub fn iterateTreeChildren(tree: *CommandsTree) void {
         iterateTreeChildren(child);
     }
 }
+pub var ui_node_layout_info = packed struct {
+    ui_node_size: u32,
+
+    // Offsets within UINode
+    elem_type_offset: u32,
+    text_ptr_offset: u32,
+    href_ptr_offset: u32,
+    id_ptr_offset: u32,
+    index_offset: u32,
+    classname_ptr_offset: u32,
+
+    hash_offset: u32,
+    style_changed_offset: u32,
+    props_changed_offset: u32,
+    dirty_offset: u32,
+    hooks_offset: u32,
+}{
+    .ui_node_size = @sizeOf(UINode),
+
+    // --- Direct fields of RenderCommand ---
+    .elem_type_offset = @offsetOf(UINode, "type"),
+    .text_ptr_offset = @offsetOf(UINode, "text"),
+    .href_ptr_offset = @offsetOf(UINode, "href"),
+    .id_ptr_offset = @offsetOf(UINode, "uuid"),
+    .index_offset = @offsetOf(UINode, "index"),
+    .classname_ptr_offset = @offsetOf(UINode, "class"),
+
+    // --- Nested struct sizes and offsets ---
+    .hash_offset = @offsetOf(UINode, "hash"),
+    .style_changed_offset = @offsetOf(UINode, "style_changed"),
+    .props_changed_offset = @offsetOf(UINode, "props_changed"),
+    .dirty_offset = @offsetOf(UINode, "dirty"),
+    .hooks_offset = @offsetOf(UINode, "hooks"),
+};
 
 // Export memory layout information for JavaScript to correctly read the struct
 // Export function to get a pointer to the memory layout information
@@ -1766,6 +1821,7 @@ pub var layout_info = packed struct {
     has_children_offset: u32,
     hash_offset: u32,
     style_changed_offset: u32,
+    props_changed_offset: u32,
 }{
     .render_command_size = @sizeOf(RenderCommand),
 
@@ -1797,6 +1853,7 @@ pub var layout_info = packed struct {
     .has_children_offset = @offsetOf(RenderCommand, "has_children"),
     .hash_offset = @offsetOf(RenderCommand, "hash"),
     .style_changed_offset = @offsetOf(RenderCommand, "style_changed"),
+    .props_changed_offset = @offsetOf(RenderCommand, "props_changed"),
 };
 
 // Make sure this function is not evaluated at compile time
@@ -2265,9 +2322,29 @@ pub export fn getRenderTreePtr() ?*UIContext.CommandsTree {
     return null;
 }
 
+pub export fn getRenderUINodeRootPtr() ?*UINode {
+    if (Vapor.current_ctx.root == null) return null;
+    return Vapor.current_ctx.root.?;
+}
+
+pub export fn getUINodeChildrenCount(node_ptr: ?*UINode) u32 {
+    const node = node_ptr orelse return 0;
+    return node.children_count;
+}
+
+pub export fn getUINodeChild(node_ptr: ?*UINode, index: u32) ?*UINode {
+    const node = node_ptr orelse return null;
+    return node.childAt(index);
+}
+
 pub export fn allocateLayoutInfo() *u8 {
     const info_ptr: *u8 = @ptrCast(&Vapor.layout_info);
     return info_ptr;
+}
+
+pub export fn allocateUINodeLayoutInfo() *u8 {
+    const ui_info_ptr: *u8 = @ptrCast(&Vapor.ui_node_layout_info);
+    return ui_info_ptr;
 }
 
 export fn allocUint8(length: u32) [*]const u8 {
@@ -2301,11 +2378,11 @@ export fn getTreeNodeChildrenCount(tree: *CommandsTree) usize {
     return tree.children.items.len;
 }
 
-export fn getUiNodeChildrenCount(tree: *CommandsTree) usize {
-    if (tree.node.node_ptr.children == null) return 0;
-    return tree.node.node_ptr.children.?.items.len;
-}
-
+// export fn getUiNodeChildrenCount(tree: *CommandsTree) usize {
+//     return tree.node.node_ptr.children_count;
+//     return tree.node.node_ptr.children.?.items.len;
+// }
+//
 export fn getTreeNodeChild(tree: *CommandsTree, index: usize) *CommandsTree {
     const child = tree.children.items[index];
     return child;
@@ -2362,8 +2439,8 @@ export fn callRouteRenderCycle(ptr: [*:0]u8) void {
     Packer.margins_paddings.clearRetainingCapacity();
     Packer.visuals.clearRetainingCapacity();
     Packer.interactives.clearRetainingCapacity();
-    UIContext.class_map.clearRetainingCapacity();
-    Vapor.pool.resetFreeList();
+    UIContext.element_style_hash_map.clearRetainingCapacity();
+    // Vapor.pool.resetFreeList();
     Vapor.renderCycle(ptr);
     Vapor.markChildrenDirty(Vapor.current_ctx.root.?);
     return;

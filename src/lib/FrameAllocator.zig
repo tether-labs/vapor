@@ -12,6 +12,7 @@ const NodePool = @import("NodePool.zig");
 const UINode = @import("UITree.zig").UINode;
 const RenderCommand = @import("types.zig").RenderCommand;
 const TreeNode = @import("UITree.zig").CommandsTree;
+const UITree = @import("UITree.zig");
 
 // The FrameAllocator is a simple allocator that allocates memory per render cycle.
 // It is used to allocate memory for the render commands and the UI tree, text, and styles, etc.
@@ -35,6 +36,8 @@ pub const Stats = struct {
     commands_allocated: usize = 0,
     bytes_used: usize = 0,
     nodes_memory: usize = 0,
+    item_memory: usize = 0,
+    items_allocated: usize = 0,
 };
 
 const FrameAllocator = @This();
@@ -44,6 +47,7 @@ current_frame: usize = 0,
 view: [2]FrameData,
 current_route: usize = 0,
 request_arena: Arena,
+scratch_arena: Arena,
 
 pub fn init(backing_allocator: std.mem.Allocator, _: usize) FrameAllocator {
     // Vapor.println("Node count {d}", .{node_count});
@@ -83,6 +87,7 @@ pub fn init(backing_allocator: std.mem.Allocator, _: usize) FrameAllocator {
             .{ .arena = current_route_arena },
         },
         .request_arena = std.heap.ArenaAllocator.init(backing_allocator),
+        .scratch_arena = std.heap.ArenaAllocator.init(backing_allocator),
     };
 }
 
@@ -109,6 +114,11 @@ pub fn incrementNodeCount(self: *FrameAllocator) void {
     self.frames[self.current_frame].stats.nodes_allocated += 1;
 }
 
+pub fn incrementItemCount(self: *FrameAllocator) void {
+    self.frames[self.current_frame].stats.item_memory += @sizeOf(UITree.Item);
+    self.frames[self.current_frame].stats.items_allocated += 1;
+}
+
 pub fn incrementCommandCount(self: *FrameAllocator) void {
     self.frames[self.current_frame].stats.command_memory += @sizeOf(RenderCommand);
     self.frames[self.current_frame].stats.commands_allocated += 1;
@@ -118,24 +128,19 @@ pub fn addBytesUsed(self: *FrameAllocator, bytes: usize) void {
     self.frames[self.current_frame].stats.bytes_used += bytes;
 }
 
-pub fn uuidAlloc(self: *FrameAllocator) ?*[]u8 {
-    self.frames[self.current_frame].stats.bytes_used += 16;
-    var slice = self.frames[self.current_frame].arena.allocator().alloc(u8, 16) catch {
-        Vapor.printlnSrcErr("UUID Alloc Failed\n", .{}, @src());
-        // or the backing allocator fails.
-        return null;
-    };
-    return &slice;
-}
-
 pub fn queryBytesUsed(self: *FrameAllocator) usize {
-    const total = self.frames[self.current_frame].arena.queryCapacity();
-    Vapor.println("String Bytes {d}", .{self.frames[self.current_frame].stats.bytes_used});
-    Vapor.println("Nodes {d}", .{self.frames[self.current_frame].stats.nodes_memory});
-    Vapor.println("Commands {d}", .{self.frames[self.current_frame].stats.command_memory});
-    Vapor.println("Tree {d}", .{self.frames[self.current_frame].stats.tree_memory});
-    Vapor.println("Other {d}", .{total - self.frames[self.current_frame].stats.bytes_used - self.frames[self.current_frame].stats.nodes_memory - self.frames[self.current_frame].stats.tree_memory - self.frames[self.current_frame].stats.command_memory});
-    return total;
+    const current_frame = self.frames[self.current_frame];
+    const current_total = current_frame.arena.queryCapacity();
+
+    Vapor.println("===================", .{});
+    Vapor.println("Item Bytes {d}", .{current_frame.stats.item_memory});
+    Vapor.println("Items {d}", .{current_frame.stats.items_allocated});
+    Vapor.println("String Bytes {d}", .{current_frame.stats.bytes_used});
+    Vapor.println("Nodes {d}", .{current_frame.stats.nodes_memory});
+    Vapor.println("Commands {d}", .{current_frame.stats.command_memory});
+    Vapor.println("Tree {d}", .{current_frame.stats.tree_memory});
+    Vapor.println("Other {d}", .{current_total - current_frame.stats.bytes_used - current_frame.stats.nodes_memory - current_frame.stats.tree_memory - current_frame.stats.command_memory});
+    return current_total;
 }
 
 pub fn queryNodes(self: *FrameAllocator) usize {
@@ -178,7 +183,7 @@ pub fn beginView(self: *FrameAllocator) void {
 /// This is now just a simple, fast create() from the arena
 pub fn commandAlloc(self: *FrameAllocator) ?*RenderCommand {
     // This is just a fast pointer bump
-    const command = self.frames[self.current_frame].arena.allocator().create(RenderCommand) catch {
+    const command = self.scratch_arena.allocator().create(RenderCommand) catch {
         // This will only fail if you run out of memory (OOM)
         // or the backing allocator fails.
         return null;
@@ -191,7 +196,7 @@ pub fn commandAlloc(self: *FrameAllocator) ?*RenderCommand {
 pub fn treeNodeAlloc(self: *FrameAllocator) ?*TreeNode {
     // This is just a fast pointer bump
     self.frames[self.current_frame].stats.tree_memory += @sizeOf(TreeNode);
-    const tree_node = self.frames[self.current_frame].arena.allocator().create(TreeNode) catch {
+    const tree_node = self.scratch_arena.allocator().create(TreeNode) catch {
         // This will only fail if you run out of memory (OOM)
         // or the backing allocator fails.
         return null;
@@ -199,6 +204,10 @@ pub fn treeNodeAlloc(self: *FrameAllocator) ?*TreeNode {
     // You could even initialize the command here if needed
     // command.* = UINode{ ... };
     return tree_node;
+}
+
+pub fn resetScratchArena(self: *FrameAllocator) void {
+    _ = self.scratch_arena.reset(.free_all);
 }
 
 /// This is now just a simple, fast create() from the arena
@@ -283,4 +292,3 @@ pub fn printStats(self: *FrameAllocator) void {
         // std.debug.print("{s}\n", .{buffer[0..writer.end]});
     }
 }
-

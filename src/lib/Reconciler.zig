@@ -9,53 +9,100 @@ const hashKey = utils.hashKey;
 const Self = @This();
 
 var layout_path: []const u8 = "";
-// pub var node_map: std.StringHashMap(usize) = undefined;
 var reconcile_debug: bool = false;
 
 pub fn reconcile(old_ctx: *UIContext, new_ctx: *UIContext) void {
     reconcile_debug = false;
     if (old_ctx.root == null or new_ctx.root == null) return;
 
-    // node_map is file-scoped, so it's reused. Clear it.
     traverseNodes(old_ctx.root.?, new_ctx.root.?);
+}
+
+// --- Child Iteration Helpers ---
+
+/// Count children in a linked list
+fn countChildren(node: *UINode) usize {
+    var count: usize = 0;
+    var child = node.first_child;
+    while (child) |c| {
+        count += 1;
+        child = c.next_sibling;
+    }
+    return count;
+}
+
+/// Get child at index (O(n))
+fn childAt(node: *UINode, index: usize) ?*UINode {
+    var i: usize = 0;
+    var child = node.first_child;
+    while (child) |c| {
+        if (i == index) return c;
+        i += 1;
+        child = c.next_sibling;
+    }
+    return null;
 }
 
 // --- Child Reconciliation Helpers ---
 
 /// Case: Old children exist, new children list is empty.
-fn removeAllChildren(old_items: []*UINode) void {
-    for (old_items, 0..) |old_child, j| {
-        // TODO: You may want to skip the debugger here too
+fn removeAllChildren(old_node: *UINode) void {
+    var j: usize = 0;
+    var child = old_node.first_child;
+    while (child) |old_child| {
         Vapor.removed_nodes.append(.{ .uuid = old_child.uuid, .index = j }) catch {};
+        j += 1;
+        child = old_child.next_sibling;
     }
 }
 
 /// Case: Old children list is empty, new children exist.
-fn addAllChildren(new_items: []*UINode) void {
-    // Mark all new children as dirty (for creation)
-
-    for (new_items) |node| {
+fn addAllChildren(new_node: *UINode) void {
+    var child = new_node.first_child;
+    while (child) |node| {
         Vapor.markChildrenDirty(node);
+        child = node.next_sibling;
     }
     Vapor.has_dirty = true;
 }
 
 /// Case: Both lists have the same number of children.
-// We cannot remove any nodes here as they just may have shifted
-fn reconcileSameLength(old_items: []*UINode, new_items: []*UINode) void {
-    for (old_items, 0..) |old_child, i| {
-        const new_child = new_items[i];
-        traverseNodes(old_child, new_child);
+fn reconcileSameLength(old_node: *UINode, new_node: *UINode) void {
+    var old_child = old_node.first_child;
+    var new_child = new_node.first_child;
+
+    while (old_child != null and new_child != null) {
+        traverseNodes(old_child.?, new_child.?);
+        old_child = old_child.?.next_sibling;
+        new_child = new_child.?.next_sibling;
     }
 }
 
+/// Build arrays from linked lists for keyed diffing
+/// Returns allocated slices that should be used within the same frame
+fn buildChildArray(node: *UINode, count: usize) ?[]*UINode {
+    if (count == 0) return null;
+
+    const items = Vapor.arena(.frame).alloc(*UINode, count) catch return null;
+    var i: usize = 0;
+    var child = node.first_child;
+    while (child) |c| {
+        if (i >= count) break;
+        items[i] = c;
+        i += 1;
+        child = c.next_sibling;
+    }
+    return items;
+}
+
 /// Case: Keyed-diffing when old_items.len > new_items.len (Deletions)
-fn reconcileDeletions(old_items: []*UINode, new_items: []*UINode, _: *UINode) void {
+fn reconcileDeletions(old_node: *UINode, new_node: *UINode, len_old: usize, len_new: usize) void {
+    // Build temporary arrays for keyed diffing
+    const old_items = buildChildArray(old_node, len_old) orelse return;
+    const new_items = buildChildArray(new_node, len_new) orelse return;
+
     var node_map = std.StringHashMap(usize).init(Vapor.arena(.frame));
     defer node_map.deinit();
-
-    const len_old = old_items.len;
-    const len_new = new_items.len;
 
     // 1. Sync from start
     var i: usize = 0;
@@ -71,7 +118,6 @@ fn reconcileDeletions(old_items: []*UINode, new_items: []*UINode, _: *UINode) vo
     var back_i_old: usize = len_old;
     var back_i_new: usize = len_new;
     while (back_i_new > i and back_i_old > i) {
-        // ... (logic unchanged) ...
         const old_child = old_items[back_i_old - 1];
         const new_child = new_items[back_i_new - 1];
 
@@ -88,7 +134,7 @@ fn reconcileDeletions(old_items: []*UINode, new_items: []*UINode, _: *UINode) vo
     const start = i;
     const end_new = back_i_new;
 
-    // Add all *old* nodes from the middle section to the (local) map
+    // Add all *old* nodes from the middle section to the map
     for (old_items[start..back_i_old], start..) |old_child, j| {
         node_map.put(old_child.uuid, j) catch {
             Vapor.printlnSrcErr("Could not put node into node_map {any}\n", .{old_child.uuid}, @src());
@@ -98,11 +144,10 @@ fn reconcileDeletions(old_items: []*UINode, new_items: []*UINode, _: *UINode) vo
     // Iterate *new* nodes in the middle section
     if (end_new > start) {
         for (new_items[start..end_new]) |new_child| {
-            // Vapor.print("New {s}\n", .{new_child.uuid});
             if (node_map.fetchRemove(new_child.uuid)) |old_child_entry| {
                 const old_child = old_items[old_child_entry.value];
-                traverseNodes(old_child, new_child); // This recursive call is now safe
-                Vapor.has_dirty = true; // It moved
+                traverseNodes(old_child, new_child);
+                Vapor.has_dirty = true;
             } else {
                 new_child.dirty = true;
                 Vapor.has_dirty = true;
@@ -112,7 +157,7 @@ fn reconcileDeletions(old_items: []*UINode, new_items: []*UINode, _: *UINode) vo
         }
     }
 
-    // 4. Any nodes *left* in the (local) map are deletions
+    // 4. Any nodes left in the map are deletions
     var node_itr = node_map.iterator();
     while (node_itr.next()) |entry| {
         const j = entry.value_ptr.*;
@@ -121,20 +166,17 @@ fn reconcileDeletions(old_items: []*UINode, new_items: []*UINode, _: *UINode) vo
     }
 }
 
-fn reconcileSame(old_items: []*UINode, new_items: []*UINode) void {
-    // ---
-    // FIX: Create a local map.
-    // NOTE: You MUST replace 'Vapor.allocator' with your actual allocator!
-    // ---
+fn reconcileSame(old_node: *UINode, new_node: *UINode, len: usize) void {
+    // Build temporary arrays for keyed diffing
+    const old_items = buildChildArray(old_node, len) orelse return;
+    const new_items = buildChildArray(new_node, len) orelse return;
+
     var node_map = std.StringHashMap(usize).init(Vapor.arena(.frame));
     defer node_map.deinit();
-
-    const len = old_items.len;
 
     // 1. Sync from start
     var i: usize = 0;
     while (i < len) : (i += 1) {
-        // ... (logic unchanged) ...
         if (std.mem.eql(u8, old_items[i].uuid, new_items[i].uuid)) {
             traverseNodes(old_items[i], new_items[i]);
         } else {
@@ -145,7 +187,6 @@ fn reconcileSame(old_items: []*UINode, new_items: []*UINode) void {
     // 2. Sync from end
     var back_i: usize = len;
     while (back_i > i) {
-        // ... (logic unchanged) ...
         const old_child = old_items[back_i - 1];
         const new_child = new_items[back_i - 1];
 
@@ -161,7 +202,7 @@ fn reconcileSame(old_items: []*UINode, new_items: []*UINode) void {
     const start = i;
     const end = back_i;
 
-    // Add all *new* nodes from the middle section to the (local) map
+    // Add all *new* nodes from the middle section to the map
     for (new_items[start..end], start..) |new_child, j| {
         node_map.put(new_child.uuid, j) catch {
             Vapor.printlnSrcErr("Could not put node into node_map {any}\n", .{new_child.uuid}, @src());
@@ -172,41 +213,36 @@ fn reconcileSame(old_items: []*UINode, new_items: []*UINode) void {
     for (old_items[start..end], start..) |old_child, offset| {
         if (node_map.fetchRemove(old_child.uuid)) |new_child_entry| {
             const new_child = new_items[new_child_entry.value];
-            traverseNodes(old_child, new_child); // This recursive call is now safe
-            Vapor.has_dirty = true; // It moved
+            traverseNodes(old_child, new_child);
+            Vapor.has_dirty = true;
         } else {
             Vapor.removed_nodes.append(.{ .uuid = old_child.uuid, .index = offset }) catch {};
         }
     }
 
-    // 4. Any nodes *left* in the (local) map are *additions*.
+    // 4. Any nodes left in the map are additions
     var node_itr = node_map.iterator();
     while (node_itr.next()) |entry| {
         const new_child_index = entry.value_ptr.*;
-        // This is now safe! The map only contains indices for *this* call's new_items.
         const new_child = new_items[new_child_index];
         new_child.state_type = .added;
-        Vapor.markChildrenDirty(new_child); // Mark for creation
+        Vapor.markChildrenDirty(new_child);
     }
-    Vapor.has_dirty = true; // Parent is dirty due to adds/moves
+    Vapor.has_dirty = true;
 }
 
 /// Case: Keyed-diffing when new_items.len > old_items.len (Additions)
-fn reconcileAdditions(old_items: []*UINode, new_items: []*UINode) void {
-    // ---
-    // FIX: Create a local map.
-    // NOTE: You MUST replace 'Vapor.allocator' with your actual allocator!
-    // ---
+fn reconcileAdditions(old_node: *UINode, new_node: *UINode, len_old: usize, len_new: usize) void {
+    // Build temporary arrays for keyed diffing
+    const old_items = buildChildArray(old_node, len_old) orelse return;
+    const new_items = buildChildArray(new_node, len_new) orelse return;
+
     var node_map = std.StringHashMap(usize).init(Vapor.arena(.frame));
     defer node_map.deinit();
-
-    const len_old = old_items.len;
-    const len_new = new_items.len;
 
     // 1. Sync from start
     var i: usize = 0;
     while (i < len_old) : (i += 1) {
-        // ... (logic unchanged) ...
         if (std.mem.eql(u8, old_items[i].uuid, new_items[i].uuid)) {
             traverseNodes(old_items[i], new_items[i]);
         } else {
@@ -218,7 +254,6 @@ fn reconcileAdditions(old_items: []*UINode, new_items: []*UINode) void {
     var back_i_old: usize = len_old;
     var back_i_new: usize = len_new;
     while (back_i_old > i and back_i_new > i) {
-        // ... (logic unchanged) ...
         const old_child = old_items[back_i_old - 1];
         const new_child = new_items[back_i_new - 1];
 
@@ -236,7 +271,7 @@ fn reconcileAdditions(old_items: []*UINode, new_items: []*UINode) void {
     const end_old = back_i_old;
     const end_new = back_i_new;
 
-    // Add all *new* nodes from the middle section to the (local) map
+    // Add all *new* nodes from the middle section to the map
     for (new_items[start..end_new], start..) |new_child, j| {
         node_map.put(new_child.uuid, j) catch {
             Vapor.printlnSrcErr("Could not put node into node_map {any}\n", .{new_child.uuid}, @src());
@@ -247,39 +282,36 @@ fn reconcileAdditions(old_items: []*UINode, new_items: []*UINode) void {
     for (old_items[start..end_old], start..) |old_child, offset| {
         if (node_map.fetchRemove(old_child.uuid)) |new_child_entry| {
             const new_child = new_items[new_child_entry.value];
-            traverseNodes(old_child, new_child); // This recursive call is now safe
-            Vapor.has_dirty = true; // It moved
+            traverseNodes(old_child, new_child);
+            Vapor.has_dirty = true;
         } else {
             Vapor.removed_nodes.append(.{ .uuid = old_child.uuid, .index = offset }) catch {};
         }
     }
 
-    // 4. Any nodes *left* in the (local) map are *additions*.
+    // 4. Any nodes left in the map are additions
     var node_itr = node_map.iterator();
     while (node_itr.next()) |entry| {
         const new_child_index = entry.value_ptr.*;
-        // This is now safe! The map only contains indices for *this* call's new_items.
         const new_child = new_items[new_child_index];
         new_child.state_type = .added;
-        Vapor.markChildrenDirty(new_child); // Mark for creation
+        Vapor.markChildrenDirty(new_child);
     }
-    Vapor.has_dirty = true; // Parent is dirty due to adds/moves
+    Vapor.has_dirty = true;
 }
 
 // --- Main Reconciler Function ---
-var empty_slice: []*UINode = &[_]*UINode{};
 pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
     // --- 1. Reconcile current node properties ---
-    // This logic is much flatter and easier to read.
     const changed = (new_node.finger_print != old_node.finger_print);
     new_node.style_changed = (new_node.style_hash != old_node.style_hash);
+    new_node.props_changed = (new_node.props_hash != old_node.props_hash);
 
     var is_dirty = changed or
         Vapor.rerender_everything or
         old_node.dirty;
 
     if (!std.mem.eql(u8, old_node.uuid, new_node.uuid)) {
-        // There is a strange bug where using the potential_nodes is weird and causes a crash
         is_dirty = true;
     }
 
@@ -289,31 +321,27 @@ pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
     }
 
     // --- 2. Reconcile children ---
-    // Get child slices, defaulting to an empty slice if children are null.
-    // This avoids all the `children != null` checks.
-    const old_items = if (old_node.children) |l| l.items else empty_slice;
-    const new_items = if (new_node.children) |l| l.items else empty_slice;
+    const old_count = old_node.children_count;
+    const new_count = new_node.children_count;
 
-    // This single if/else block replaces all the nested logic.
-    if (new_items.len == 0) {
-        if (old_items.len > 0) {
+    if (new_count == 0) {
+        if (old_count > 0) {
             // Case: New is empty, Old had items -> Remove all old
-            removeAllChildren(old_items);
+            removeAllChildren(old_node);
         }
         // Else: Both empty -> Do nothing
-    } else if (old_items.len == 0) {
+    } else if (old_count == 0) {
         // Case: New has items, Old was empty -> Add all new
-        addAllChildren(new_items);
-    } else if (old_items.len == new_items.len) {
-        // Case: Same length -> Simple 1:1 traversal
-        reconcileSame(old_items, new_items);
+        addAllChildren(new_node);
+    } else if (old_count == new_count) {
+        // Case: Same length -> Try simple 1:1 traversal first, fall back to keyed
+        reconcileSame(old_node, new_node, old_count);
     } else {
         // Case: Different lengths -> Keyed diff
-        if (old_items.len > new_items.len) {
-            // Vapor.print("Reconcile deletions\n", .{});
-            reconcileDeletions(old_items, new_items, new_node);
+        if (old_count > new_count) {
+            reconcileDeletions(old_node, new_node, old_count, new_count);
         } else {
-            reconcileAdditions(old_items, new_items);
+            reconcileAdditions(old_node, new_node, old_count, new_count);
         }
     }
 }

@@ -38,8 +38,8 @@ pub const PackedTransition = packed struct {
     // final_state: TransitionState = .{ .none = {} },
 
     pub fn set(packed_transition: *PackedTransition, transition: *const Transition) void {
-        const slice_ptr = Vapor.frame_arena.persistentAllocator().create([]TransitionProperty) catch unreachable;
-        var slice: []TransitionProperty = Vapor.frame_arena.persistentAllocator().alloc(TransitionProperty, transition.properties.len) catch unreachable;
+        const slice_ptr = Vapor.arena(.frame).create([]TransitionProperty) catch unreachable;
+        var slice: []TransitionProperty = Vapor.arena(.frame).alloc(TransitionProperty, transition.properties.len) catch unreachable;
         for (transition.properties, 0..) |property, i| {
             slice[i] = property;
         }

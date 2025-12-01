@@ -12,6 +12,8 @@ const println = Vapor.println;
 
 var writer: *std.Io.Writer = undefined;
 
+const mode_options = @import("build_options");
+
 pub fn generate(root: *UINode, new_writer: *std.Io.Writer, style_path: []const u8) void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer if (gpa.deinit() != .ok) @panic("Failed to deinit gpa");
@@ -75,6 +77,8 @@ fn writeAllProps(ui_node: *UINode) void {
         } else {
             writeOptionalProp(" href", ui_node.href);
         }
+    } else if (ui_node.type == .Graphic and mode_options.static_mode) {
+        writeOptionalProp(" src", ui_node.href);
     }
 
     // TODO: Add other attributes as needed, e.g., 'src' for 'video'
@@ -148,12 +152,22 @@ pub fn createImageClose() void {
 }
 
 pub fn createGraphicOpen(ui_node: *UINode) void {
-    _ = writer.write("<div") catch unreachable;
-    writeAllProps(ui_node);
-    _ = writer.write(">") catch unreachable;
+    if (mode_options.static_mode) {
+        _ = writer.write("<img") catch unreachable;
+        writeAllProps(ui_node);
+        _ = writer.write(">") catch unreachable;
+    } else {
+        _ = writer.write("<div") catch unreachable;
+        writeAllProps(ui_node);
+        _ = writer.write(">") catch unreachable;
+    }
 }
 pub fn createGraphicClose() void {
-    _ = writer.write("</div>") catch unreachable;
+    if (mode_options.static_mode) {
+        _ = writer.write("</img>") catch unreachable;
+    } else {
+        _ = writer.write("</div>") catch unreachable;
+    }
 }
 
 pub fn createListOpen(ui_node: *UINode) void {
@@ -343,4 +357,3 @@ pub fn createHtmlTree(node: *UINode) void {
         _ = writer.write("\n") catch unreachable;
     }
 }
-

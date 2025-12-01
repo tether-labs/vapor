@@ -400,6 +400,7 @@ pub const Background = struct {
 
     pub const white = Background{ .color = .{ .Literal = .{ .r = 255, .g = 255, .b = 255, .a = 1 } } };
     pub const black = Background{ .color = .{ .Literal = .{ .r = 0, .g = 0, .b = 0, .a = 1 } } };
+    pub const grey = Background{ .color = .{ .Literal = .{ .r = 128, .g = 128, .b = 128, .a = 1 } } };
     pub const red = Background{ .color = .{ .Literal = .{ .r = 255, .g = 0, .b = 0, .a = 1 } } };
     pub const green = Background{ .color = .{ .Literal = .{ .r = 0, .g = 255, .b = 0, .a = 1 } } };
     pub const blue = Background{ .color = .{ .Literal = .{ .r = 0, .g = 0, .b = 255, .a = 1 } } };
@@ -485,6 +486,7 @@ pub const Color = union(enum) {
     pub const transparent = Color{ .Literal = .{ .r = 0, .g = 0, .b = 0, .a = 0 } };
     pub const white = Color{ .Literal = .{ .r = 255, .g = 255, .b = 255, .a = 1 } };
     pub const black = Color{ .Literal = .{ .r = 0, .g = 0, .b = 0, .a = 1 } };
+    pub const grey = Color{ .Literal = .{ .r = 128, .g = 128, .b = 128, .a = 1 } };
     pub const red = Color{ .Literal = .{ .r = 255, .g = 0, .b = 0, .a = 1 } };
     pub const green = Color{ .Literal = .{ .r = 0, .g = 255, .b = 0, .a = 1 } };
     pub const blue = Color{ .Literal = .{ .r = 0, .g = 0, .b = 255, .a = 1 } };
@@ -2618,6 +2620,7 @@ pub const RenderCommand = struct {
     has_children: bool = true,
     hash: u32 = 0,
     style_changed: bool = false,
+    props_changed: bool = false,
 };
 
 pub const EventType = enum(u8) {

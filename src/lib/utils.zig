@@ -34,6 +34,18 @@ pub fn hashKey(key: []const u8) u32 {
     return std.hash.XxHash32.hash(0, key);
 }
 
+const base62_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+pub fn hashToBase62(hash: u32, buf: *[6]u8) []const u8 {
+    var h = hash;
+    var i: usize = 0;
+    while (h > 0 and i < 6) : (i += 1) {
+        buf[i] = base62_chars[@intCast(h % 62)];
+        h /= 62;
+    }
+    return buf[0..@max(i, 1)];
+}
+
 pub fn compareStyles(a: *const Vapor.Style, b: *const Vapor.Style) bool {
     if (a.blur != null and b.blur != null) {
         if (a.blur.? != b.blur.?) return false;

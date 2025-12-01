@@ -29,15 +29,17 @@ pub fn onCreateNode(ui_node: *UINode, callback: anytype, args: anytype) void {
     const Args = @TypeOf(args);
     const Closure = struct {
         arguments: Args,
-        run_node: Vapor.onCreateData = .{ .data = .{ .runFn = runFn } },
-        fn runFn(on_create: *Vapor.onCreate) void {
-            const run_node: *Vapor.onCreateData = @fieldParentPtr("data", on_create);
+        run_node: Vapor.Node = .{ .data = .{ .runFn = runFn, .deinitFn = deinit } },
+        fn runFn(action: *Vapor.Action) void {
+            const run_node: *Vapor.Node = @fieldParentPtr("data", action);
             const closure: *@This() = @alignCast(@fieldParentPtr("run_node", run_node));
             @call(.auto, callback, closure.arguments);
         }
+
+        fn deinit(_: *Vapor.Node) void {}
     };
 
-    const closure = Vapor.getFrameAllocator().create(Closure) catch |err| {
+    const closure = Vapor.arena(.frame).create(Closure) catch |err| {
         Vapor.printlnSrcErr("Error could not create closure {any}\n ", .{err}, @src());
         unreachable;
     };
@@ -54,6 +56,6 @@ export fn callOnCreateNode(id_ptr: [*:0]u8) void {
     const id = std.mem.span(id_ptr);
     defer Vapor.allocator_global.free(id);
     const kv = Vapor.on_create_node_funcs.fetchRemove(hashKey(id)) orelse return;
-    const on_create_node: *Vapor.onCreateData = kv.value;
+    const on_create_node: *Vapor.Node = kv.value;
     @call(.auto, on_create_node.data.runFn, .{&on_create_node.data});
 }

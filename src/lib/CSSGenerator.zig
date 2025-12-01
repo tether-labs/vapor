@@ -82,6 +82,10 @@ fn writeToken(token: []const u8) void {
 fn appendWriterToGenerator(gen: *Generator) void {
     const len: usize = writer.pos;
     gen.end += len;
+    if (gen.start + len > gen.buffer.len) {
+        Vapor.printlnErr("Buffer overflow, increase buffer size {d}\n", .{gen.start + len});
+        unreachable;
+    }
     @memcpy(gen.buffer[gen.start..gen.end], writer.buffer[0..len]);
     gen.start += len;
 }
@@ -165,7 +169,7 @@ pub fn writeNodeStyle(gen: *Generator, node: *UINode) void {
     if (class) |c| {
         var tokenized = std.mem.tokenizeScalar(u8, c, ' ');
         while (tokenized.next()) |token| {
-            if (contains(token, "genk")) {
+            if (contains(token, "gk")) {
                 // Generate the "fbc-..." selector
                 var fbc_buf: [256]u8 = undefined; // Buffer for UUID string
                 const fbc_selector = std.fmt.bufPrint(&fbc_buf, "fbc-{s}", .{node.uuid}) catch unreachable;

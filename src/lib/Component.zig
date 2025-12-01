@@ -215,6 +215,7 @@ pub fn Builder(comptime state_type: types.StateType) type {
         _transition: ?types.Transition = null,
         _direction: types.Direction = .row,
         _list_style: ?types.ListStyle = null,
+        _class: ?[]const u8 = null,
 
         pub fn Button(options: ButtonOptions) Self {
             const elem_decl = ElementDecl{
@@ -827,6 +828,12 @@ pub fn Builder(comptime state_type: types.StateType) type {
             return new_self;
         }
 
+        pub fn class(self: *const Self, class_name: []const u8) Self {
+            var new_self: Self = self.*;
+            new_self._class = class_name;
+            return new_self;
+        }
+
         pub fn ref(self: *const Self, element: *Element) Self {
             var new_self: Self = self.*;
 
@@ -1054,6 +1061,14 @@ pub fn Builder(comptime state_type: types.StateType) type {
             var new_self: Self = self.*;
             var visual = new_self._visual orelse types.Visual{};
             visual.background = value;
+            new_self._visual = visual;
+            return new_self;
+        }
+
+        pub fn outline(self: *const Self, value: types.Outline) Self {
+            var new_self: Self = self.*;
+            var visual = new_self._visual orelse types.Visual{};
+            visual.outline = value;
             new_self._visual = visual;
             return new_self;
         }
@@ -1450,6 +1465,10 @@ pub fn Builder(comptime state_type: types.StateType) type {
                 mutable_style.id = _id;
             }
 
+            if (self._class) |_class| {
+                mutable_style.style_id = _class;
+            }
+
             const elem_decl = Vapor.ElementDecl{
                 .state_type = _state_type,
                 .elem_type = self._elem_type,
@@ -1548,6 +1567,7 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
         _transition: ?types.Transition = null,
         _direction: types.Direction = .row,
         _list_style: ?types.ListStyle = null,
+        _class: ?[]const u8 = null,
 
         pub fn Label(text: []const u8) Self {
             return Self{ ._elem_type = .Label, ._text = text };
@@ -1601,7 +1621,9 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
                     break :blk value;
                 },
                 .int => {
-                    break :blk Vapor.fmtln("{any}", .{value});
+                    const number = Vapor.fmtln("{any}", .{value});
+                    Vapor.frame_arena.addBytesUsed(number.len);
+                    break :blk number;
                 },
                 else => {
                     Vapor.printlnErr("Text only accepts []const u8 or number types, NOT {any}", .{@TypeOf(value)});
@@ -2008,6 +2030,12 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
             return Self{ ._elem_type = .Image, ._href = options.src, ._alt = options.alt };
         }
 
+        pub fn class(self: *const Self, class_name: []const u8) Self {
+            var new_self: Self = self.*;
+            new_self._class = class_name;
+            return new_self;
+        }
+
         pub fn id(self: *const Self, element_id: []const u8) Self {
             var new_self: Self = self.*;
             new_self._id = element_id;
@@ -2263,6 +2291,14 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
             var new_self: Self = self.*;
             var visual = new_self._visual orelse types.Visual{};
             visual.background = value;
+            new_self._visual = visual;
+            return new_self;
+        }
+
+        pub fn outline(self: *const Self, value: types.Outline) Self {
+            var new_self: Self = self.*;
+            var visual = new_self._visual orelse types.Visual{};
+            visual.outline = value;
             new_self._visual = visual;
             return new_self;
         }
@@ -2560,6 +2596,10 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
                 mutable_style.id = _id;
             }
 
+            if (self._class) |_class| {
+                mutable_style.style_id = _class;
+            }
+
             const elem_decl = Vapor.ElementDecl{
                 .state_type = _state_type,
                 .elem_type = self._elem_type,
@@ -2649,10 +2689,10 @@ export fn getHeadingLevel(ptr: ?*UINode) u8 {
     return 0;
 }
 
-export fn getVideo(node_ptr: *UINode) ?*const Vapor.Types.Video {
-    const video = node_ptr.video orelse return null;
-    return &video;
-}
+// export fn getVideo(node_ptr: *UINode) ?*const Vapor.Types.Video {
+//     const video = node_ptr.video orelse return null;
+//     return &video;
+// }
 
 var alt_len: usize = 0;
 pub export fn getAlt(node_ptr: ?*UINode) ?[*]const u8 {
