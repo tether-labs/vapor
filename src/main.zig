@@ -2,6 +2,9 @@
 //! you are building an executable. If you are making a library, the convention
 //! is to delete this file and start with root.zig instead.
 
-pub const ElementType = @import("root").ElementType;
-// Global buffer to store the CSS string for returning to JavaScript
-pub fn main() !void {}
+const Vapor = @import("vapor");
+const std = @import("std");
+pub fn main() !void {
+    // const route = std.mem.Allocator.dupeZ(std.heap.page_allocator, u8, "/root/index.html") catch unreachable;
+    // _ = Vapor.lib.renderCycle(route);
+}

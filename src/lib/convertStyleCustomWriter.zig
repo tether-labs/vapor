@@ -765,6 +765,36 @@ pub fn checkSize(size: *const Types.Size, writer: writer_t) void {
     }
 }
 
+pub fn writeStyleField(field: Types.StyleFields, visual: *const Types.PackedVisual, writer: writer_t) void {
+    switch (field) {
+        .border => {
+            if (visual.has_border_thickeness) {
+                const border_thickness = visual.border_thickness;
+                writePropValue("border-width", .{ .tag = .border, .data = .{ .border = border_thickness } }, writer);
+                writer.write("border-style: solid;\n") catch {};
+            }
+            if (visual.has_border_color) {
+                const border_color = visual.border_color;
+                writePropValue("border-color", .{ .tag = .color, .data = .{ .color = border_color } }, writer);
+            }
+            if (visual.has_border_radius) {
+                const border_radius = visual.border_radius;
+                writePropValue("border-radius", .{ .tag = .border_radius, .data = .{ .border_radius = border_radius } }, writer);
+            }
+        },
+        .text_color => {
+            if (visual.text_color.has_color or visual.text_color.has_token) {
+                const color = visual.text_color;
+                writePropValue("color", .{ .tag = .color, .data = .{ .color = color } }, writer);
+            }
+        },
+        else => {
+            Vapor.printlnErr("StyleField not implemented {any}", .{field});
+            unreachable;
+        },
+    }
+}
+
 pub fn generateVisual(visual: *const Types.PackedVisual, writer: writer_t) void {
     // Color color
     if (visual.background.has_color or visual.background.has_token) {
@@ -878,12 +908,7 @@ pub fn generateVisual(visual: *const Types.PackedVisual, writer: writer_t) void 
     // Text color
     if (visual.text_color.has_color or visual.text_color.has_token) {
         const color = visual.text_color;
-        // if (ptr.type == .Svg or ptr.type == .Graphic) {
-        //     writePropValue("fill", .{ .tag = .color, .data = .{ .color = color } }, writer);
-        //     writePropValue("stroke", .{ .tag = .color, .data = .{ .color = color } }, writer);
-        // } else {
         writePropValue("color", .{ .tag = .color, .data = .{ .color = color } }, writer);
-        // }
     }
 
     if (visual.list_style != .default) {

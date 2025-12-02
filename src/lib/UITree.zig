@@ -4,7 +4,6 @@ const KeyGenerator = @import("Key.zig").KeyGenerator;
 const utils = @import("utils.zig");
 const hashKey = utils.hashKey;
 const Writer = @import("Writer.zig");
-const StringData = @import("Pool.zig").StringData;
 const Packer = @import("Packer.zig");
 const ClassType = @import("ClassCache.zig").ClassType;
 // const CompactStyle = @import("types.zig").CompactStyle;
@@ -51,15 +50,15 @@ pub const CommandsTree = struct {
     children: std.ArrayListUnmanaged(*CommandsTree) = undefined,
 };
 
-pub fn debugPrintUINodeLayout() void {
-    inline for (@typeInfo(UINode).@"struct".fields) |field| {
-        const field_type = field.type;
-        const size = @sizeOf(field_type);
-        Vapor.println("{s:20} | size: {d:3} bytes |\n", .{ field.name, size });
-    }
-
-    Vapor.println("\nTotal struct size: {d} bytes\n", .{@sizeOf(UINode)});
-}
+// pub fn debugPrintUINodeLayout() void {
+//     inline for (@typeInfo(UINode).@"struct".fields) |field| {
+//         const field_type = field.type;
+//         const size = @sizeOf(field_type);
+//         Vapor.println("{s:20} | size: {d:3} bytes |\n", .{ field.name, size });
+//     }
+//
+//     Vapor.println("\nTotal struct size: {d} bytes\n", .{@sizeOf(UINode)});
+// }
 
 pub const UINode = struct {
     dirty: bool = false,
@@ -97,6 +96,7 @@ pub const UINode = struct {
     first_child: ?*UINode = null, // "child" in React terms
     next_sibling: ?*UINode = null, // "sibling" in React terms
     last_child: ?*UINode = null, // +4 bytes, but O(1) append
+    hover_style_fields: ?*[]const types.StyleFields = null,
 
     // nodes_flat_index: usize = 0,
     // tooltip: ?types.Tooltip = null,
@@ -234,6 +234,15 @@ pub fn stackRegister(ui_ctx: *UIContext, ui_node: *UINode) !void {
     ui_ctx.stack = item;
 }
 
+// These come from the pre-compiled .a file
+extern fn vapor_hash_bytes(ptr: [*]const u8, len: usize) u32;
+
+// Comptime stuff that uses runtime
+pub fn structToBytes(struct_ptr: *anyopaque) u32 {
+    const bytes = std.mem.asBytes(struct_ptr);
+    return vapor_hash_bytes(bytes.ptr, bytes.len);
+}
+
 pub fn stackPop(ui_ctx: *UIContext) void {
     const current_stack = ui_ctx.stack orelse return;
     ui_ctx.stack = current_stack.next;
@@ -300,17 +309,6 @@ pub fn open(ui_ctx: *UIContext, elem_decl: ElemDecl) !*UINode {
     return node;
 }
 
-// This function was already DRY, no changes needed.
-pub fn structToBytes(struct_ptr: anytype) u32 {
-    return std.hash.XxHash32.hash(0, std.mem.asBytes(struct_ptr));
-    // const bytes = std.mem.asBytes(struct_ptr);
-    // return hashKey(bytes);
-}
-
-pub fn structToInt(struct_ptr: anytype) u32 {
-    return @as(u32, @bitCast(struct_ptr));
-}
-
 // -----------------------------------------------------------------------------
 // NEW HELPER FUNCTIONS
 // -----------------------------------------------------------------------------
@@ -327,21 +325,92 @@ fn packColor(source_color: types.Color, packed_color: *types.PackedColor) void {
     }
 }
 
-/// Generic function to hash a packed data structure, look it up in a cache,
-/// or create and cache it if it doesn't exist. Updates the style hash.
-fn getOrPutAndUpdateHash(
+fn getOrPutAndUpdateHashLayout(
     hash: u32,
-    data: anytype,
-    map: anytype,
-    pool: anytype,
+    data: types.PackedLayout,
 ) !*const @TypeOf(data) {
-    if (map.get(hash)) |ptr| {
+    if (Packer.layouts.get(hash)) |ptr| {
         return ptr;
     }
 
-    const new_ptr = try pool.create();
+    const new_ptr = try Packer.layouts_pool.create();
     new_ptr.* = data;
-    try map.put(hash, new_ptr);
+    try Packer.layouts.put(hash, new_ptr);
+
+    return new_ptr;
+}
+
+fn getOrPutAndUpdateHashPosition(
+    hash: u32,
+    data: types.PackedPosition,
+) !*const @TypeOf(data) {
+    if (Packer.positions.get(hash)) |ptr| {
+        return ptr;
+    }
+
+    const new_ptr = try Packer.positions_pool.create();
+    new_ptr.* = data;
+    try Packer.positions.put(hash, new_ptr);
+
+    return new_ptr;
+}
+
+fn getOrPutAndUpdateHashMarginsPadding(
+    hash: u32,
+    data: types.PackedMarginsPaddings,
+) !*const @TypeOf(data) {
+    if (Packer.margins_paddings.get(hash)) |ptr| {
+        return ptr;
+    }
+
+    const new_ptr = try Packer.margins_paddings_pool.create();
+    new_ptr.* = data;
+    try Packer.margins_paddings.put(hash, new_ptr);
+
+    return new_ptr;
+}
+
+fn getOrPutAndUpdateHashVisual(
+    hash: u32,
+    data: types.PackedVisual,
+) !*const @TypeOf(data) {
+    if (Packer.visuals.get(hash)) |ptr| {
+        return ptr;
+    }
+
+    const new_ptr = try Packer.visuals_pool.create();
+    new_ptr.* = data;
+    try Packer.visuals.put(hash, new_ptr);
+
+    return new_ptr;
+}
+
+fn getOrPutAndUpdateHashInteractive(
+    hash: u32,
+    data: types.PackedInteractive,
+) !*const @TypeOf(data) {
+    if (Packer.interactives.get(hash)) |ptr| {
+        return ptr;
+    }
+
+    const new_ptr = try Packer.interactives_pool.create();
+    new_ptr.* = data;
+    try Packer.interactives.put(hash, new_ptr);
+
+    return new_ptr;
+}
+
+fn getOrPutAndUpdateHashAnimation(
+    hash: u32,
+    data: types.PackedAnimations,
+) !*const @TypeOf(data) {
+    if (Packer.animations.get(hash)) |ptr| {
+        return ptr;
+    }
+
+    const new_ptr = try Packer.animations_pool.create();
+    new_ptr.* = data;
+    try Packer.animations.put(hash, new_ptr);
 
     return new_ptr;
 }
@@ -715,6 +784,12 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
         current_open.finger_print +%= hashKey(text);
     }
 
+    if (elem_decl.hover_style_fields) |fields| {
+        const hover_style_fields = Vapor.arena(.frame).create([]const types.StyleFields) catch unreachable;
+        hover_style_fields.* = fields;
+        current_open.hover_style_fields = hover_style_fields;
+    }
+
     if (elem_decl.text_field_params) |params| {
         const text_field_params = Vapor.arena(.frame).create(types.TextFieldParams) catch unreachable;
         text_field_params.* = params;
@@ -812,11 +887,9 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
             if (!hash_id) {
 
                 // These add a 1.5ms for 10000 nodes
-                current_open.packed_field_ptrs.?.layout_ptr = getOrPutAndUpdateHash(
+                current_open.packed_field_ptrs.?.layout_ptr = getOrPutAndUpdateHashLayout(
                     hash_l,
                     packed_layout,
-                    &Packer.layouts,
-                    &Packer.layouts_pool,
                 ) catch unreachable;
             } else {
                 const packed_layout_ptr = Packer.layouts_pool.create() catch unreachable;
@@ -840,11 +913,9 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
             hash_p = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_position));
 
             if (!hash_id) {
-                current_open.packed_field_ptrs.?.position_ptr = getOrPutAndUpdateHash(
+                current_open.packed_field_ptrs.?.position_ptr = getOrPutAndUpdateHashPosition(
                     hash_p,
                     packed_position,
-                    &Packer.positions,
-                    &Packer.positions_pool,
                 ) catch unreachable;
             } else {
                 const packed_position_ptr = Packer.positions_pool.create() catch unreachable;
@@ -862,11 +933,9 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
             // This is an expensive operation, since the the visual hash is quite large
             hash_mp = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_margins_paddings));
             if (!hash_id) {
-                current_open.packed_field_ptrs.?.margins_paddings_ptr = getOrPutAndUpdateHash(
+                current_open.packed_field_ptrs.?.margins_paddings_ptr = getOrPutAndUpdateHashMarginsPadding(
                     hash_mp,
                     packed_margins_paddings,
-                    &Packer.margins_paddings,
-                    &Packer.margins_paddings_pool,
                 ) catch unreachable;
             } else {
                 const packed_margin_paddings_ptr = Packer.margins_paddings_pool.create() catch unreachable;
@@ -1051,14 +1120,17 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                         packed_visual.transitions = packed_transition;
                     }
                 }
-                current_open.packed_field_ptrs.?.visual_ptr = getOrPutAndUpdateHash(
+                current_open.packed_field_ptrs.?.visual_ptr = getOrPutAndUpdateHashVisual(
                     hash_v,
                     packed_visual,
-                    &Packer.visuals,
-                    &Packer.visuals_pool,
                 ) catch unreachable;
             } else {
                 const packed_visual_ptr = Packer.visuals_pool.create() catch unreachable;
+                if (s.transition) |transition| {
+                    // set is persitnant
+                    packed_transition.set(&transition);
+                    packed_visual.transitions = packed_transition;
+                }
 
                 packed_visual_ptr.* = packed_visual;
                 current_open.packed_field_ptrs.?.visual_ptr = packed_visual_ptr;
@@ -1119,12 +1191,14 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                 hash_i = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_interactive));
 
                 if (!hash_id) {
-                    current_open.packed_field_ptrs.?.interactive_ptr = getOrPutAndUpdateHash(
+                    current_open.packed_field_ptrs.?.interactive_ptr = getOrPutAndUpdateHashInteractive(
                         hash_i,
                         packed_interactive,
-                        &Packer.interactives,
-                        &Packer.interactives_pool,
                     ) catch unreachable;
+                } else {
+                    const packed_interactive_ptr = Packer.interactives_pool.create() catch unreachable;
+                    packed_interactive_ptr.* = packed_interactive;
+                    current_open.packed_field_ptrs.?.interactive_ptr = packed_interactive_ptr;
                 }
 
                 hash_a = std.hash.XxHash32.hash(0, std.mem.asBytes(&packed_animations));
@@ -1141,11 +1215,9 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                         }
                     }
                     if (packed_animations.has_transform) {
-                        current_open.packed_field_ptrs.?.animations_ptr = getOrPutAndUpdateHash(
+                        current_open.packed_field_ptrs.?.animations_ptr = getOrPutAndUpdateHashAnimation(
                             hash_a,
                             packed_animations,
-                            &Packer.animations,
-                            &Packer.animations_pool,
                         ) catch unreachable;
                     }
                 }
@@ -1173,10 +1245,14 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
                 Vapor.class_cache.set(new_class_hash, .defined) catch unreachable;
                 Vapor.generator.writeNodeStyle(current_open);
             };
+            // if (current_open.type == .Icon) {
+            //     const full_class = std.fmt.allocPrint(Vapor.arena(.frame), "{s} {s}", .{ elem_decl.href.?, class }) catch unreachable;
+            //     current_open.class = full_class;
+            // }
         } else {
-            if (current_open.type == .Icon) {
-                current_open.class = elem_decl.href.?;
-            }
+            // if (current_open.type == .Icon) {
+            //     current_open.class = elem_decl.href.?;
+            // }
             // This adds 2ms for 10000 nodes
             buildClassString(
                 &current_open.packed_field_ptrs.?,
@@ -1196,6 +1272,12 @@ pub fn configure(ui_ctx: *UIContext, elem_decl: ElemDecl) *UINode {
     if (current_open.type == .Hooks or current_open.type == .HooksCtx) {
         current_open.hooks = elem_decl.hooks;
     }
+
+    // if (current_open.class) |class| {
+    //     if (current_open.type == .Icon and std.mem.eql(u8, class, "btn-icon")) {
+    //         Vapor.println("Class is not null {s} {d}", .{ class, current_open.props_hash });
+    //     }
+    // }
 
     // if (elem_decl.animation_enter) |animation_enter| {
     //     current_open.animation_enter = animation_enter;

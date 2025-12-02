@@ -86,14 +86,14 @@ pub const Node = struct {
     }
 };
 
-pub fn init(target: *Radix, arena: *std.mem.Allocator) !void {
-    const root_node = try arena.*.create(Node);
+pub fn init(target: *Radix, allocator: std.mem.Allocator) !void {
+    const root_node = try allocator.create(Node);
     root_node.* = Node{
         .prefix = "",
         .tree = null,
         .query_param = "",
         .is_dynamic = false,
-        .children = std.StringHashMap(*Node).init(arena.*),
+        .children = std.StringHashMap(*Node).init(allocator),
         .param_child = null,
         .is_end = false,
         .page = undefined,
@@ -101,7 +101,7 @@ pub fn init(target: *Radix, arena: *std.mem.Allocator) !void {
     };
     target.* = .{
         .root = root_node,
-        .allocator = arena.*,
+        .allocator = allocator,
     };
 }
 

@@ -645,10 +645,6 @@ pub fn Builder(comptime state_type: types.StateType) type {
             return Self{ ._elem_type = .Graphic, ._href = options.src };
         }
 
-        pub fn Icon(token: *const IconTokens) Self {
-            return Self{ ._elem_type = .Icon, ._href = token.web orelse "" };
-        }
-
         pub fn Svg(options: struct { svg: []const u8 }) Self {
             if (options.svg.len > 2048 and Vapor.build_options.enable_debug) {
                 Vapor.printlnErr("Svg is too large inlining: {d}B, use Graphic;\nSVG Content:\n{s}...", .{ options.svg.len, options.svg[0..100] });
@@ -833,6 +829,11 @@ pub fn Builder(comptime state_type: types.StateType) type {
             new_self._class = class_name;
             return new_self;
         }
+        pub fn transition(self: *const Self, _transition: types.Transition) Self {
+            var new_self: Self = self.*;
+            new_self._transition = _transition;
+            return new_self;
+        }
 
         pub fn ref(self: *const Self, element: *Element) Self {
             var new_self: Self = self.*;
@@ -973,6 +974,12 @@ pub fn Builder(comptime state_type: types.StateType) type {
             if (self._id) |_id| {
                 var mutable_style = style_ptr.*;
                 mutable_style.id = _id;
+                elem_decl.style = &mutable_style;
+            }
+
+            if (self._class) |_class| {
+                var mutable_style = style_ptr.*;
+                mutable_style.style_id = _class;
                 elem_decl.style = &mutable_style;
             }
 
@@ -1568,6 +1575,8 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
         _direction: types.Direction = .row,
         _list_style: ?types.ListStyle = null,
         _class: ?[]const u8 = null,
+        _style_fields: ?[]const types.StyleFields = &.{},
+        _hover_style_fields: ?[]const types.StyleFields = &.{},
 
         pub fn Label(text: []const u8) Self {
             return Self{ ._elem_type = .Label, ._text = text };
@@ -1883,6 +1892,18 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
 
         pub fn Icon(token: *const IconTokens) Self {
             return Self{ ._elem_type = .Icon, ._href = token.web orelse "" };
+        }
+
+        pub fn inherit(self: *const Self, fields: []const types.StyleFields) Self {
+            var new_self: Self = self.*;
+            new_self._style_fields = fields;
+            return new_self;
+        }
+
+        pub fn inheritHover(self: *const Self, fields: []const types.StyleFields) Self {
+            var new_self: Self = self.*;
+            new_self._hover_style_fields = fields;
+            return new_self;
         }
 
         pub fn Svg(options: struct { svg: []const u8 }) Self {
@@ -2613,6 +2634,8 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
                 .animation_exit = self._animation_exit,
                 .name = self._name,
                 .video = self._video,
+                .style_fields = self._style_fields,
+                .hover_style_fields = self._hover_style_fields,
             };
 
             if (self._ui_node == null) {

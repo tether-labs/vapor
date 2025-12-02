@@ -18,7 +18,7 @@ const KeyGenerator = @import("Key.zig").KeyGenerator;
 const Reconciler = @import("Reconciler.zig");
 const TrackingAllocator = @import("TrackingAllocator.zig");
 pub const KeyStone = @import("keystone/KeyStone.zig");
-pub const Wasm = @import("wasm");
+pub const Wasm = @import("WASM.zig");
 const getVisualStyle = @import("convertStyleCustomWriter.zig").getVisualStyle;
 pub const Bridge = @import("Bridge.zig");
 pub const Event = @import("Event.zig");
@@ -50,20 +50,13 @@ pub var Timer = struct {
 // const getFocusWithinStyle = @import("convertFocusWithin.zig").getFocusWithinStyle;
 const Chain = @import("Static.zig").Chain;
 const ChainPure = @import("Pure.zig").Chain;
-const AllocText = ChainPure.AllocText;
 const getStyle = @import("convertStyleCustomWriter.zig").getStyle;
 const StyleCompiler = @import("convertStyleCustomWriter.zig");
-pub const generateStyle = @import("convertStyleCustomWriter.zig").generateStyle;
-const generateInputHTML = @import("grabInputDetails.zig").generateInputHTML;
 const grabInputDetails = @import("grabInputDetails.zig");
 const utils = @import("utils.zig");
 // const createInput = grabInputDetails.createInput;
-const getInputSize = grabInputDetails.getInputSize;
-const getInputType = grabInputDetails.getInputType;
 const getAriaLabel = utils.getAriaLabel;
 pub const setGlobalStyleVariables = @import("convertStyleCustomWriter.zig").setGlobalStyleVariables;
-pub const ThemeType = @import("convertStyleCustomWriter.zig").ThemeType;
-const Theme = @import("theme");
 const Debugger = @import("Debugger.zig");
 const NodePool = @import("NodePool.zig");
 
@@ -281,6 +274,9 @@ const Mode = enum {
 pub var pool: Pool = undefined;
 pub var mode: Mode = .atomic;
 pub var class_cache: ClassCache = undefined;
+
+extern fn frame_arena_init(frame_arena: *FrameAllocator, backing_allocator: *std.mem.Allocator) void;
+
 pub fn init(config: VaporConfig) void {
     switch (builtin.target.cpu.arch) {
         .wasm32 => {
@@ -299,12 +295,13 @@ pub fn init(config: VaporConfig) void {
 
     // Init the frame allocator;
     // This adds 500B
-    frame_arena = FrameAllocator.init(allocator_global, page_node_count);
+    // frame_arena_init(&frame_arena, &allocator_global);
+    frame_arena = FrameAllocator.init(&allocator_global);
     // The persistent allocator is used for the Initialization of the registries as these persist over the lifetime of the program.
-    var allocator = frame_arena.persistentAllocator();
+    const allocator = frame_arena.persistentAllocator();
 
     // Init Router // This adds 1kb
-    router.init(&allocator) catch |err| {
+    router.init(allocator) catch |err| {
         println("Could not init Router {any}\n", .{err});
     };
 
@@ -2327,7 +2324,7 @@ pub export fn getRenderUINodeRootPtr() ?*UINode {
     return Vapor.current_ctx.root.?;
 }
 
-pub export fn getUINodeChildrenCount(node_ptr: ?*UINode) u32 {
+pub export fn getUINodeChildrenCount(node_ptr: ?*UINode) usize {
     const node = node_ptr orelse return 0;
     return node.children_count;
 }
@@ -2708,59 +2705,3 @@ pub fn exportStruct(comptime T: type) type {
         }
     };
 }
-
-// // Usage
-// const UserExport = exportStruct(User);
-// pub fn initUser() void {
-//     UserExport.init();
-//     UserExport.instance = User{
-//         .id = 12345,
-//         .age = 25,
-//         .score = 98.5,
-//         .name = "John Doe".*,
-//         .is_active = true,
-//     };
-// }
-
-// // Export the stack pointer to JavaScript
-// export fn get_stack_pointer() usize {
-//     var stack_variable: u8 = 0;
-//     return @intFromPtr(&stack_variable);
-// }
-//
-// // Track heap allocations if using an allocator
-// var heap_allocated: usize = 0;
-//
-// export fn get_heap_size() usize {
-//     return heap_allocated;
-// }
-//
-// // Get current memory pages
-// export fn get_memory_pages() u32 {
-//     // This is a WASM builtin
-//     return @wasmMemorySize(0);
-// }
-//
-// // Try to grow memory
-// export fn try_grow_memory(pages: u32) isize {
-//     return @wasmMemoryGrow(0, pages);
-// }
-//
-// // More detailed memory info
-// export fn get_memory_info() void {
-//     const pages = @wasmMemorySize(0);
-//     const bytes = pages * 65536;
-//
-//     // Get stack pointer
-//     var stack_var: u8 = 0;
-//     const stack_ptr = @intFromPtr(&stack_var);
-//
-//     // If you know your stack base (depends on your setup)
-//     const STACK_BASE = 1048576; // Example: 1MB
-//     const stack_used = STACK_BASE - stack_ptr;
-//
-//     Vapor.print("Memory Pages: {}\n", .{pages});
-//     Vapor.print("Total Memory: {} KB\n", .{bytes / 1024});
-//     Vapor.print("Stack Pointer: 0x{x}\n", .{stack_ptr});
-//     Vapor.print("Approx Stack Used: {} KB\n", .{stack_used / 1024});
-// }

@@ -1,7 +1,7 @@
 // The ClassCache is a simple cache for reference counting of the number of element that share the same class
 const std = @import("std");
 const Vapor = @import("Vapor.zig");
-const Wasm = @import("wasm");
+const Wasm = Vapor.Wasm;
 
 pub const ClassType = enum {
     layout,

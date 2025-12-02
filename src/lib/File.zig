@@ -1,6 +1,6 @@
 const std = @import("std");
 const Vapor = @import("vapor");
-const Wasm = @import("wasm");
+const Wasm = Vapor.Wasm;
 const isWasi = Vapor.lib.isWasi;
 const utils = @import("utils.zig");
 const hashKey = utils.hashKey;

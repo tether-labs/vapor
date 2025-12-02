@@ -1640,7 +1640,7 @@ pub const Layout = packed struct {
 
 pub const BorderGrouped = struct {
     thickness: Border = .all(1),
-    color: ?Color = .hex("#000000"),
+    color: ?Color = null,
     radius: ?BorderRadius = null,
 
     pub const none = BorderGrouped{ .thickness = .all(0) };
@@ -2415,6 +2415,32 @@ pub const Style = struct {
     //     user_defaults = new_default;
     // }
 };
+
+pub const StyleFields = enum {
+    background,
+    border,
+    border_radius,
+    border_thickness,
+    border_color,
+    text_color,
+    font_style,
+    font_size,
+    font_weight,
+    letter_spacing,
+    line_height,
+    opacity,
+    padding,
+    margin,
+    size,
+    position,
+    direction,
+    flex_wrap,
+    list_style,
+    transition,
+    show_scrollbar,
+};
+
+
 pub const Config = struct {
     style: Style,
 };
@@ -2594,6 +2620,8 @@ pub const ElementDeclaration = struct {
     udata: usize = 0,
     level: ?u8 = null,
     name: ?[]const u8 = null,
+    style_fields: ?[]const StyleFields = null,
+    hover_style_fields: ?[]const StyleFields = null,
 };
 
 pub const Tooltip = struct {

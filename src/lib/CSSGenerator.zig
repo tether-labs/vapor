@@ -32,12 +32,52 @@ var writer: Writer = undefined;
 // -----------------------------------------------------------------------------
 // These functions are already simple, single-purpose wrappers.
 
-fn writeCss(node: *UINode) void {
+fn writeCss(_: *Generator, node: *UINode) void {
     writer.writeByte('{') catch {};
     writer.writeByte('\n') catch {};
     StyleWriter.generateStylePass(node, &writer);
     writer.writeByte('}') catch {};
     writer.writeByte('\n') catch {};
+
+    if (node.packed_field_ptrs) |packed_field_ptrs| {
+        if (packed_field_ptrs.interactive_ptr) |interactive_ptr| {
+            if (interactive_ptr.has_hover) {
+                writer.writeByte('.') catch {};
+                writer.write(node.class.?) catch {};
+                writer.write(":hover") catch {};
+                writer.write("{\n") catch {};
+
+                const hover = interactive_ptr.hover;
+                StyleWriter.generateVisual(&hover, &writer);
+                writer.writeByte('}') catch {};
+                writer.writeByte('\n') catch {};
+
+                // We write the inherited styles for the children
+                if (node.children_count > 0) {
+                    writer.writeByte('.') catch {};
+                    writer.write(node.class.?) catch {};
+                    writer.write(":hover") catch {};
+                    var children = node.children();
+                    while (children.next()) |child| {
+                        if (child.hover_style_fields) |fields| {
+                            if (child.class) |class| {
+                                writer.writeByte(' ') catch {};
+                                writer.writeByte('.') catch {};
+                                writer.write(class) catch {};
+
+                                writer.write("{\n") catch {};
+                                for (fields.*) |field| {
+                                    StyleWriter.writeStyleField(field, &hover, &writer);
+                                }
+                                writer.writeByte('}') catch {};
+                                writer.writeByte('\n') catch {};
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn writeLayout(layout_ptr: *const Types.PackedLayout) void {
@@ -138,7 +178,7 @@ fn writeFullNodeRule(gen: *Generator, node: *UINode, selector: []const u8) void 
     writer.writeByte('.') catch {};
     writer.write(selector) catch {};
 
-    writeCss(node); // This writes the full { ...styles... } block
+    gen.writeCss(node); // This writes the full { ...styles... } block
 
     appendWriterToGenerator(gen);
 }
@@ -174,7 +214,7 @@ pub fn writeNodeStyle(gen: *Generator, node: *UINode) void {
                 var fbc_buf: [256]u8 = undefined; // Buffer for UUID string
                 const fbc_selector = std.fmt.bufPrint(&fbc_buf, "fbc-{s}", .{node.uuid}) catch unreachable;
                 writeFullNodeRule(gen, node, fbc_selector);
-            } else if (token.len > 0 and node.type != .Icon) {
+            } else if (token.len > 0) {
                 writeFullNodeRule(gen, node, token);
             }
         }
