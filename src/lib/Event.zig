@@ -29,6 +29,26 @@ pub fn metaKey(evt: *Event) bool {
         else => return false,
     }
 }
+pub fn shiftKey(evt: *Event) bool {
+    const key_str: []const u8 = "shiftKey";
+    const resp = getEventData(evt.id, key_str.ptr, key_str.len);
+    switch (resp[0]) {
+        't' => return true,
+        'f' => return false,
+        else => return false,
+    }
+}
+
+pub fn altKey(evt: *Event) bool {
+    const key_str: []const u8 = "altKey";
+    const resp = getEventData(evt.id, key_str.ptr, key_str.len);
+    switch (resp[0]) {
+        't' => return true,
+        'f' => return false,
+        else => return false,
+    }
+}
+
 pub fn text(evt: *Event) []const u8 {
     const resp = getEventDataInput(evt.id);
     return std.mem.span(resp);

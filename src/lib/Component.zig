@@ -216,6 +216,7 @@ pub fn Builder(comptime state_type: types.StateType) type {
         _direction: types.Direction = .row,
         _list_style: ?types.ListStyle = null,
         _class: ?[]const u8 = null,
+        _scroll: ?types.Scroll = null,
 
         pub fn Button(options: ButtonOptions) Self {
             const elem_decl = ElementDecl{
@@ -449,30 +450,6 @@ pub fn Builder(comptime state_type: types.StateType) type {
             };
         }
 
-        pub fn TextFmt(comptime fmt: []const u8, args: anytype) Self {
-            const allocator = Vapor.arena(.frame);
-            const text = std.fmt.allocPrint(allocator, fmt, args) catch |err| {
-                Vapor.printlnColor(
-                    \\Error formatting text: {any}\n"
-                    \\FMT: {s}\n"
-                    \\ARGS: {any}\n"
-                , .{ err, fmt, args }, .hex("#FF3029"));
-                return Self{ ._elem_type = .Text, ._text = "ERROR" };
-            };
-            Vapor.frame_arena.addBytesUsed(text.len);
-
-            const elem_decl = ElementDecl{
-                .state_type = _state_type,
-                .elem_type = .Text,
-            };
-            const ui_node = LifeCycle.open(elem_decl) orelse {
-                Vapor.printlnSrcErr("Could not add component Link to lifecycle {any}\n", .{error.CouldNotAllocate}, @src());
-                unreachable;
-            };
-
-            return Self{ ._elem_type = .TextFmt, ._text = text, ._ui_node = ui_node };
-        }
-
         pub fn bind(self: *const Self, value: anytype) Self {
             var new_self: Self = self.*;
             if (self._elem_type != .TextField) {
@@ -645,16 +622,6 @@ pub fn Builder(comptime state_type: types.StateType) type {
             return Self{ ._elem_type = .Graphic, ._href = options.src };
         }
 
-        pub fn Svg(options: struct { svg: []const u8 }) Self {
-            if (options.svg.len > 2048 and Vapor.build_options.enable_debug) {
-                Vapor.printlnErr("Svg is too large inlining: {d}B, use Graphic;\nSVG Content:\n{s}...", .{ options.svg.len, options.svg[0..100] });
-                if (!Vapor.isWasi) {
-                    @panic("Svg is too large, crashing!");
-                } else return Self{ ._elem_type = .Svg, ._svg = "" };
-            }
-            return Self{ ._elem_type = .Svg, ._svg = if (options.svg.len < 128) options.svg else "" };
-        }
-
         pub fn fontSize(self: *const Self, font_size: u8) Self {
             var new_self: Self = self.*;
             var visual = new_self._visual orelse types.Visual{};
@@ -760,6 +727,12 @@ pub fn Builder(comptime state_type: types.StateType) type {
                 unreachable;
             };
 
+            return new_self;
+        }
+
+        pub fn scroll(self: *const Self, scroll_type: types.Scroll) Self {
+            var new_self: Self = self.*;
+            new_self._scroll = scroll_type;
             return new_self;
         }
 
@@ -1457,6 +1430,7 @@ pub fn Builder(comptime state_type: types.StateType) type {
             mutable_style.direction = self._direction;
             if (mutable_style.list_style == null) mutable_style.list_style = self._list_style;
             if (mutable_style.font_family == null) mutable_style.font_family = self._font_family;
+            if (mutable_style.scroll == null) mutable_style.scroll = self._scroll;
 
             // if (self._tooltip) |_tooltip| {
             //     elem_decl.tooltip = &_tooltip;
@@ -1656,6 +1630,26 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
             };
         }
 
+        pub fn Html(text: []const u8) Self {
+            const elem_decl = ElementDecl{
+                .state_type = _state_type,
+                .elem_type = .HtmlText,
+            };
+            const ui_node = LifeCycle.open(elem_decl) orelse {
+                Vapor.printlnSrcErr("Could not add component Link to lifecycle {any}\n", .{error.CouldNotAllocate}, @src());
+                unreachable;
+            };
+            return Self{ ._elem_type = .HtmlText, ._text = text, ._ui_node = ui_node };
+        }
+
+        pub fn fontStyle(self: *const Self, font_style: types.FontStyle) Self {
+            var new_self: Self = self.*;
+            var visual = new_self._visual orelse types.Visual{};
+            visual.font_style = font_style;
+            new_self._visual = visual;
+            return new_self;
+        }
+
         pub fn ellipsis(self: *const Self, value: types.Ellipsis) Self {
             if (self._elem_type != .Text) {
                 Vapor.printWarn("Ellipsis can only be used on Text, not {any}", .{self._elem_type});
@@ -1729,10 +1723,10 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
                 return self.*;
             }
 
-            _ = self._ui_node orelse {
-                Vapor.printlnSrcErr("Node is null must ref() first, before setting onChange", .{}, @src());
-                unreachable;
-            };
+            // _ = self._ui_node orelse {
+            //     Vapor.printlnSrcErr("Node is null must ref() first, before setting onChange", .{}, @src());
+            //     unreachable;
+            // };
 
             // switch (self._text_field_type) {
             //     .string => {
@@ -1907,13 +1901,22 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
         }
 
         pub fn Svg(options: struct { svg: []const u8 }) Self {
+            const elem_decl = ElementDecl{
+                .elem_type = .Svg,
+            };
+
+            const ui_node = createNode(elem_decl);
+
             if (options.svg.len > 2048 and Vapor.build_options.enable_debug) {
                 Vapor.printlnErr("Svg is too large inlining: {d}B, use Graphic;\nSVG Content:\n{s}...", .{ options.svg.len, options.svg[0..100] });
-                if (!Vapor.isWasi) {
-                    @panic("Svg is too large, crashing!");
-                } else return Self{ ._elem_type = .Svg, ._svg = "" };
+                return Self{ ._elem_type = .Svg, ._svg = "" };
             }
-            return Self{ ._elem_type = .Svg, ._svg = if (options.svg.len < 128) options.svg else "" };
+
+            return Self{
+                ._elem_type = .Svg,
+                ._svg = options.svg,
+                ._ui_node = ui_node,
+            };
         }
 
         pub fn fontSize(self: *const Self, font_size: u8) Self {
@@ -1927,6 +1930,12 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
         pub fn fontFamily(self: *const Self, font_family: []const u8) Self {
             var new_self: Self = self.*;
             new_self._font_family = font_family;
+            return new_self;
+        }
+
+        pub fn scroll(self: *const Self, scroll_type: types.Scroll) Self {
+            var new_self: Self = self.*;
+            new_self._scroll = scroll_type;
             return new_self;
         }
 

@@ -263,6 +263,12 @@ pub extern fn setCursorPositionWasm(
     pos: usize,
 ) void;
 
+/// Gets the current selection in a text input.
+pub extern fn selectionWasm(
+    id_ptr: [*]const u8,
+    id_len: usize,
+) [*]u32;
+
 // =============================================================================
 // DEBUG HIGHLIGHTING
 // =============================================================================
@@ -347,8 +353,6 @@ pub extern fn getScrollPositionWasm() [*]f32;
 pub extern fn scrollIntoViewWasm(
     id_ptr: [*]const u8,
     id_len: usize,
-    behavior: u32,
-    block: u32,
 ) void;
 
 /// Gets element's scroll properties.
@@ -1356,3 +1360,4 @@ pub extern fn shareWasm(
 ) void;
 
 pub extern fn batchRemoveTombStonesWasm() void;
+

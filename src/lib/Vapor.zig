@@ -1090,7 +1090,10 @@ pub fn attachEventCallback(ui_node: *UINode, event_type: EventType, cb: *const f
     if (ui_node.event_handlers) |handlers| {
         for (handlers.handlers.items) |handler| {
             if (handler.type == event_type) {
-                return error.EventCallbackError;
+                Vapor.printlnErr("Cannot create multiple events on the same type\n", .{});
+                Vapor.printlnErr("For example: onChange and bind cannot coexist\n", .{});
+                Vapor.printlnErr("DUPLICATE EVENT {any}\n", .{event_type});
+                return error.EventCallbackErrorDuplicate;
             }
         }
         handlers.handlers.ensureUnusedCapacity(arena(.frame), 1) catch |err| {
@@ -2478,6 +2481,14 @@ export fn onEndCallback() void {
 
 export fn allocate(size: usize) ?[*]f32 {
     const buf = Vapor.allocator_global.alloc(f32, size) catch |err| {
+        Vapor.println("{any}\n", .{err});
+        return null;
+    };
+    return buf.ptr;
+}
+
+export fn allocateU32(size: usize) ?[*]u32 {
+    const buf = Vapor.arena(.persist).alloc(u32, size) catch |err| {
         Vapor.println("{any}\n", .{err});
         return null;
     };

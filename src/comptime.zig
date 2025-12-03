@@ -118,10 +118,11 @@ pub const CtxButton = PureComponent.CtxButton;
 pub const TextFmt = PureComponentClose.TextFmt;
 pub const TextArea = @import("lib/TextField.zig").BuilderClose(.pure).TextArea;
 pub const Heading = PureComponentClose.Heading;
-pub const Code = PureComponent.Code;
 pub const Section = PureComponent.Section;
 pub const Video = PureComponentClose.Video;
 pub const Null = PureComponentClose.Null;
 pub const Form = PureComponent.Form;
 pub const Label = PureComponentClose.Label;
 pub const SubmitButton = PureComponent.SubmitButton;
+pub const Html = PureComponentClose.Html;
+

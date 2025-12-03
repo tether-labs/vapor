@@ -28,6 +28,11 @@ const Offsets = struct {
     offset_height: f32,
 };
 
+const Selection = struct {
+    start: u32,
+    end: u32,
+};
+
 const AttributeType = union(enum) {
     string: []const u8,
     number: f32,
@@ -79,7 +84,7 @@ pub const Element = struct {
             return null;
         }
     }
-    pub fn scrollTop(self: *Element, value: u32) void {
+    pub fn scrollToTop(self: *Element, value: u32) void {
         const id = self._get_id() orelse {
             Vapor.printlnSrc("Id is null", .{}, @src());
             return;
@@ -87,6 +92,20 @@ pub const Element = struct {
         const attribute: []const u8 = "scrollTop";
         mutateDomElement(id.ptr, id.len, attribute.ptr, attribute.len, value);
         self.scroll_top = value;
+    }
+
+    pub fn scrollTop(self: *Element) u32 {
+        const attribute: []const u8 = "scrollTop";
+        self.scroll_top = self.getAttributeNumber(attribute);
+        return self.scroll_top;
+    }
+
+    pub fn scrollIntoView(self: *Element) void {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrc("Id is null", .{}, @src());
+            return;
+        };
+        Wasm.scrollIntoViewWasm(id.ptr, id.len);
     }
 
     pub fn toOffsetWidth(self: *Element, value: u32) void {
@@ -104,7 +123,7 @@ pub const Element = struct {
             Vapor.printlnSrc("Id is null", .{}, @src());
             return 0;
         };
-        return Vapor.getAttributeWasmNumber(id.ptr, id.len, attribute.ptr, attribute.len);
+        return Wasm.getAttributeWasmNumber(id.ptr, id.len, attribute.ptr, attribute.len);
     }
 
     pub fn cursorPosition(self: *Element) u32 {
@@ -122,6 +141,24 @@ pub const Element = struct {
             return;
         };
         Wasm.setCursorPositionWasm(id.ptr, id.len, value);
+    }
+
+    pub fn selection(self: *Element) ?Selection {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrc("Id is null", .{}, @src());
+            return null;
+        };
+        const selections = if (Vapor.isWasi) blk: {
+            break :blk Wasm.selectionWasm(id.ptr, id.len);
+        } else {
+            // Dummy implementation - return selections with fake values
+            // Typically: [start, end]
+            &[_]u32{ 0, 0 };
+        };
+        return Selection{
+            .start = selections[0],
+            .end = selections[1],
+        };
     }
 
     pub fn mutate(self: *Element, attribute: []const u8, value: u32) void {
@@ -247,14 +284,12 @@ pub const Element = struct {
             return null;
         };
         // const bounds_ptr = Vapor.getOffsets(id.ptr, @intCast(id.len));
-        const bounds_ptr = if (isWasi) {
-            return Wasm.getOffsetsWasm(id.ptr, id.len);
+        const bounds_ptr = if (isWasi) blk: {
+            break :blk Wasm.getOffsetsWasm(id.ptr, id.len);
         } else {
             // Dummy implementation - return offsets with fake values
             // Assuming offsets contain [offsetX, offsetY]
-            dummy_float_buffer[0] = 0.0; // offsetX
-            dummy_float_buffer[1] = 0.0; // offsetY
-            return &dummy_float_buffer;
+            &[_]f32{ 0.0, 0.0 };
         };
 
         return Offsets{

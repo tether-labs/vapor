@@ -246,6 +246,53 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
             return new_self;
         }
 
+        pub fn val(self: *const Self, value: anytype) Self {
+            var new_self: Self = self.*;
+            if (self._elem_type != .TextField and self._elem_type != .TextArea) {
+                Vapor.printlnErr("bindValue only works on TextField", .{});
+                return self.*;
+            }
+            if (@typeInfo(@TypeOf(value)) != .pointer) {
+                Vapor.printlnErr("bindValue only works on pointer types", .{});
+                return self.*;
+            }
+
+            _ = self._ui_node orelse {
+                Vapor.printlnSrcErr("Node is null must ref() first, before setting onChange", .{}, @src());
+                unreachable;
+            };
+
+            switch (self._text_field_type) {
+                .string => {
+                    if (@TypeOf(value.*) != []const u8) {
+                        Vapor.printlnErr("bindValue and TextField type mismatch", .{});
+                        return self.*;
+                    }
+                    new_self._text_field_params.?.string.value_ptr = value.*.ptr;
+                    new_self._text_field_params.?.string.value_len = value.*.len;
+                },
+                .int => {
+                    if (@TypeOf(value.*) != i32) {
+                        Vapor.printlnErr("bindValue and TextField type mismatch", .{});
+                        return self.*;
+                    }
+                },
+                .float => {
+                    if (@TypeOf(value.*) != f32) {
+                        Vapor.printlnErr("bindValue and TextField type mismatch", .{});
+                        return self.*;
+                    }
+                },
+                else => {
+                    Vapor.printlnErr("NOT IMPLEMENTED", .{});
+                    return self.*;
+                },
+            }
+            new_self._value = @ptrCast(@alignCast(value));
+
+            return new_self;
+        }
+
         pub fn bind(self: *const Self, value: anytype) Self {
             var new_self: Self = self.*;
             if (self._elem_type != .TextField and self._elem_type != .TextArea) {
@@ -361,6 +408,16 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
             return new_self;
         }
 
+        pub fn onScroll(self: *const Self, cb: fn (*Vapor.Event) void) *const Self {
+            const element = self._element orelse {
+                Vapor.printlnSrcErr("Element is null must bind() first, before setting onChange", .{}, @src());
+                unreachable;
+            };
+
+            _ = element.addListener(.scroll, cb);
+            return self;
+        }
+
         pub fn onChange(self: *const Self, cb: fn (*Vapor.Event) void) Self {
             var new_self: Self = self.*;
 
@@ -399,7 +456,7 @@ pub fn BuilderClose(comptime state_type: types.StateType) type {
             //     }
             // } else {
             Vapor.attachEventCallback(ui_node, .input, cb) catch |err| {
-                Vapor.println("ONLEAVE: Could not attach event callback {any}\n", .{err});
+                Vapor.printErr("ONCHANGE: Could not attach event callback {any}\n", .{err});
                 unreachable;
             };
             // }

@@ -108,201 +108,201 @@ fn transformToCSS(transform: Transform, writer: anytype) !void {
 // Export this function to be called from JavaScript to get the CSS representation
 var focus_style: []const u8 = "";
 var global_len: usize = 0;
-pub export fn getFocusWithinStyle(node_ptr: ?*UINode) ?[*]const u8 {
-    if (node_ptr == null) return focus_style.ptr;
-    const style = node_ptr.?.style orelse return null;
-    const focus = style.focus_within.?;
-    // Create a default Focus style
-    // const focus = Focus{};
-
-    // Use a fixed buffer with a fbs to build the CSS string
-    var fbs = std.io.fixedBufferStream(&css_buffer);
-    var writer = fbs.writer();
-
-    // Start CSS block
-    // writer.writeAll("{\n") catch {};
-
-    // Write position properties
-    if (focus.position) |fp| {
-        writer.print("  position: {s};\n", .{positionTypeToCSS(fp.type)}) catch {};
-        writer.writeAll("  left: ") catch {};
-        posTypeToCSS(fp.left, writer) catch {};
-        writer.writeAll(";\n") catch {};
-
-        writer.writeAll("  right: ") catch {};
-        posTypeToCSS(fp.right, writer) catch {};
-        writer.writeAll(";\n") catch {};
-
-        writer.writeAll("  top: ") catch {};
-        posTypeToCSS(fp.top, writer) catch {};
-        writer.writeAll(";\n") catch {};
-
-        writer.writeAll("  bottom: ") catch {};
-        posTypeToCSS(fp.bottom, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    if (focus.display) |d| {
-        writer.writeAll("  display: ") catch {};
-        flexTypeToCSS(d, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    // Write display and flex properties
-    // writer.writeAll("  display: flex;\n") catch {};
-    if (focus.direction) |fd| {
-        writer.print("  flex-direction: {s};\n", .{directionToCSS(fd)}) catch {};
-    }
-
-    // Write width and height
-    if (focus.width) |fw| {
-        if (fw.type != .none) {
-            writer.writeAll("  width: ") catch {};
-            sizingTypeToCSS(fw, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-    }
-
-    if (focus.height) |fh| {
-        if (fh.type != .none) {
-            writer.writeAll("  height: ") catch {};
-            sizingTypeToCSS(fh, writer) catch {};
-            writer.writeAll(";\n") catch {};
-        }
-    }
-
-    // Write font properties
-    if (focus.font_size) |fs| {
-        writer.print("  font-size: {d}px;\n", .{fs}) catch {};
-    }
-    if (focus.letter_spacing) |ls| {
-        writer.print("  letter-spacing: {d}px;\n", .{@as(f32, @floatFromInt(ls)) / 1000.0}) catch {};
-    }
-    if (focus.line_height) |lh| {
-        writer.print("  line-height: {d}px;\n", .{lh}) catch {};
-    }
-
-    if (focus.font_weight) |hf| {
-        if (hf > 0) {
-            writer.print("  font-weight: {d};\n", .{hf}) catch {};
-        }
-    }
-
-    // Border properties
-    if (focus.border_thickness) |fbt| {
-        if (fbt.top > 0 or
-            fbt.right > 0 or
-            fbt.bottom > 0 or
-            fbt.left > 0)
-        {
-            writer.print("  border-width: {d}px {d}px {d}px {d}px;\n", .{
-                fbt.top,
-                fbt.right,
-                fbt.bottom,
-                fbt.left,
-            }) catch {};
-
-            writer.writeAll("  border-style: solid;\n") catch {};
-        }
-    }
-    if (focus.border_color) |border_color| {
-        writer.writeAll("  border-color: ") catch {};
-        colorToCSS(border_color, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    // Border radius
-    if (focus.border_radius) |fbr| {
-        if (fbr.top_left > 0 or
-            fbr.top_right > 0 or
-            fbr.bottom_right > 0 or
-            fbr.bottom_left > 0)
-        {
-            writer.print("  border-radius: {d}px {d}px {d}px {d}px;\n", .{
-                fbr.top_left,
-                fbr.top_right,
-                fbr.bottom_right,
-                fbr.bottom_left,
-            }) catch {};
-        }
-    }
-
-    // Text color
-    if (focus.text_color) |tc| {
-        writer.writeAll("  color: ") catch {};
-        colorToCSS(tc, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    // Padding
-    if (focus.padding) |tp| {
-        if (tp.top > 0 or
-            tp.right > 0 or
-            tp.bottom > 0 or
-            tp.left > 0)
-        {
-            writer.print("  padding: {d}px {d}px {d}px {d}px;\n", .{
-                tp.top,
-                tp.right,
-                tp.bottom,
-                tp.left,
-            }) catch {};
-        }
-    }
-
-    // Alignment
-    if (focus.child_alignment) |fca| {
-        writer.print("  justify-content: {s};\n", .{alignmentToCSS(fca.x)}) catch {};
-        writer.print("  align-items: {s};\n", .{alignmentToCSS(fca.y)}) catch {};
-    }
-
-    if (focus.child_gap > 0) {
-        writer.print("  gap: {d}px;\n", .{focus.child_gap}) catch {};
-    }
-
-    // Background color
-    if (focus.background) |fb| {
-        writer.writeAll("  background-color: ") catch {};
-        colorToCSS(fb, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    // Shadow
-    if (focus.shadow.blur > 0 or focus.shadow.spread > 0 or
-        focus.shadow.top > 0 or focus.shadow.left > 0)
-    {
-        writer.writeAll("  box-shadow: ") catch {};
-        writer.print("{d}px {d}px {d}px {d}px ", .{
-            focus.shadow.left,
-            focus.shadow.top,
-            focus.shadow.blur,
-            focus.shadow.spread,
-        }) catch {};
-
-        colorToCSS(focus.shadow.color, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    // Transform
-    if (focus.transform.type != .none) {
-        writer.writeAll("  transform: ") catch {};
-        transformToCSS(focus.transform, writer) catch {};
-        writer.writeAll(";\n") catch {};
-    }
-
-    writer.print("  opacity: {d};\n", .{focus.opacity}) catch {};
-
-    // Close CSS block
-    // writer.writeAll("}\n") catch {};
-
-    // Null-terminate the string
-    const len: usize = @intCast(fbs.getPos() catch 0);
-    css_buffer[len] = 0;
-    focus_style = css_buffer[0..len];
-
-    // Return a pointer to the CSS string
-    return focus_style.ptr;
-}
+// pub export fn getFocusWithinStyle(node_ptr: ?*UINode) ?[*]const u8 {
+//     if (node_ptr == null) return focus_style.ptr;
+//     const style = node_ptr.?.style orelse return null;
+//     const focus = style.focus_within.?;
+//     // Create a default Focus style
+//     // const focus = Focus{};
+//
+//     // Use a fixed buffer with a fbs to build the CSS string
+//     var fbs = std.io.fixedBufferStream(&css_buffer);
+//     var writer = fbs.writer();
+//
+//     // Start CSS block
+//     // writer.writeAll("{\n") catch {};
+//
+//     // Write position properties
+//     if (focus.position) |fp| {
+//         writer.print("  position: {s};\n", .{positionTypeToCSS(fp.type)}) catch {};
+//         writer.writeAll("  left: ") catch {};
+//         posTypeToCSS(fp.left, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//
+//         writer.writeAll("  right: ") catch {};
+//         posTypeToCSS(fp.right, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//
+//         writer.writeAll("  top: ") catch {};
+//         posTypeToCSS(fp.top, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//
+//         writer.writeAll("  bottom: ") catch {};
+//         posTypeToCSS(fp.bottom, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     if (focus.display) |d| {
+//         writer.writeAll("  display: ") catch {};
+//         flexTypeToCSS(d, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     // Write display and flex properties
+//     // writer.writeAll("  display: flex;\n") catch {};
+//     if (focus.direction) |fd| {
+//         writer.print("  flex-direction: {s};\n", .{directionToCSS(fd)}) catch {};
+//     }
+//
+//     // Write width and height
+//     if (focus.width) |fw| {
+//         if (fw.type != .none) {
+//             writer.writeAll("  width: ") catch {};
+//             sizingTypeToCSS(fw, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//     }
+//
+//     if (focus.height) |fh| {
+//         if (fh.type != .none) {
+//             writer.writeAll("  height: ") catch {};
+//             sizingTypeToCSS(fh, writer) catch {};
+//             writer.writeAll(";\n") catch {};
+//         }
+//     }
+//
+//     // Write font properties
+//     if (focus.font_size) |fs| {
+//         writer.print("  font-size: {d}px;\n", .{fs}) catch {};
+//     }
+//     if (focus.letter_spacing) |ls| {
+//         writer.print("  letter-spacing: {d}px;\n", .{@as(f32, @floatFromInt(ls)) / 1000.0}) catch {};
+//     }
+//     if (focus.line_height) |lh| {
+//         writer.print("  line-height: {d}px;\n", .{lh}) catch {};
+//     }
+//
+//     if (focus.font_weight) |hf| {
+//         if (hf > 0) {
+//             writer.print("  font-weight: {d};\n", .{hf}) catch {};
+//         }
+//     }
+//
+//     // Border properties
+//     if (focus.border_thickness) |fbt| {
+//         if (fbt.top > 0 or
+//             fbt.right > 0 or
+//             fbt.bottom > 0 or
+//             fbt.left > 0)
+//         {
+//             writer.print("  border-width: {d}px {d}px {d}px {d}px;\n", .{
+//                 fbt.top,
+//                 fbt.right,
+//                 fbt.bottom,
+//                 fbt.left,
+//             }) catch {};
+//
+//             writer.writeAll("  border-style: solid;\n") catch {};
+//         }
+//     }
+//     if (focus.border_color) |border_color| {
+//         writer.writeAll("  border-color: ") catch {};
+//         colorToCSS(border_color, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     // Border radius
+//     if (focus.border_radius) |fbr| {
+//         if (fbr.top_left > 0 or
+//             fbr.top_right > 0 or
+//             fbr.bottom_right > 0 or
+//             fbr.bottom_left > 0)
+//         {
+//             writer.print("  border-radius: {d}px {d}px {d}px {d}px;\n", .{
+//                 fbr.top_left,
+//                 fbr.top_right,
+//                 fbr.bottom_right,
+//                 fbr.bottom_left,
+//             }) catch {};
+//         }
+//     }
+//
+//     // Text color
+//     if (focus.text_color) |tc| {
+//         writer.writeAll("  color: ") catch {};
+//         colorToCSS(tc, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     // Padding
+//     if (focus.padding) |tp| {
+//         if (tp.top > 0 or
+//             tp.right > 0 or
+//             tp.bottom > 0 or
+//             tp.left > 0)
+//         {
+//             writer.print("  padding: {d}px {d}px {d}px {d}px;\n", .{
+//                 tp.top,
+//                 tp.right,
+//                 tp.bottom,
+//                 tp.left,
+//             }) catch {};
+//         }
+//     }
+//
+//     // Alignment
+//     if (focus.child_alignment) |fca| {
+//         writer.print("  justify-content: {s};\n", .{alignmentToCSS(fca.x)}) catch {};
+//         writer.print("  align-items: {s};\n", .{alignmentToCSS(fca.y)}) catch {};
+//     }
+//
+//     if (focus.child_gap > 0) {
+//         writer.print("  gap: {d}px;\n", .{focus.child_gap}) catch {};
+//     }
+//
+//     // Background color
+//     if (focus.background) |fb| {
+//         writer.writeAll("  background-color: ") catch {};
+//         colorToCSS(fb, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     // Shadow
+//     if (focus.shadow.blur > 0 or focus.shadow.spread > 0 or
+//         focus.shadow.top > 0 or focus.shadow.left > 0)
+//     {
+//         writer.writeAll("  box-shadow: ") catch {};
+//         writer.print("{d}px {d}px {d}px {d}px ", .{
+//             focus.shadow.left,
+//             focus.shadow.top,
+//             focus.shadow.blur,
+//             focus.shadow.spread,
+//         }) catch {};
+//
+//         colorToCSS(focus.shadow.color, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     // Transform
+//     if (focus.transform.type != .none) {
+//         writer.writeAll("  transform: ") catch {};
+//         transformToCSS(focus.transform, writer) catch {};
+//         writer.writeAll(";\n") catch {};
+//     }
+//
+//     writer.print("  opacity: {d};\n", .{focus.opacity}) catch {};
+//
+//     // Close CSS block
+//     // writer.writeAll("}\n") catch {};
+//
+//     // Null-terminate the string
+//     const len: usize = @intCast(fbs.getPos() catch 0);
+//     css_buffer[len] = 0;
+//     focus_style = css_buffer[0..len];
+//
+//     // Return a pointer to the CSS string
+//     return focus_style.ptr;
+// }
 
 export fn getFocusWithinLen() usize {
     return focus_style.len;
