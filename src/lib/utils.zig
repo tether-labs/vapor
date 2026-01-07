@@ -34,10 +34,28 @@ pub fn hashKey(key: []const u8) u32 {
     return std.hash.XxHash32.hash(0, key);
 }
 
+pub fn hash(value: []const u8) u32 {
+    return std.hash.XxHash32.hash(0, value);
+}
+
 const base62_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-pub fn hashToBase62(hash: u32, buf: *[6]u8) []const u8 {
-    var h = hash;
+pub fn hashToBufferBase62(hash_value: u32, out: []u8) usize {
+    var h = hash_value;
+    var i: usize = 0;
+    if (h == 0) {
+        out[0] = '0';
+        return 1;
+    }
+    while (h > 0 and i < 6) : (i += 1) {
+        out[i] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"[h % 62];
+        h /= 62;
+    }
+    return i;
+}
+
+pub fn hashToBase62(hash_value: u32, buf: *[6]u8) []const u8 {
+    var h = hash_value;
     var i: usize = 0;
     while (h > 0 and i < 6) : (i += 1) {
         buf[i] = base62_chars[@intCast(h % 62)];
@@ -256,6 +274,45 @@ fn compareOptionalSlice(
     }
 }
 
-pub fn cast(comptime T: type, opaque_ptr: *anyopaque) T {
+const any = *anyopaque;
+pub fn cast(comptime T: type, opaque_ptr: any) T {
     return @ptrCast(@alignCast(opaque_ptr));
+}
+
+pub fn getUnderlyingType(comptime T: type) type {
+    return switch (@typeInfo(T)) {
+        .optional => std.meta.Child(T),
+        else => T,
+    };
+}
+
+pub fn getUnderlyingValue(comptime T: type, comptime OT: type, v: OT) T {
+    return switch (@typeInfo(OT)) {
+        .optional => v.?,
+        else => v,
+    };
+}
+
+pub fn toLowerCase(str: []const u8, arena_type: Vapor.ArenaType) []const u8 {
+    return std.ascii.allocLowerString(Vapor.arena(arena_type), str) catch unreachable;
+}
+
+pub fn firstLetterToUpper(str: []const u8, arena_type: Vapor.ArenaType) []const u8 {
+    const capital = std.ascii.allocUpperString(Vapor.allocator_global, str[0..1]) catch unreachable;
+    defer Vapor.allocator_global.free(capital);
+    return std.fmt.allocPrint(Vapor.arena(arena_type), "{s}{s}", .{ capital, str[1..] }) catch unreachable;
+}
+
+pub fn stringReplace(str: []const u8, needle: []const u8, replacement: []const u8, arena_type: Vapor.ArenaType) []const u8 {
+    const size = std.mem.replacementSize(u8, str, needle, replacement);
+    const buf = Vapor.arena(arena_type).alloc(u8, size) catch unreachable;
+    _ = std.mem.replace(u8, str, needle, replacement, buf);
+    return buf;
+}
+
+pub fn stringify(value: anytype, arena_type: Vapor.ArenaType) ![]const u8 {
+    var writer = std.Io.Writer.Allocating.init(Vapor.arena(arena_type));
+    try std.json.Stringify.value(value, .{ .emit_null_optional_fields = true, .escape_unicode = true }, &writer.writer);
+    const payload = writer.written();
+    return payload;
 }

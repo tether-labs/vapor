@@ -229,6 +229,14 @@ pub const Element = struct {
         return Vapor.destroyElementInstEventListener(id, event_type, cb_idx);
     }
 
+    pub fn mutateStyleString(self: *Element, attribute: []const u8, value: []const u8) void {
+        const id = self._get_id() orelse {
+            Vapor.printlnSrc("Id is null", .{}, @src());
+            return;
+        };
+        mutateDomElementStyleString(id.ptr, id.len, attribute.ptr, attribute.len, value.ptr, value.len);
+    }
+
     pub fn mutateStyle(self: *Element, style: *const Style) void {
         const id = self._get_id() orelse {
             Vapor.printlnSrc("Id is null", .{}, @src());
@@ -302,36 +310,13 @@ pub const Element = struct {
         };
     }
 
-    pub fn getBoundingClientRect(self: *Element) ?Rect {
+    pub fn getBoundingClientRect(self: *Element) ?Vapor.Bounds {
         const id = self._get_id() orelse {
             Vapor.printlnSrc("Id is null", .{}, @src());
-            return;
+            return null;
         };
 
-        const bounds_ptr = if (isWasi) {
-            return Wasm.getBoundingClientRectWasm(id.ptr, id.len);
-        } else {
-            // Dummy implementation - return rectangle with fake values
-            // Typically: [x, y, width, height, top, right, bottom, left]
-            dummy_float_buffer[0] = 0.0; // x
-            dummy_float_buffer[1] = 0.0; // y
-            dummy_float_buffer[2] = 100.0; // width
-            dummy_float_buffer[3] = 50.0; // height
-            dummy_float_buffer[4] = 0.0; // top
-            dummy_float_buffer[5] = 100.0; // right
-            dummy_float_buffer[6] = 50.0; // bottom
-            dummy_float_buffer[7] = 0.0; // left
-            return &dummy_float_buffer;
-        };
-
-        return Rect{
-            .top = bounds_ptr[0],
-            .left = bounds_ptr[1],
-            .right = bounds_ptr[2],
-            .bottom = bounds_ptr[3],
-            .width = bounds_ptr[4],
-            .height = bounds_ptr[5],
-        };
+        return Vapor.getComponentBounds(id);
     }
 
     pub fn removeFromParent(self: *Element) void {
@@ -504,12 +489,12 @@ pub const Element = struct {
         return Wasm.getVideoCurrentTimeWasm(id.ptr, id.len);
     }
 
-    pub fn translate3d(element: *Element, translation: Translate3d) void {
+    pub fn translate3d(element: *Element, translation: Translate3d) ?void {
         const id = element._get_id() orelse {
             Vapor.printlnSrcErr("Id is null", .{}, @src());
-            unreachable;
+            return null;
         };
-        Wasm.translate3dWasm(id.ptr, id.len, translation.toString().ptr, translation.toString().len);
+        Wasm.translate3dWasm(id.ptr, id.len, translation.x, translation.y, translation.z);
     }
 };
 

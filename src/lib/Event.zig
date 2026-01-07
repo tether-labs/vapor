@@ -4,6 +4,7 @@ const Wasm = Vapor.Wasm;
 const isWasi = Vapor.isWasi;
 const utils = @import("utils.zig");
 const hashKey = utils.hashKey;
+const DynamicObject = @import("Dynamic.zig");
 
 pub const Event = @This();
 id: u32,
@@ -54,26 +55,25 @@ pub fn text(evt: *Event) []const u8 {
     return std.mem.span(resp);
 }
 
-export fn readObject(callback_ptr: u32, object_ptr: ?*Vapor.DynamicObject) void {
-    const node = Vapor.ctx_callback_registry.get(callback_ptr) orelse {
-        Vapor.printlnSrcErr("Callback not found\n", .{}, @src());
-        return;
-    };
-    node.data.dynamic_object = object_ptr;
-    @call(.auto, node.data.runFn, .{&node.data});
-    if (Vapor.mode == .atomic) {
-        Vapor.cycle();
-    }
+pub fn number(evt: *Event) !i32 {
+    const resp = getEventDataInput(evt.id);
+    const num_str = std.mem.span(resp);
+    if (num_str.len == 0) return error.EmptyString;
+    return try std.fmt.parseInt(i32, num_str, 10);
 }
 
 pub fn formData(evt: *Event, form_value: anytype) ?@typeInfo(@TypeOf(form_value)).pointer.child {
     if (isWasi) {
         const handle = Wasm.formDataWasm(evt.id);
-        const obj = Vapor.finalizeObject(handle);
+        const obj = DynamicObject.finalizeObject(handle);
+
         var cloned_form: @typeInfo(@TypeOf(form_value)).pointer.child = form_value.*;
         const fields = @typeInfo(@TypeOf(cloned_form)).@"struct".fields;
+        if (obj.fields.items.len == 0) return null;
         inline for (fields, 0..) |field, i| {
+            if (i > obj.fields.items.len - 1) break;
             const obj_value = obj.fields.items[i].value;
+
             switch (@typeInfo(field.type)) {
                 .pointer => |ptr| {
                     if (ptr.size == .slice) {
@@ -91,14 +91,79 @@ pub fn formData(evt: *Event, form_value: anytype) ?@typeInfo(@TypeOf(form_value)
                         Vapor.printlnSrcErr("WE NEED TO CHECK THIS SO THAT THE SIGNDNESS IS OKAY", .{}, @src());
                     }
                 },
+                .@"struct" => {
+                    var section = @field(cloned_form, field.name);
+                    fillStruct(field.type, &section, obj);
+                    @field(cloned_form, field.name) = section;
+                    // if (obj_value == .string) {
+                    //     @field(cloned_form, field.name) = std.fmt.parseInt(field.type, obj_value.string, 10) catch |err| blk: {
+                    //         Vapor.printlnErr("Error parsing int field {s} value {s} {any}", .{ field.name, obj_value.string, err });
+                    //         break :blk 0;
+                    //     };
+                    // } else {
+                    //     @field(cloned_form, field.name) = @intCast(obj_value.int);
+                    //     Vapor.printlnSrcErr("WE NEED TO CHECK THIS SO THAT THE SIGNDNESS IS OKAY", .{}, @src());
+                    // }
+                },
                 else => {
-                    Vapor.printlnErr("Cannot set non string or int float types TYPE: {any}", .{@TypeOf(obj_value)});
+                    Vapor.printlnErr("Cannot set non string or int float types TYPE", .{});
                 },
             }
         }
         return cloned_form;
     }
     return null;
+}
+
+/// Helper function to map a DynamicObject to a Zig struct type
+fn fillStruct(comptime T: type, cloned_form: *T, obj: *DynamicObject.DynamicObject) void {
+    const fields = @typeInfo(T).@"struct".fields;
+
+    var index: usize = 0;
+    inline for (fields, 0..) |field, i| {
+        // Safety check: ensure we don't out-of-bounds the dynamic object
+        if (i >= obj.fields.items.len) break;
+
+        var obj_field: ?DynamicObject.Field = null;
+
+        for (obj.fields.items, 0..) |item, j| {
+            index = j;
+            if (std.mem.eql(u8, item.name, field.name)) {
+                obj_field = item;
+            }
+        }
+
+        if (obj_field) |of| {
+            const obj_value = of.value;
+            switch (@typeInfo(field.type)) {
+                .pointer => |ptr| {
+                    if (ptr.size == .slice) {
+                        @field(cloned_form, field.name) = obj_value.string;
+                    }
+                },
+                .int => {
+                    if (obj_value == .string) {
+                        @field(cloned_form, field.name) = std.fmt.parseInt(field.type, obj_value.string, 10) catch |err| blk: {
+                            Vapor.printlnErr("Error parsing int field {s} value {s} {any}", .{ field.name, obj_value.string, err });
+                            break :blk 0;
+                        };
+                    } else {
+                        // Added a safety check for signedness/bounds as requested
+                        @field(cloned_form, field.name) = @intCast(obj_value.int);
+                    }
+                },
+                .float => {
+                    // Handling floats since they are common in forms
+                    @field(cloned_form, field.name) = if (obj_value == .float) obj_value.float else 0;
+                },
+                else => {
+                    Vapor.printlnErr("Cannot set unsupported type for field {s}: {any}", .{ field.name, field.type });
+                },
+            }
+        } else {
+            Vapor.printlnErr("Field {s} not found in DynamicObject {s}\n", .{field.name, obj.fields.items[index].name});
+        }
+    }
 }
 
 pub fn preventDefault(evt: *Event) void {

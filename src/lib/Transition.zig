@@ -1,9 +1,10 @@
 // Transition.zig
 const std = @import("std");
-const TimingFunction = @import("types.zig").TimingFunction;
+const TimingFunction = @import("Animation.zig").Easing;
 const Vapor = @import("Vapor.zig");
 
 pub const TransitionProperty = enum(u8) {
+    linear,
     opacity,
     x_position,
     y_position,
@@ -14,7 +15,14 @@ pub const TransitionProperty = enum(u8) {
     background_color,
     border_color,
     transform,
+    top,
+    bottom,
+    left,
+    right,
     none,
+    cx,
+    d,
+    cy,
 };
 
 pub const TransitionState = packed union {
@@ -29,28 +37,22 @@ pub const TransitionState = packed union {
 };
 
 pub const PackedTransition = packed struct {
-    properties_ptr: ?*[]TransitionProperty = null,
+    properties_ptr: ?[*]const TransitionProperty = null,
     properties_len: usize = 0,
     duration: u32 = 300, // default 300ms
     timing: TimingFunction = .ease,
     delay: u32 = 0,
-    // initial_state: TransitionState = .{ .none = {} },
-    // final_state: TransitionState = .{ .none = {} },
 
     pub fn set(packed_transition: *PackedTransition, transition: *const Transition) void {
-        const slice_ptr = Vapor.arena(.frame).create([]TransitionProperty) catch unreachable;
         var slice: []TransitionProperty = Vapor.arena(.frame).alloc(TransitionProperty, transition.properties.len) catch unreachable;
         for (transition.properties, 0..) |property, i| {
             slice[i] = property;
         }
-        slice_ptr.* = slice;
-        packed_transition.properties_ptr = slice_ptr;
+        packed_transition.properties_ptr = slice.ptr;
         packed_transition.properties_len = slice.len;
         packed_transition.duration = transition.duration;
         packed_transition.timing = transition.timing;
         packed_transition.delay = transition.delay;
-        // packed_transition.initial_state = transition.initial_state;
-        // packed_transition.final_state = transition.final_state;
     }
 };
 
@@ -60,8 +62,6 @@ pub const Transition = struct {
     duration: u32 = 300, // default 300ms
     timing: TimingFunction = .ease,
     delay: u32 = 0,
-    initial_state: TransitionState = .{ .none = {} },
-    final_state: TransitionState = .{ .none = {} },
 
     pub fn none() Transition {
         return Transition{};

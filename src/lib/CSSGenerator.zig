@@ -107,6 +107,10 @@ fn writeMarginPaddings(margin_paddings_ptr: *const Types.PackedMarginsPaddings) 
     StyleWriter.generateMarginsPadding(margin_paddings_ptr, &writer);
 }
 
+fn writeTransform(transform_ptr: *const Types.PackedTransforms) void {
+    StyleWriter.generateTransforms(transform_ptr, &writer);
+}
+
 fn writeToken(token: []const u8) void {
     writer.writeByte('.') catch {};
     writer.write(token) catch {};
@@ -196,6 +200,7 @@ pub fn writeAllStyles(gen: *Generator) void {
     writeCommonStyleGroup(gen, allocator, &Packer.visuals, "vis", &key_buf, writeVisual, null);
     writeCommonStyleGroup(gen, allocator, &Packer.positions, "pos", &key_buf, writePos, null);
     writeCommonStyleGroup(gen, allocator, &Packer.margins_paddings, "mapa", &key_buf, writeMarginPaddings, null);
+    writeCommonStyleGroup(gen, allocator, &Packer.transforms, "tran", &key_buf, writeTransform, null);
 
     // Special cases with ":hover"
     writeCommonStyleGroup(gen, allocator, &Packer.interactives, "intr", &key_buf, writeInteractive, ":hover");

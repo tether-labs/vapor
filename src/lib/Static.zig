@@ -47,48 +47,61 @@ pub inline fn Header(text: []const u8, size: HeaderSize, style: Style) void {
     LifeCycle.close({});
 }
 
-pub inline fn CtxHooks(hooks: Vapor.HooksCtxFuncs, func: anytype, args: anytype, style: ?*const Style) fn (void) void {
-    var elem_decl = ElementDecl{
+pub inline fn CtxHooks(hooks: Vapor.HooksCtxFuncs, func: anytype, args: anytype) fn (void) void {
+    const elem_decl = ElementDecl{
         .elem_type = .HooksCtx,
         .state_type = .static,
-        .style = style,
     };
 
-    if (hooks == .mounted) {
-        const Args = @TypeOf(args);
-        const Closure = struct {
-            arguments: Args,
-            run_node: Vapor.Node = .{ .data = .{ .runFn = runFn, .deinitFn = deinitFn } },
-            //
-            fn runFn(action: *Vapor.Action) void {
-                const run_node: *Vapor.Node = @fieldParentPtr("data", action);
-                const closure: *@This() = @alignCast(@fieldParentPtr("run_node", run_node));
-                @call(.auto, func, closure.arguments);
-            }
-            //
-            fn deinitFn(node: *Vapor.Node) void {
-                const closure: *@This() = @alignCast(@fieldParentPtr("run_node", node));
-                Vapor.allocator_global.destroy(closure);
-            }
-        };
-
-        const closure = Vapor.allocator_global.create(Closure) catch |err| {
-            println("Error could not create closure {any}\n ", .{err});
-            unreachable;
-        };
-        closure.* = .{
-            .arguments = args,
-        };
-
-        const id = Vapor.mounted_ctx_funcs.items.len;
-        elem_decl.hooks.mounted_id += id + 1;
-        Vapor.mounted_ctx_funcs.append(&closure.run_node) catch |err| {
-            println("Hooks Function Registry {any}\n", .{err});
-        };
+    const ui_node = LifeCycle.open(elem_decl) orelse unreachable;
+    switch (hooks) {
+        .mounted => {
+            ui_node.hooks.mounted_id = 1;
+        },
+        .destroy => {
+            ui_node.hooks.destroy_id = 1;
+        },
     }
-    _ = LifeCycle.open(elem_decl);
+    const Args = @TypeOf(args);
+    const Closure = struct {
+        arguments: Args,
+        run_node: Vapor.Node = .{ .data = .{ .runFn = runFn, .deinitFn = deinitFn } },
+        //
+        fn runFn(action: *Vapor.Action) void {
+            const run_node: *Vapor.Node = @fieldParentPtr("data", action);
+            const closure: *@This() = @alignCast(@fieldParentPtr("run_node", run_node));
+            @call(.auto, func, closure.arguments);
+        }
+        //
+        fn deinitFn(node: *Vapor.Node) void {
+            const closure: *@This() = @alignCast(@fieldParentPtr("run_node", node));
+            Vapor.allocator_global.destroy(closure);
+        }
+    };
+
+    const closure = Vapor.allocator_global.create(Closure) catch |err| {
+        println("Error could not create closure {any}\n ", .{err});
+        unreachable;
+    };
+    closure.* = .{
+        .arguments = args,
+    };
+
+    Vapor.mounted_ctx_funcs.put(hashKey(ui_node.uuid), &closure.run_node) catch |err| {
+        println("Hooks Function Registry {any}\n", .{err});
+    };
     LifeCycle.configure(elem_decl);
+
     return LifeCycle.close;
+}
+
+export fn getHooksType(ui_node: *UINode) Vapor.HooksCtxFuncs {
+    if (ui_node.hooks.mounted_id > 0) {
+        return .mounted;
+    } else if (ui_node.hooks.destroy_id > 0) {
+        return .destroy;
+    }
+    unreachable;
 }
 
 pub inline fn Hooks(hooks: Vapor.HooksFuncs) fn (void) void {
@@ -975,7 +988,7 @@ pub const Chain = struct {
             fn runFn(action: *Vapor.Action) void {
                 const run_node: *Vapor.Node = @fieldParentPtr("data", action);
                 const closure: *@This() = @alignCast(@fieldParentPtr("run_node", run_node));
-                @call(.auto, func, closure.arguments);
+                @call(.always_tail, func, closure.arguments);
             }
             fn deinitFn(node: *Vapor.Node) void {
                 const closure: *@This() = @alignCast(@fieldParentPtr("run_node", node));

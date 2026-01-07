@@ -5,7 +5,7 @@ const ElementType = @import("types.zig").ElementType;
 const Writer = @import("Writer.zig");
 const utils = @import("utils.zig");
 
-var hasher = std.hash.Wyhash.init(5213);
+var _hasher = std.hash.Wyhash.init(5213);
 var buf_128: [128]u8 = undefined;
 var writer: Writer = undefined;
 pub const KeyGenerator = struct {
@@ -49,43 +49,43 @@ pub const KeyGenerator = struct {
         writer.init(&buf_128);
     }
 
-    pub fn generateCommonStyleKey(ids: []const []const u8, allocator: *std.mem.Allocator) []const u8 {
-
-        // Hash all the IDs in order
-        for (ids) |id| {
-            hasher.update(id);
-        }
-
-        // Generate the final hash
-        const hash = hasher.final();
-
-        // Convert to UUID-like string (128-bit represented as hex)
-        const result = std.fmt.allocPrint(allocator.*, "common-{x:0>16}", .{hash}) catch |err| {
-            Vapor.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
-            return "fallback-common-key";
-        };
-
-        return result;
-    }
-
-    pub fn generateStyleKey(tag: []const u8, ids: []const []const u8, allocator: *std.mem.Allocator) []const u8 {
-
-        // Hash all the IDs in order
-        for (ids) |id| {
-            hasher.update(id);
-        }
-
-        // Generate the final hash
-        const hash = hasher.final();
-
-        // Convert to UUID-like string (128-bit represented as hex)
-        const result = std.fmt.allocPrint(allocator.*, "{s}-{x:0>16}", .{ tag, hash }) catch |err| {
-            Vapor.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
-            return "fallback-common-key";
-        };
-
-        return result;
-    }
+    // pub fn generateCommonStyleKey(ids: []const []const u8, allocator: *std.mem.Allocator) []const u8 {
+    //
+    //     // Hash all the IDs in order
+    //     for (ids) |id| {
+    //         hasher.update(id);
+    //     }
+    //
+    //     // Generate the final hash
+    //     const hash = hasher.final();
+    //
+    //     // Convert to UUID-like string (128-bit represented as hex)
+    //     const result = std.fmt.allocPrint(allocator.*, "common-{x:0>16}", .{hash}) catch |err| {
+    //         Vapor.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
+    //         return "fallback-common-key";
+    //     };
+    //
+    //     return result;
+    // }
+    //
+    // pub fn generateStyleKey(tag: []const u8, ids: []const []const u8, allocator: *std.mem.Allocator) []const u8 {
+    //
+    //     // Hash all the IDs in order
+    //     for (ids) |id| {
+    //         hasher.update(id);
+    //     }
+    //
+    //     // Generate the final hash
+    //     const hash = hasher.final();
+    //
+    //     // Convert to UUID-like string (128-bit represented as hex)
+    //     const result = std.fmt.allocPrint(allocator.*, "{s}-{x:0>16}", .{ tag, hash }) catch |err| {
+    //         Vapor.printlnSrcErr("Could not allocate common style key: {any}", .{err}, @src());
+    //         return "fallback-common-key";
+    //     };
+    //
+    //     return result;
+    // }
 
     pub fn hashKey(key: []const u8) u32 {
         var h: u32 = 5381;
@@ -203,6 +203,20 @@ pub const KeyGenerator = struct {
         return buffer[i..];
     }
 
+    pub fn generateKey64(
+        elem_type: ElementType,
+        parent_hash: u32,
+        depth: usize,
+    ) u32 {
+        const index = getComponentCount();
+        var id: u32 = 0;
+        id += @intCast(depth);
+        id += @intCast(index);
+        id += @intFromEnum(elem_type);
+        id += parent_hash;
+        return id;
+    }
+
     pub fn generateKey(
         uuid_buf: []u8,
         elem_type: ElementType,
@@ -210,8 +224,41 @@ pub const KeyGenerator = struct {
         depth: usize,
     ) []const u8 {
         const index = getComponentCount();
-        // call_counter += 1;
-        // component_index += 1;
+
+        // 1. Incremental Hash (No intermediate string buffer)
+        var hasher = std.hash.XxHash32.init(0);
+        const tag_name = @tagName(elem_type);
+
+        hasher.update(tag_name);
+        hasher.update(parent_key);
+        hasher.update(std.mem.asBytes(&depth));
+        hasher.update(std.mem.asBytes(&index));
+        const hash_val = hasher.final();
+
+        // 2. Direct Write to Output Buffer
+        // Prefix: 4 chars of tag + '_'
+        const prefix_len = @min(4, tag_name.len);
+        @memcpy(uuid_buf[0..prefix_len], tag_name[0..prefix_len]);
+        uuid_buf[prefix_len] = '_';
+
+        // 3. Optimized Base62 Write
+        // We pass a slice of the output buffer directly to the hasher
+        const base62_len = utils.hashToBufferBase62(hash_val, uuid_buf[prefix_len + 1 ..]);
+
+        // 4. Final Suffix
+        const final_pos = prefix_len + 1 + base62_len;
+        @memcpy(uuid_buf[final_pos .. final_pos + 3], "-gk");
+
+        return uuid_buf[0 .. final_pos + 3];
+    }
+
+    pub fn generateKey__(
+        uuid_buf: []u8,
+        elem_type: ElementType,
+        parent_key: []const u8,
+        depth: usize,
+    ) []const u8 {
+        const index = getComponentCount();
         writer.init(&buf_128);
         const tag_name = @tagName(elem_type);
         writer.write(tag_name) catch "";
@@ -226,7 +273,6 @@ pub const KeyGenerator = struct {
         var buf_short: [6]u8 = undefined;
         const class_name = utils.hashToBase62(hash, &buf_short);
 
-
         writer.write(class_name) catch "";
         writer.write("-gk") catch "";
         const key = writer.buffer[0..writer.pos];
@@ -234,51 +280,51 @@ pub const KeyGenerator = struct {
         return uuid_buf[0..key.len];
     }
 
-    // Similar update for generateListItemKey
-    pub fn generateListItemKey(
-        parent_key: []const u8,
-        item_key: anytype,
-        index: usize,
-    ) []const u8 {
-        // Increment call counter for each component creation
-        const current_count = call_counter;
-        call_counter += 1;
-
-        // Include parent key in the hash
-        hasher.update(parent_key);
-
-        // Include the call counter
-        var count_buf: [16]u8 = undefined;
-        const count_str = std.fmt.bufPrint(&count_buf, "{d}", .{current_count}) catch &count_buf;
-        hasher.update(count_str);
-
-        // Include index for stability even if order changes
-        var idx_buf: [16]u8 = undefined;
-        const idx_str = std.fmt.bufPrint(&idx_buf, "{d}", .{index}) catch &idx_buf;
-        hasher.update(idx_str);
-
-        // Include the item key if it's a string
-        if (@TypeOf(item_key) == []const u8) {
-            hasher.update(item_key);
-        } else {
-            // Convert non-string keys to string
-            var key_buf: [32]u8 = undefined;
-            const key_str = std.fmt.bufPrint(&key_buf, "{any}", .{item_key}) catch &key_buf;
-            hasher.update(key_str);
-        }
-
-        // Generate the final hash
-        const hash = hasher.final();
-
-        // Convert hash to a readable string
-        var buf: [64]u8 = undefined;
-        const key = std.fmt.bufPrint(&buf, "li_{x}_{d}_{d}", .{ hash, index, current_count }) catch &buf;
-
-        // Allocate permanent storage for the key
-        var allocator = std.heap.page_allocator;
-        const result = allocator.alloc(u8, key.len) catch return "fallback_key";
-        std.mem.copy(u8, result, key);
-
-        return result;
-    }
+    // // Similar update for generateListItemKey
+    // pub fn generateListItemKey(
+    //     parent_key: []const u8,
+    //     item_key: anytype,
+    //     index: usize,
+    // ) []const u8 {
+    //     // Increment call counter for each component creation
+    //     const current_count = call_counter;
+    //     call_counter += 1;
+    //
+    //     // Include parent key in the hash
+    //     hasher.update(parent_key);
+    //
+    //     // Include the call counter
+    //     var count_buf: [16]u8 = undefined;
+    //     const count_str = std.fmt.bufPrint(&count_buf, "{d}", .{current_count}) catch &count_buf;
+    //     hasher.update(count_str);
+    //
+    //     // Include index for stability even if order changes
+    //     var idx_buf: [16]u8 = undefined;
+    //     const idx_str = std.fmt.bufPrint(&idx_buf, "{d}", .{index}) catch &idx_buf;
+    //     hasher.update(idx_str);
+    //
+    //     // Include the item key if it's a string
+    //     if (@TypeOf(item_key) == []const u8) {
+    //         hasher.update(item_key);
+    //     } else {
+    //         // Convert non-string keys to string
+    //         var key_buf: [32]u8 = undefined;
+    //         const key_str = std.fmt.bufPrint(&key_buf, "{any}", .{item_key}) catch &key_buf;
+    //         hasher.update(key_str);
+    //     }
+    //
+    //     // Generate the final hash
+    //     const hash = hasher.final();
+    //
+    //     // Convert hash to a readable string
+    //     var buf: [64]u8 = undefined;
+    //     const key = std.fmt.bufPrint(&buf, "li_{x}_{d}_{d}", .{ hash, index, current_count }) catch &buf;
+    //
+    //     // Allocate permanent storage for the key
+    //     var allocator = std.heap.page_allocator;
+    //     const result = allocator.alloc(u8, key.len) catch return "fallback_key";
+    //     std.mem.copy(u8, result, key);
+    //
+    //     return result;
+    // }
 };

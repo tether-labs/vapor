@@ -11,6 +11,7 @@ pub const ClassType = enum {
     interactive,
     animation,
     defined,
+    transform,
 };
 
 pub const ClassCache = struct {
@@ -27,17 +28,18 @@ pub const ClassCache = struct {
     };
 
     map: std.AutoHashMap(Hash, Class),
-    allocator: std.mem.Allocator,
-    tombstones: []Class = undefined,
-    tombstone_count: u32 = 0,
+    scratch_arena: std.heap.ArenaAllocator,
+    tombstones: Vapor.Array(Hash) = undefined,
 
-    pub fn init(allocator: std.mem.Allocator) !Self {
-        const tombstones: []Class = try allocator.alloc(Class, 64);
-        return .{
-            .map = std.AutoHashMap(Hash, Class).init(allocator),
-            .allocator = allocator,
-            .tombstones = tombstones,
+    pub fn init(class_cache: *Self, allocator: std.mem.Allocator) !void {
+        class_cache.* = Self{
+            .map = undefined,
+            .scratch_arena = std.heap.ArenaAllocator.init(allocator),
+            .tombstones = undefined,
         };
+        const map = std.AutoHashMap(Hash, Class).init(class_cache.scratch_arena.allocator());
+        class_cache.map = map;
+        class_cache.tombstones = Vapor.Array(Hash).init(class_cache.scratch_arena.allocator());
     }
 
     pub fn getClassNameByType(class_type: ClassType) []const u8 {
@@ -49,6 +51,7 @@ pub const ClassCache = struct {
             .interactive => "intr",
             .animation => "anim",
             .defined => "def",
+            .transform => "tran",
         };
     }
 
@@ -57,73 +60,88 @@ pub const ClassCache = struct {
     }
 
     pub fn set(self: *Self, hash: Hash, class_type: ClassType) !void {
-        const class_type_as_str = getClassNameByType(class_type);
-        const full_class = std.fmt.allocPrint(self.allocator, "{s}_{any}", .{ class_type_as_str, hash }) catch unreachable;
-
-        var class = self.get(hash) orelse {
-            const class = Class{
-                .name = full_class,
-                .type = class_type,
-                .count = 1,
-            };
-            try self.map.put(hash, class);
+        // 1. Check existence FIRST to avoid allocation
+        if (self.map.getPtr(hash)) |class| {
+            class.count += 1;
             return;
-        };
-        class.count += 1;
-        try self.map.put(hash, class);
-    }
-
-    pub fn decrement(self: *Self, old_hash: Hash) !void {
-        var class = self.get(old_hash) orelse {
-            return error.ClassNotFound;
-        };
-        if (class.tombstone) return;
-        class.count -= 1;
-        if (class.count == 0) {
-            if (self.tombstone_count == 64) return error.TombstoneOverflow;
-            class.tombstone = true;
-            self.tombstones[self.tombstone_count] = class;
-            self.tombstone_count += 1;
         }
-        try self.map.put(old_hash, class);
+
+        // 2. Only allocate if it's actually new
+        const class_type_as_str = getClassNameByType(class_type);
+        const full_class = try std.fmt.allocPrint(self.scratch_arena.allocator(), "{s}_{any}", .{ class_type_as_str, hash });
+
+        try self.map.put(hash, .{
+            .name = full_class,
+            .type = class_type,
+            .count = 1,
+        });
     }
 
-    pub fn getTombstones(self: *Self) []Class {
-        return self.tombstones[0..self.tombstone_count];
+    pub fn decrement(self: *Self, hash: Hash) !void {
+        const class_ptr = self.map.getPtr(hash) orelse return error.ClassNotFound;
+
+        // Safety check to prevent double-free logic
+        if (class_ptr.count == 0) return;
+
+        class_ptr.count -= 1;
+
+        if (class_ptr.count == 0) {
+            // Queue the HASH for deletion, don't store the whole Class copy
+            try self.tombstones.append(hash);
+        }
     }
 
-    pub fn clearTombstones(self: *Self) void {
-        self.tombstone_count = 0;
+    pub fn getTombstones(self: *Self) []Hash {
+        return self.tombstones.items[0..];
     }
 
     pub fn batchRemove(self: *Self) void {
-        if (self.tombstone_count < 32) return;
+        if (self.tombstones.items.len > 0) return;
         if (Vapor.isWasi) {
             Wasm.batchRemoveTombStonesWasm();
         }
     }
 
-    pub fn getTombstone(self: *Self, index: usize) Class {
-        return self.tombstones[index];
+    pub fn getTombstone(self: *Self, index: usize) Hash {
+        return self.tombstones.items[index];
+    }
+
+    // Call this AFTER the JS side has read the tombstones and removed CSS classes
+    pub fn flushTombstones(self: *Self) void {
+        // Reset the list
+        self.tombstones.clearRetainingCapacity();
+        self.map.clearRetainingCapacity();
+        const did = self.scratch_arena.reset(.retain_capacity);
+        if (!did) {
+            Vapor.printlnSrcErr("Failed to ClassCache reset arena\nPlease report bug to maintainer", .{}, @src());
+        }
+    }
+
+    pub fn getTombstoneName(self: *Self, index: usize) ?[]const u8 {
+        if (index >= self.tombstones.items.len) return null;
+        const hash = self.tombstones.items[index];
+        const class = self.map.get(hash) orelse return null;
+        return class.name;
     }
 };
 
 export fn getTombstoneCount() usize {
-    return Vapor.class_cache.tombstone_count;
+    return Vapor.class_cache.tombstones.items.len;
 }
 
 export fn getTombstoneClassNamePtr(index: usize) ?[*]const u8 {
-    if (index >= Vapor.class_cache.tombstone_count) return null;
-    const tombstone = Vapor.class_cache.getTombstone(index);
-    Vapor.println("Tombstone: {s}\n", .{tombstone.name});
-    return tombstone.name.ptr;
+    if (index >= Vapor.class_cache.tombstones.items.len) return null;
+    const name = Vapor.class_cache.getTombstoneName(index) orelse return null;
+    Vapor.println("Tombstone: {s}\n", .{name});
+    return name.ptr;
 }
 
 export fn getTombstoneClassNameLength(index: usize) usize {
-    const tombstone = Vapor.class_cache.getTombstone(index);
-    return tombstone.name.len;
+    if (index >= Vapor.class_cache.tombstones.items.len) return 0;
+    const name = Vapor.class_cache.getTombstoneName(index) orelse return 0;
+    return name.len;
 }
 
 export fn clearTombstones() void {
-    Vapor.class_cache.clearTombstones();
+    Vapor.class_cache.flushTombstones();
 }

@@ -2,12 +2,6 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const Arena = std.heap.ArenaAllocator;
-// const println = @import("Vapor.zig").println;
-// const printlnColor = @import("Vapor.zig").printlnColor;
-// const Vapor = @import("Vapor.zig");
-// const Types = @import("types.zig");
-// const Wasm = Vapor.Wasm;
-// const isWasi = Vapor.isWasi;
 const UINode = @import("UITree.zig").UINode;
 const Item = @import("UITree.zig").Item;
 
@@ -24,6 +18,8 @@ const FrameData = struct {
     stats: Stats = .{},
 };
 
+const NUMBER_OF_FRAMES =2;
+
 pub const Stats = struct {
     nodes_allocated: usize = 0,
     tree_memory: usize = 0,
@@ -37,30 +33,29 @@ pub const Stats = struct {
 
 const FrameAllocator = @This();
 persistent_arena: Arena,
-frames: [2]FrameData,
+frames: [NUMBER_OF_FRAMES]FrameData,
 current_frame: usize = 0,
-view: [2]FrameData,
+view: [NUMBER_OF_FRAMES]FrameData,
 current_route: usize = 0,
 request_arena: Arena,
 scratch_arena: Arena,
 
 pub fn init(backing_allocator: *std.mem.Allocator) FrameAllocator {
-    const frame1_arena = std.heap.ArenaAllocator.init(backing_allocator.*);
-    const frame2_arena = std.heap.ArenaAllocator.init(backing_allocator.*);
+    var frames: [NUMBER_OF_FRAMES]FrameData = undefined;
 
-    const previous_route_arena = std.heap.ArenaAllocator.init(backing_allocator.*);
-    const current_route_arena = std.heap.ArenaAllocator.init(backing_allocator.*);
+    for (0..NUMBER_OF_FRAMES) |i| {
+        frames[i] = .{ .arena = std.heap.ArenaAllocator.init(backing_allocator.*) };
+    }
+
+    var views: [NUMBER_OF_FRAMES]FrameData = undefined;
+    for (0..NUMBER_OF_FRAMES) |i| {
+        views[i] = .{ .arena = std.heap.ArenaAllocator.init(backing_allocator.*) };
+    }
 
     return .{
-        .frames = [_]FrameData{
-            .{ .arena = frame1_arena },
-            .{ .arena = frame2_arena },
-        },
+        .frames = frames,
         .persistent_arena = std.heap.ArenaAllocator.init(backing_allocator.*),
-        .view = [_]FrameData{
-            .{ .arena = previous_route_arena },
-            .{ .arena = current_route_arena },
-        },
+        .view = views,
         .request_arena = std.heap.ArenaAllocator.init(backing_allocator.*),
         .scratch_arena = std.heap.ArenaAllocator.init(backing_allocator.*),
     };
@@ -130,7 +125,7 @@ pub export fn beginFrame(self: *FrameAllocator) void {
     //     printPrevStats(self);
     // }
     // Move to next frame
-    const next_frame = (self.current_frame + 1) % 2;
+    const next_frame = (self.current_frame + 1) % NUMBER_OF_FRAMES;
 
     // Clear the frame we're about to use
     _ = self.frames[next_frame].arena.reset(.retain_capacity);
@@ -141,7 +136,7 @@ pub export fn beginFrame(self: *FrameAllocator) void {
 
 pub fn beginView(self: *FrameAllocator) void {
     // Move to next frame
-    const next_route = (self.current_route + 1) % 2;
+    const next_route = (self.current_route + 1) % NUMBER_OF_FRAMES;
 
     // Clear the route we're about to use
     _ = self.view[next_route].arena.reset(.retain_capacity);

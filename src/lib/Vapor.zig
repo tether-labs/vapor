@@ -32,11 +32,12 @@ const HtmlGenerator = @import("HtmlGenerator.zig");
 const mode_options = @import("build_options");
 const Packer = @import("Packer.zig");
 const ClassCache = @import("ClassCache.zig").ClassCache;
+const DynamicObject = @import("Dynamic.zig").DynamicObject;
 
 const DebugLevel = enum(u8) { all = 0, debug = 1, info = 2, warn = 3, none = 4 };
 
 pub var build_options = struct {
-    enable_debug: bool = debug,
+    enable_debug: bool = true,
     debug_level: DebugLevel = .none,
 }{};
 
@@ -147,6 +148,19 @@ pub fn store(key: []const u8, value: anytype) void {
     }
 }
 
+pub fn getStore(comptime T: type, key: []const u8) ?T {
+    switch (T) {
+        []const u8 => {
+            const string = Wasm.getLocalStorageStringWasm(key.ptr, key.len) orelse return null;
+            return std.mem.span(string);
+        },
+        i32 => return Wasm.getLocalStorageI32Wasm(key.ptr, key.len),
+        u32 => return Wasm.getLocalStorageU32Wasm(key.ptr, key.len),
+        f32 => return Wasm.getLocalStorageF32Wasm(key.ptr, key.len),
+        else => return null,
+    }
+}
+
 pub const EventHandler = struct {
     type: EventType,
     ctx_aware: bool = false,
@@ -178,12 +192,15 @@ pub var fetch_registry: std.AutoHashMap(u32, *Kit.FetchNode) = undefined;
 pub const EventNode = struct { cb: *const fn (*Event) void, ui_node: ?*UINode = null, evt_type: EventType };
 pub var events_callbacks: std.AutoHashMap(u32, EventNode) = undefined;
 pub var nodes_with_events: std.AutoHashMap(u32, *UINode) = undefined;
+pub var cached_event_handlers: std.AutoHashMap(u32, EventHandlers) = undefined;
 pub var node_events_callbacks: std.AutoHashMap(u32, *CtxAwareEventNode) = undefined;
 pub var events_inst_callbacks: std.AutoHashMap(u32, *EvtInstNode) = undefined;
 pub var hooks_inst_callbacks: std.AutoHashMap(u32, *const fn (HookContext) void) = undefined;
 pub var mounted_funcs: std.AutoHashMap(u32, *const fn () void) = undefined;
 pub var on_end_funcs: std.array_list.Managed(*const fn () void) = undefined;
 pub var on_end_ctx_funcs: std.array_list.Managed(*Node) = undefined;
+pub var pop_state_funcs: std.array_list.Managed(*const fn () void) = undefined;
+pub var push_state_funcs: std.array_list.Managed(*const fn () void) = undefined;
 pub var on_commit_funcs: std.array_list.Managed(*const fn () void) = undefined;
 pub var mounted_ctx_funcs: std.AutoHashMap(u32, *Node) = undefined;
 pub var on_create_node_funcs: std.AutoHashMap(u32, *Node) = undefined;
@@ -195,10 +212,10 @@ pub const ObserverNode = union(enum) {
     type: ElementType,
     uuid: []const u8,
 };
-pub var removed_nodes: std.array_list.Managed(RemovedNode) = undefined;
+// pub var removed_nodes: std.array_list.Managed(RemovedNode) = undefined;
 pub var observer_nodes: std.StringHashMap(std.array_list.Managed(ObserverNode)) = undefined;
-pub var added_nodes: std.array_list.Managed(RenderCommand) = undefined;
-pub var dirty_nodes: std.array_list.Managed(RenderCommand) = undefined;
+pub var added_nodes: std.array_list.Managed(*UINode) = undefined;
+pub var dirty_nodes: std.array_list.Managed(*UINode) = undefined;
 // Potential nodes is an set to chekc if the potential nodes that are either shifted or removed on in the dom currently
 // instead of an active set, we only record the nodes that are different from the current tree
 // pub var potential_nodes: std.StringHashMap(void) = undefined;
@@ -226,7 +243,7 @@ pub fn getFrameAllocator() std.mem.Allocator {
     return arena(.frame);
 }
 
-const ArenaType = enum {
+pub const ArenaType = enum {
     frame,
     view,
     persist,
@@ -241,10 +258,7 @@ pub fn arena(arena_type: ArenaType) std.mem.Allocator {
         .view => frame_arena.viewAllocator(),
         .persist => frame_arena.persistentAllocator(),
         .request => frame_arena.requestAllocator(),
-        .scratch => {
-            Vapor.printlnSrcErr("Scratch is yet to be implemented", .{}, @src());
-            unreachable;
-        },
+        .scratch => frame_arena.persistentAllocator(),
     };
 }
 
@@ -277,6 +291,8 @@ pub var class_cache: ClassCache = undefined;
 
 extern fn frame_arena_init(frame_arena: *FrameAllocator, backing_allocator: *std.mem.Allocator) void;
 
+// 17kb is just the exports and externs
+
 pub fn init(config: VaporConfig) void {
     switch (builtin.target.cpu.arch) {
         .wasm32 => {
@@ -294,8 +310,6 @@ pub fn init(config: VaporConfig) void {
     mode = config.mode;
 
     // Init the frame allocator;
-    // This adds 500B
-    // frame_arena_init(&frame_arena, &allocator_global);
     frame_arena = FrameAllocator.init(&allocator_global);
     // The persistent allocator is used for the Initialization of the registries as these persist over the lifetime of the program.
     const allocator = frame_arena.persistentAllocator();
@@ -307,88 +321,59 @@ pub fn init(config: VaporConfig) void {
 
     // >1kb
     Packer.init(allocator);
-    // initPackedData(allocator);
-    // initPools(allocator);
-    // 20kb
+    // 20kb // This is the biggest chunk of code
     initRegistries(allocator);
     // >1kb
     initCalls(allocator);
     // >1kb
     initContextData(allocator);
-    class_cache = ClassCache.init(allocator) catch |err| {
+
+    // Eveyrhtuing up to here is 35kb
+
+    class_cache.init(allocator) catch |err| {
         printlnErr("Could not init ClassCache {any}\n", .{err});
         unreachable;
     };
-    UIContext.element_style_hash_map = std.AutoHashMap(u32, [7]u32).init(allocator);
-    // UIContext.global_classes = std.array_list.Managed(u32).init(allocator);
-
-    // UIContext.ui_nodes = allocator.alloc(UINode, config.page_node_count) catch unreachable;
-
-    // // Init string pool adds 1kb
-    // pool = Pool.init(allocator, page_node_count) catch |err| {
-    //     printlnErr("Could not init Pool {any}\n", .{err});
-    //     unreachable;
-    // };
-    // pool.initFreelist();
+    UIContext.element_style_hash_map = std.AutoHashMap(u32, [8]u32).init(allocator);
+    UIContext.class_string_cache = std.AutoHashMap(u32, []const u8).init(allocator);
+    Animation.RemovalQueue.init(allocator);
     KeyGenerator.initWriter();
-    // UIContext.debugPrintUINodeLayout();
 
     // All this below adds 3kb
     animations = std.StringHashMap(Animation).init(allocator);
-    component_subscribers = std.array_list.Managed(*Rune.ComponentNode).init(allocator);
-    removed_nodes = std.array_list.Managed(RemovedNode).init(allocator);
+    // removed_nodes = std.array_list.Managed(RemovedNode).init(allocator);
     observer_nodes = std.StringHashMap(std.array_list.Managed(ObserverNode)).init(allocator);
-    added_nodes = std.array_list.Managed(RenderCommand).init(allocator);
-    dirty_nodes = std.array_list.Managed(RenderCommand).init(allocator);
-    // potential_nodes = std.StringHashMap(void).init(allocator);
-    // grain_subs = std.array_list.Managed(*GrainStruct.ComponentNode).init(allocator);
+    added_nodes = std.array_list.Managed(*UINode).init(allocator);
+    dirty_nodes = std.array_list.Managed(*UINode).init(allocator);
     element_registry = std.AutoHashMap(u32, *Element).init(allocator);
 
-    // Init Context Data
-    // Reconciler.node_map = std.StringHashMap(usize).init(allocator);
-
-    // Reconciliation styles dedupe // this is 2kb
-    // UIContext.nodes = allocator.alloc(*UINode, config.page_node_count) catch unreachable;
-
     UIContext.indexes = std.AutoHashMap(u32, usize).init(allocator);
-
-    // this adds 7kb
-    // _ = getStyle(null); // 16kb
-    // _ = getVisualStyle(null, 0); // 20kb
-    _ = getAriaLabel(null); // < 1kb
-    // _ = getFocusStyle(null); // 20kb
-    // _ = getFocusWithinStyle(null); // 20kb
-    // this adds 4kb
-    // _ = createInput(null); // 20kb
-    // _ = getInputType(null); // 5kb
-    // _ = getInputSize(null); // 5kb
-
     if (build_options.enable_debug) {
         printlnColor("-----------Debug Mode----------", .{}, .hex("#F6820C"));
     }
-    // printDebug() catch unreachable;
-}
 
-export fn renderUI(route: [*:0]u8) void {
-    Vapor.renderCycle(route);
+    // Everything up to here is 42 kb
 }
 
 fn initRegistries(persistent_allocator: std.mem.Allocator) void {
     callback_registry = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
     ctx_callback_registry = std.AutoHashMap(u32, *Node).init(persistent_allocator);
-    fetch_registry = std.AutoHashMap(u32, *Kit.FetchNode).init(persistent_allocator);
-    // response_registry = std.AutoHashMap(u32, Kit.Response).init(persistent_allocator);
+    fetch_registry = std.AutoHashMap(u32, *Kit.FetchNode).init(persistent_allocator); ///// This bad boy is 19kb addition
+    response_registry = std.AutoHashMap(u32, Kit.Response).init(persistent_allocator);
 }
 
 fn initCalls(persistent_allocator: std.mem.Allocator) void {
     events_callbacks = std.AutoHashMap(u32, EventNode).init(persistent_allocator);
     nodes_with_events = std.AutoHashMap(u32, *UINode).init(persistent_allocator);
+    cached_event_handlers = std.AutoHashMap(u32, EventHandlers).init(persistent_allocator);
     node_events_callbacks = std.AutoHashMap(u32, *CtxAwareEventNode).init(persistent_allocator);
     events_inst_callbacks = std.AutoHashMap(u32, *EvtInstNode).init(persistent_allocator);
     hooks_inst_callbacks = std.AutoHashMap(u32, *const fn (HookContext) void).init(persistent_allocator);
     mounted_funcs = std.AutoHashMap(u32, *const fn () void).init(persistent_allocator);
     on_end_funcs = std.array_list.Managed(*const fn () void).init(persistent_allocator);
     on_end_ctx_funcs = std.array_list.Managed(*Node).init(persistent_allocator);
+    pop_state_funcs = std.array_list.Managed(*const fn () void).init(persistent_allocator);
+    push_state_funcs = std.array_list.Managed(*const fn () void).init(persistent_allocator);
     on_commit_funcs = std.array_list.Managed(*const fn () void).init(persistent_allocator);
     mounted_ctx_funcs = std.AutoHashMap(u32, *Node).init(persistent_allocator);
     on_create_node_funcs = std.AutoHashMap(u32, *Node).init(persistent_allocator);
@@ -578,7 +563,7 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     }
 
     current_route = route;
-    removed_nodes.clearRetainingCapacity();
+    // removed_nodes.clearRetainingCapacity();
     added_nodes.clearRetainingCapacity();
     dirty_nodes.clearRetainingCapacity();
     // potential_nodes.clearRetainingCapacity();
@@ -597,7 +582,7 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     // for (mounted_ctx_funcs.items) |node| {
     //     node.data.deinitFn(node);
     // }
-    mounted_ctx_funcs.clearRetainingCapacity();
+    // mounted_ctx_funcs.clearRetainingCapacity();
 
     // Get the old context for current route
     const old_route = router.searchRoute(route) orelse blk: {
@@ -642,6 +627,7 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     generator.init();
     next_layout_path_to_check = "";
 
+    UIContext.open_time = 0;
     const generation_start = nowMs();
     findResetLayout();
     // This calls the render tree, with render_page as the root function call
@@ -656,10 +642,12 @@ pub fn renderCycle(route_ptr: [*:0]u8) void {
     const reconcile_start = nowMs();
     Reconciler.reconcile(old_ctx, new_ctx); // 3kb
     Timer.reconcile_time = nowMs() - reconcile_start;
+    // Vapor.println("Reconcile Time: {d}ms", .{Timer.reconcile_time});
     // We generate the render commands tree
     const commit_start = nowMs();
     endPage(new_ctx);
     Timer.commit_time = nowMs() - commit_start;
+    // Vapor.println("Commit Time: {d}ms", .{Timer.commit_time});
     if (!std.mem.eql(u8, previous_route, current_route)) {
         Vapor.has_dirty = true;
     }
@@ -841,6 +829,8 @@ pub fn endPage(_: *UIContext) void {
     // This adds 2kb
     // UIContext.reconcileStyles();
     if (changed_route) {
+        ////// BE CAREFUL WITH THIS the configuration system does not run if the value has been created already i think?
+        ///// uncommenting the above and then usign the search fucntion casues errors on the layers style fucntionality
         generator.writeAllStyles();
     }
     // @memset(UIContext.seen_nodes, false);
@@ -951,7 +941,7 @@ pub const HooksFuncs = struct {
     updated: ?*const fn () void = null,
 };
 
-pub const HooksCtxFuncs = enum { mounted };
+pub const HooksCtxFuncs = enum(u8) { mounted, destroy };
 
 pub fn toggleTheme() void {
     if (isWasi) {
@@ -1146,14 +1136,14 @@ pub inline fn elementEventListener(
     return onid;
 }
 
-pub fn addGlobalListener(event_type: EventType, cb: EvtInstProto) ?usize {
+pub fn addGlobalListener(event_type: EventType, cb: *const fn (*Event) void) ?usize {
     const id = events_callbacks.count() + 1;
     events_callbacks.put(id, .{ .cb = cb, .ui_node = null, .evt_type = event_type }) catch |err| {
         println("Event Callback Error: {any}\n", .{err});
         unreachable;
     };
 
-    const event_type_str: []const u8 = std.enums.tagName(types.EventType, event_type) orelse return;
+    const event_type_str: []const u8 = std.enums.tagName(types.EventType, event_type) orelse return null;
     if (isWasi) {
         Wasm.createEventListener(event_type_str.ptr, event_type_str.len, id);
     }
@@ -1433,7 +1423,7 @@ pub fn generateHtml(route: []const u8, dir: []const u8) void {
     }
 
     current_route = route;
-    removed_nodes.clearRetainingCapacity();
+    // removed_nodes.clearRetainingCapacity();
     added_nodes.clearRetainingCapacity();
     dirty_nodes.clearRetainingCapacity();
     // potential_nodes.clearRetainingCapacity();
@@ -1764,6 +1754,7 @@ pub var ui_node_layout_info = packed struct {
     props_changed_offset: u32,
     dirty_offset: u32,
     hooks_offset: u32,
+    style_hash_offset: u32,
 }{
     .ui_node_size = @sizeOf(UINode),
 
@@ -1781,6 +1772,7 @@ pub var ui_node_layout_info = packed struct {
     .props_changed_offset = @offsetOf(UINode, "props_changed"),
     .dirty_offset = @offsetOf(UINode, "dirty"),
     .hooks_offset = @offsetOf(UINode, "hooks"),
+    .style_hash_offset = @offsetOf(UINode, "style_hash"),
 };
 
 // Export memory layout information for JavaScript to correctly read the struct
@@ -2238,16 +2230,16 @@ pub fn registerTimeout(ms: u32, cb: *const fn () void) void {
 }
 
 pub fn setCookie(cookie: []const u8) void {
-    Wasm.setCookieWASM(cookie.ptr, cookie.len);
+    Wasm.setCookieWasm(cookie.ptr, cookie.len);
 }
 
 pub fn getCookies() []const u8 {
-    const cookie = Wasm.getCookiesWASM();
+    const cookie = Wasm.getCookiesWasm();
     return std.mem.span(cookie);
 }
 
 pub fn getCookie(name: []const u8) ?[]const u8 {
-    const cookie = Wasm.getCookieWASM(name.ptr, name.len);
+    const cookie = Wasm.getCookieWasm(name.ptr, name.len);
     if (cookie == null) return null;
     return std.mem.span(cookie);
 }
@@ -2267,8 +2259,16 @@ pub fn onEnd(callback: *const fn () void) void {
     };
 }
 
-export fn clearOnEnd() void {
-    on_end_funcs.clearRetainingCapacity();
+pub fn onPopState(callback: *const fn () void) void {
+    pop_state_funcs.append(callback) catch |err| {
+        printlnErr("Button Function Registry {any}\n", .{err});
+    };
+}
+
+pub fn onPushState(callback: *const fn () void) void {
+    push_state_funcs.append(callback) catch |err| {
+        printlnErr("Button Function Registry {any}\n", .{err});
+    };
 }
 
 pub const Binded = Element;
@@ -2311,408 +2311,547 @@ pub fn onCommit(callback: *const fn () void) void {
         printlnErr("Button Function Registry {any}\n", .{err});
     };
 }
-
-pub export fn getRenderTreePtr() ?*UIContext.CommandsTree {
-    const tree_op = Vapor.current_ctx.ui_tree;
-
-    if (tree_op != null) {
-        // iterateTreeChildren(Vapor.current_ctx.ui_tree.?);
-        return Vapor.current_ctx.ui_tree.?;
-    }
-    return null;
-}
-
-pub export fn getRenderUINodeRootPtr() ?*UINode {
-    if (Vapor.current_ctx.root == null) return null;
-    return Vapor.current_ctx.root.?;
-}
-
-pub export fn getUINodeChildrenCount(node_ptr: ?*UINode) usize {
-    const node = node_ptr orelse return 0;
-    return node.children_count;
-}
-
-pub export fn getUINodeChild(node_ptr: ?*UINode, index: u32) ?*UINode {
-    const node = node_ptr orelse return null;
-    return node.childAt(index);
-}
-
-pub export fn allocateLayoutInfo() *u8 {
-    const info_ptr: *u8 = @ptrCast(&Vapor.layout_info);
-    return info_ptr;
-}
-
-pub export fn allocateUINodeLayoutInfo() *u8 {
-    const ui_info_ptr: *u8 = @ptrCast(&Vapor.ui_node_layout_info);
-    return ui_info_ptr;
-}
-
-export fn allocUint8(length: u32) [*]const u8 {
-    const slice = Vapor.allocator_global.alloc(u8, length) catch
-        @panic("failed to allocate memory");
-    return slice.ptr;
-}
-
-export fn allocUint8Frame(length: u32) [*]const u8 {
-    const slice = Vapor.getFrameAllocator().alloc(u8, length) catch
-        @panic("failed to allocate memory");
-    return slice.ptr;
-}
-
-export fn getCSS() ?[*]const u8 {
-    return Vapor.generator.buffer[0..Vapor.generator.end].ptr;
-}
-
-export fn getCSSLen() usize {
-    return Vapor.generator.end;
-}
-
-pub export fn getRenderCommandPtr(tree: *CommandsTree) [*]u8 {
-    if (std.mem.eql(u8, tree.node.id, "global-style")) {
-        Vapor.println("getRenderCommandPtr {any}\n", .{tree.node.node_ptr.dirty});
-    }
-    return @ptrCast(tree.node);
-}
-
-export fn getTreeNodeChildrenCount(tree: *CommandsTree) usize {
-    return tree.children.items.len;
-}
-
-// export fn getUiNodeChildrenCount(tree: *CommandsTree) usize {
-//     return tree.node.node_ptr.children_count;
-//     return tree.node.node_ptr.children.?.items.len;
-// }
-//
-export fn getTreeNodeChild(tree: *CommandsTree, index: usize) *CommandsTree {
-    const child = tree.children.items[index];
-    return child;
-}
-
-// The first node needs to be marked as false always
-export fn markCurrentTreeNotDirty() void {
-    if (!Vapor.has_context) return;
-    const root = Vapor.current_ctx.root orelse return;
-    Vapor.markChildrenNotDirty(root);
-}
-
-export fn getRemovedNode(index: usize) [*]const u8 {
-    const node = Vapor.removed_nodes.items[index];
-    return node.uuid.ptr;
-}
-
-export fn getRemovedNodeIndex(index: usize) usize {
-    return Vapor.removed_nodes.items[index].index;
-}
-
-export fn getRemovedNodeLength(index: usize) usize {
-    return Vapor.removed_nodes.items[index].uuid.len;
-}
-
-// Export the size of a single RenderCommand for proper memory reading
-export fn getRenderCommandSize() usize {
-    return @sizeOf(RenderCommand);
-}
-
-export fn shouldRerender() bool {
-    return Vapor.global_rerender;
-}
-
-export fn rerenderEverything() bool {
-    return Vapor.rerender_everything;
-}
-
-export fn hasDirty() bool {
-    return Vapor.has_dirty;
-}
-
-export fn resetRerender() void {
-    Vapor.global_rerender = false;
-    Vapor.rerender_everything = false;
-    Vapor.has_dirty = false;
-}
-
-/// Calling route renderCycle will mark eveything as dirty
-export fn callRouteRenderCycle(ptr: [*:0]u8) void {
-    Packer.animations.clearRetainingCapacity();
-    Packer.layouts.clearRetainingCapacity();
-    Packer.positions.clearRetainingCapacity();
-    Packer.margins_paddings.clearRetainingCapacity();
-    Packer.visuals.clearRetainingCapacity();
-    Packer.interactives.clearRetainingCapacity();
-    UIContext.element_style_hash_map.clearRetainingCapacity();
-    // Vapor.pool.resetFreeList();
-    Vapor.renderCycle(ptr);
-    Vapor.markChildrenDirty(Vapor.current_ctx.root.?);
-    return;
-}
-
-export fn setRouteRenderTree(ptr: [*:0]u8) void {
-    Vapor.renderCycle(ptr);
-    return;
-}
-
-export fn setRerenderTrue() void {
-    Vapor.cycle();
-}
-
-export fn getDirtyValue(node: *UINode) bool {
-    return node.dirty;
-}
-
-export fn getRemovedNodeCount() usize {
-    return Vapor.removed_nodes.items.len;
-}
-
-export fn clearRemovedNodesretainingCapacity() void {
-    Vapor.removed_nodes.clearRetainingCapacity();
-}
-
-export fn onEndCallback() void {
-    const length = Vapor.on_end_funcs.items.len;
-    if (length == 0) return;
-    Vapor.println("onEndCallback {any}", .{length});
-    var i: usize = length - 1;
-    while (i >= 0) : (i -= 1) {
-        const call = Vapor.on_end_funcs.orderedRemove(i);
-        @call(.auto, call, .{});
-        if (i == 0) return;
-    }
-}
-
-export fn allocate(size: usize) ?[*]f32 {
-    const buf = Vapor.allocator_global.alloc(f32, size) catch |err| {
-        Vapor.println("{any}\n", .{err});
-        return null;
-    };
-    return buf.ptr;
-}
-
-export fn allocateU32(size: usize) ?[*]u32 {
-    const buf = Vapor.arena(.persist).alloc(u32, size) catch |err| {
-        Vapor.println("{any}\n", .{err});
-        return null;
-    };
-    return buf.ptr;
-}
-
-export fn callbackCtx(callback_ptr: u32, object_ptr: ?*DynamicObject) void {
-    const node = Vapor.ctx_callback_registry.get(callback_ptr) orelse {
-        Vapor.printlnSrcErr("Callback not found\n", .{}, @src());
-        return;
-    };
-    node.data.dynamic_object = object_ptr;
-    @call(.auto, node.data.runFn, .{&node.data});
-    if (Vapor.mode == .atomic) {
-        Vapor.cycle();
-    }
-}
-
-pub fn alert(message: []const u8) void {
+pub fn alert(comptime fmt: []const u8, args: anytype) void {
     if (isWasi) {
+        const message = Vapor.fmtln(fmt, args);
         Wasm.alertWasm(message.ptr, message.len);
     }
 }
 
-// Zig Side
-const FieldType = enum {
-    string,
-    int,
-    float,
-    bool,
-};
+// export fn onEndCtxCallback() void {
+//     const length = Vapor.on_end_ctx_funcs.items.len;
+//     // Vapor.println("onEndCtxCallback {d}\n", .{length});
+//     if (length == 0) return;
+//     var i: usize = length - 1;
+//     while (i >= 0) : (i -= 1) {
+//         const node = Vapor.on_end_ctx_funcs.orderedRemove(i);
+//         @call(.auto, node.data.runFn, .{&node.data});
+//         if (i == 0) return;
+//     }
+// }
+//
+// export fn clearOnEnd() void {
+//     on_end_funcs.clearRetainingCapacity();
+// }
+// export fn renderUI(route: [*:0]u8) void {
+//     Vapor.renderCycle(route);
+// }
+//
+// pub export fn getRenderTreePtr() ?*UIContext.CommandsTree {
+//     const tree_op = Vapor.current_ctx.ui_tree;
+//
+//     if (tree_op != null) {
+//         // iterateTreeChildren(Vapor.current_ctx.ui_tree.?);
+//         return Vapor.current_ctx.ui_tree.?;
+//     }
+//     return null;
+// }
+//
+// pub export fn getRenderUINodeRootPtr() ?*UINode {
+//     if (Vapor.current_ctx.root == null) return null;
+//     return Vapor.current_ctx.root.?;
+// }
+//
+// pub export fn getUINodeChildrenCount(node_ptr: ?*UINode) usize {
+//     const node = node_ptr orelse return 0;
+//     return node.children_count;
+// }
+//
+// pub export fn getUINodeChild(node_ptr: ?*UINode, index: u32) ?*UINode {
+//     const node = node_ptr orelse return null;
+//     return node.childAt(index);
+// }
+//
+// pub export fn allocateLayoutInfo() *u8 {
+//     const info_ptr: *u8 = @ptrCast(&Vapor.layout_info);
+//     return info_ptr;
+// }
+//
+// pub export fn allocateUINodeLayoutInfo() *u8 {
+//     const ui_info_ptr: *u8 = @ptrCast(&Vapor.ui_node_layout_info);
+//     return ui_info_ptr;
+// }
+//
+// export fn allocUint8(length: u32) [*]const u8 {
+//     const slice = Vapor.allocator_global.alloc(u8, length) catch
+//         @panic("failed to allocate memory");
+//     return slice.ptr;
+// }
+//
+// export fn allocUint8Frame(length: u32) [*]const u8 {
+//     const slice = Vapor.getFrameAllocator().alloc(u8, length) catch
+//         @panic("failed to allocate memory");
+//     return slice.ptr;
+// }
+//
+// export fn getCSS() ?[*]const u8 {
+//     return Vapor.generator.buffer[0..Vapor.generator.end].ptr;
+// }
+//
+// export fn getCSSLen() usize {
+//     return Vapor.generator.end;
+// }
+//
+// pub export fn getRenderCommandPtr(tree: *CommandsTree) [*]u8 {
+//     if (std.mem.eql(u8, tree.node.id, "global-style")) {
+//         Vapor.println("getRenderCommandPtr {any}\n", .{tree.node.node_ptr.dirty});
+//     }
+//     return @ptrCast(tree.node);
+// }
+//
+// export fn getTreeNodeChildrenCount(tree: *CommandsTree) usize {
+//     return tree.children.items.len;
+// }
+//
+// export fn getTreeNodeChild(tree: *CommandsTree, index: usize) *CommandsTree {
+//     const child = tree.children.items[index];
+//     return child;
+// }
+//
+// // The first node needs to be marked as false always
+// export fn markCurrentTreeNotDirty() void {
+//     if (!Vapor.has_context) return;
+//     const root = Vapor.current_ctx.root orelse return;
+//     Vapor.markChildrenNotDirty(root);
+// }
+//
+// export fn getRemovedNode(index: usize) [*]const u8 {
+//     const node = Vapor.removed_nodes.items[index];
+//     return node.uuid.ptr;
+// }
+//
+// export fn getRemovedNodeIndex(index: usize) usize {
+//     return Vapor.removed_nodes.items[index].index;
+// }
+//
+// export fn getRemovedNodeLength(index: usize) usize {
+//     return Vapor.removed_nodes.items[index].uuid.len;
+// }
+//
+// // Export the size of a single RenderCommand for proper memory reading
+// export fn getRenderCommandSize() usize {
+//     return @sizeOf(RenderCommand);
+// }
+//
+// export fn shouldRerender() bool {
+//     return Vapor.global_rerender;
+// }
+//
+// export fn rerenderEverything() bool {
+//     return Vapor.rerender_everything;
+// }
+//
+// export fn hasDirty() bool {
+//     return Vapor.has_dirty;
+// }
+//
+// export fn resetRerender() void {
+//     Vapor.global_rerender = false;
+//     Vapor.rerender_everything = false;
+//     Vapor.has_dirty = false;
+// }
+//
+// /// Calling route renderCycle will mark eveything as dirty
+// export fn callRouteRenderCycle(ptr: [*:0]u8) void {
+//     Packer.animations.clearRetainingCapacity();
+//     Packer.layouts.clearRetainingCapacity();
+//     Packer.positions.clearRetainingCapacity();
+//     Packer.margins_paddings.clearRetainingCapacity();
+//     Packer.visuals.clearRetainingCapacity();
+//     Packer.interactives.clearRetainingCapacity();
+//     Packer.transforms.clearRetainingCapacity();
+//     UIContext.element_style_hash_map.clearRetainingCapacity();
+//     // Vapor.pool.resetFreeList();
+//     Vapor.renderCycle(ptr);
+//     Vapor.markChildrenDirty(Vapor.current_ctx.root.?);
+//     return;
+// }
+//
+// export fn setRouteRenderTree(ptr: [*:0]u8) void {
+//     Vapor.renderCycle(ptr);
+//     return;
+// }
+//
+// export fn setRerenderTrue() void {
+//     Vapor.cycle();
+// }
+//
+// export fn getDirtyValue(node: *UINode) bool {
+//     return node.dirty;
+// }
+//
+// export fn getRemovedNodeCount() usize {
+//     return Vapor.removed_nodes.items.len;
+// }
+//
+// export fn clearRemovedNodesretainingCapacity() void {
+//     Vapor.removed_nodes.clearRetainingCapacity();
+// }
+//
+// export fn onEndCallback() void {
+//     const length = Vapor.on_end_funcs.items.len;
+//     if (length == 0) return;
+//     Vapor.println("onEndCallback {any}", .{length});
+//     var i: usize = length - 1;
+//     while (i >= 0) : (i -= 1) {
+//         const call = Vapor.on_end_funcs.orderedRemove(i);
+//         @call(.auto, call, .{});
+//         if (i == 0) return;
+//     }
+// }
+//
+// export fn allocate(size: usize) ?[*]f32 {
+//     const buf = Vapor.allocator_global.alloc(f32, size) catch |err| {
+//         Vapor.println("{any}\n", .{err});
+//         return null;
+//     };
+//     return buf.ptr;
+// }
+//
+// export fn allocateU32(size: usize) ?[*]u32 {
+//     const buf = Vapor.arena(.persist).alloc(u32, size) catch |err| {
+//         Vapor.println("{any}\n", .{err});
+//         return null;
+//     };
+//     return buf.ptr;
+// }
+//
+// export fn callbackCtx(callback_ptr: u32, object_ptr: ?*DynamicObject) void {
+//     const node = Vapor.ctx_callback_registry.get(callback_ptr) orelse {
+//         Vapor.printlnSrcErr("Callback not found\n", .{}, @src());
+//         return;
+//     };
+//     node.data.dynamic_object = object_ptr;
+//     @call(.auto, node.data.runFn, .{&node.data});
+//     if (Vapor.mode == .atomic) {
+//         Vapor.cycle();
+//     }
+// }
+//
+// export fn startObject() usize {
+//     current_object = allocator_global.create(DynamicObject) catch return 0;
+//     current_object.?.* = DynamicObject.init(allocator_global);
+//     return @intFromPtr(current_object.?);
+// }
+//
+// export fn addStringField(handle: i32, key_ptr: [*:0]u8, value_ptr: [*:0]u8) void {
+//     const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
+//     const key = std.mem.span(key_ptr);
+//     const value = std.mem.span(value_ptr);
+//
+//     obj.fields.append(.{
+//         .name = key,
+//         .type = .string,
+//         .value = .{ .string = value },
+//     }) catch return;
+// }
+//
+// export fn addIntField(handle: i32, key_ptr: [*:0]u8, value: i32) void {
+//     const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
+//     const key = std.mem.span(key_ptr);
+//
+//     obj.fields.append(.{
+//         .name = key,
+//         .type = .int,
+//         .value = .{ .int = value },
+//     }) catch return;
+// }
+//
+// export fn addFloatField(handle: i32, key_ptr: [*:0]u8, value: f32) void {
+//     const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
+//     const key = std.mem.span(key_ptr);
+//
+//     obj.fields.append(.{
+//         .name = key,
+//         .type = .float,
+//         .value = .{ .float = value },
+//     }) catch return;
+// }
+//
+// export fn addBoolField(handle: i32, key_ptr: [*:0]u8, value: bool) void {
+//     const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
+//     const key = std.mem.span(key_ptr);
+//
+//     obj.fields.append(.{
+//         .name = key,
+//         .type = .bool,
+//         .value = .{ .bool = value },
+//     }) catch return;
+// }
 
-const Field = struct {
-    name: []const u8,
-    type: FieldType,
-    value: union(enum) {
-        string: []const u8,
-        int: i32,
-        float: f64,
-        bool: bool,
-    },
-};
+pub const API = struct {
+    // --- Context & Callbacks ---
 
-pub const DynamicObject = struct {
-    fields: std.array_list.Managed(Field),
-    allocator: std.mem.Allocator,
+    pub fn onEndCtxCallback() callconv(.c) void {
+        const length = Vapor.on_end_ctx_funcs.items.len;
+        if (length == 0) return;
+        var i: usize = length - 1;
+        while (i >= 0) : (i -= 1) {
+            const node = Vapor.on_end_ctx_funcs.orderedRemove(i);
+            @call(.auto, node.data.runFn, .{&node.data});
+            if (i == 0) return;
+        }
+    }
 
-    pub fn init(allocator: std.mem.Allocator) DynamicObject {
-        return .{
-            .fields = std.array_list.Managed(Field).init(allocator),
-            .allocator = allocator,
+    export fn hooksMountedCallbackCtx(id: u32) void {
+        const kv = Vapor.mounted_ctx_funcs.fetchRemove(id) orelse {
+            printlnSrcErr("Mounted Function {d} not found\n", .{id}, @src());
+            return;
         };
+        const node = kv.value;
+        @call(.auto, node.data.runFn, .{&node.data});
     }
 
-    pub fn deinit(self: *DynamicObject) void {
-        self.fields.deinit();
+    // pub fn clearOnEnd() callconv(.c) void {
+    //     on_end_funcs.clearRetainingCapacity();
+    // }
+
+    pub fn onEndCallback() callconv(.c) void {
+        const length = Vapor.on_end_funcs.items.len;
+        if (length == 0) return;
+        var i: usize = length - 1;
+        while (i >= 0) : (i -= 1) {
+            const call = Vapor.on_end_funcs.orderedRemove(i);
+            @call(.auto, call, .{});
+            if (i == 0) return;
+        }
+    }
+
+    pub fn onPopStateCallback() callconv(.c) void {
+        const length = Vapor.pop_state_funcs.items.len;
+        if (length == 0) return;
+        var i: usize = length - 1;
+        while (i >= 0) : (i -= 1) {
+            const call = Vapor.pop_state_funcs.items[i];
+            @call(.auto, call, .{});
+            if (i == 0) return;
+        }
+    }
+
+    pub fn onPushStateCallback() callconv(.c) void {
+        const length = Vapor.push_state_funcs.items.len;
+        if (length == 0) return;
+        var i: usize = length - 1;
+        while (i >= 0) : (i -= 1) {
+            const call = Vapor.push_state_funcs.orderedRemove(i);
+            @call(.auto, call, .{});
+            if (i == 0) return;
+        }
+    }
+
+    pub fn callbackCtx(callback_ptr: u32, object_ptr: ?*DynamicObject) callconv(.c) void {
+        const node = Vapor.ctx_callback_registry.get(callback_ptr) orelse {
+            Vapor.printlnSrcErr("Callback not found\n", .{}, @src());
+            return;
+        };
+        node.data.dynamic_object = object_ptr;
+        @call(.auto, node.data.runFn, .{&node.data});
+        if (Vapor.mode == .atomic) {
+            Vapor.cycle();
+        }
+    }
+
+    // --- Rendering & Tree Management ---
+
+    pub fn renderUI(route: [*:0]u8) callconv(.c) void {
+        Vapor.renderCycle(route);
+    }
+
+    pub fn getRenderTreePtr() callconv(.c) ?*UIContext.CommandsTree {
+        const tree_op = Vapor.current_ctx.ui_tree;
+        if (tree_op != null) {
+            return Vapor.current_ctx.ui_tree.?;
+        }
+        return null;
+    }
+
+    pub fn getRenderUINodeRootPtr() callconv(.c) ?*UINode {
+        if (Vapor.current_ctx.root == null) return null;
+        return Vapor.current_ctx.root.?;
+    }
+
+    pub fn getUINodeChildrenCount(node_ptr: ?*UINode) callconv(.c) usize {
+        const node = node_ptr orelse return 0;
+        return node.children_count;
+    }
+
+    pub fn getUINodeChild(node_ptr: ?*UINode, index: u32) callconv(.c) ?*UINode {
+        const node = node_ptr orelse return null;
+        return node.childAt(index);
+    }
+
+    // Zig side - export first child and next sibling
+    pub fn getUINodeFirstChild(node_ptr: ?*UINode) callconv(.c) ?*UINode {
+        const node = node_ptr orelse return null;
+        return node.first_child;
+    }
+
+    pub fn getUINodeNextSibling(node_ptr: ?*UINode) callconv(.c) ?*UINode {
+        const node = node_ptr orelse return null;
+        return node.next_sibling;
+    }
+
+    pub fn getDirtyNodeCount() callconv(.c) usize {
+        return Vapor.dirty_nodes.items.len;
+    }
+
+    pub fn markCurrentTreeNotDirty() callconv(.c) void {
+        if (!Vapor.has_context) return;
+        const root = Vapor.current_ctx.root orelse return;
+        Vapor.markChildrenNotDirty(root);
+    }
+
+    // --- Layout & Allocation ---
+
+    pub fn allocateLayoutInfo() callconv(.c) *u8 {
+        const info_ptr: *u8 = @ptrCast(&Vapor.layout_info);
+        return info_ptr;
+    }
+
+    pub fn allocateUINodeLayoutInfo() callconv(.c) *u8 {
+        const ui_info_ptr: *u8 = @ptrCast(&Vapor.ui_node_layout_info);
+        return ui_info_ptr;
+    }
+
+    pub fn allocUint8(length: u32) callconv(.c) [*]const u8 {
+        const slice = Vapor.allocator_global.alloc(u8, length) catch
+            @panic("failed to allocate memory");
+        return slice.ptr;
+    }
+
+    pub fn allocUint8Frame(length: u32) callconv(.c) [*]const u8 {
+        const slice = Vapor.getFrameAllocator().alloc(u8, length) catch
+            @panic("failed to allocate memory");
+        return slice.ptr;
+    }
+
+    pub fn allocate(size: usize) callconv(.c) ?[*]f32 {
+        const buf = Vapor.allocator_global.alloc(f32, size) catch |err| {
+            Vapor.println("{any}\n", .{err});
+            return null;
+        };
+        return buf.ptr;
+    }
+
+    pub fn allocateU32(size: usize) callconv(.c) ?[*]u32 {
+        const buf = Vapor.arena(.persist).alloc(u32, size) catch |err| {
+            Vapor.println("{any}\n", .{err});
+            return null;
+        };
+        return buf.ptr;
+    }
+
+    // --- CSS & Commands ---
+
+    pub fn getCSS() callconv(.c) ?[*]const u8 {
+        return Vapor.generator.buffer[0..Vapor.generator.end].ptr;
+    }
+
+    pub fn getCSSLen() callconv(.c) usize {
+        return Vapor.generator.end;
+    }
+
+    pub fn getRenderCommandPtr(tree: *CommandsTree) callconv(.c) [*]u8 {
+        if (std.mem.eql(u8, tree.node.id, "global-style")) {
+            Vapor.println("getRenderCommandPtr {any}\n", .{tree.node.node_ptr.dirty});
+        }
+        return @ptrCast(tree.node);
+    }
+
+    pub fn getTreeNodeChildrenCount(tree: *CommandsTree) callconv(.c) usize {
+        return tree.children.items.len;
+    }
+
+    pub fn getTreeNodeChild(tree: *CommandsTree, index: usize) callconv(.c) *CommandsTree {
+        const child = tree.children.items[index];
+        return child;
+    }
+
+    pub fn getRenderCommandSize() callconv(.c) usize {
+        return @sizeOf(RenderCommand);
+    }
+
+    // --- Removal Handling ---
+
+    // pub fn getRemovedNode(index: usize) callconv(.c) [*]const u8 {
+    //     const node = Vapor.removed_nodes.items[index];
+    //     return node.uuid.ptr;
+    // }
+    //
+    // pub fn getRemovedNodeIndex(index: usize) callconv(.c) usize {
+    //     return Vapor.removed_nodes.items[index].index;
+    // }
+    //
+    // pub fn getRemovedNodeLength(index: usize) callconv(.c) usize {
+    //     return Vapor.removed_nodes.items[index].uuid.len;
+    // }
+    //
+    // pub fn getRemovedNodeCount() callconv(.c) usize {
+    //     return Vapor.removed_nodes.items.len;
+    // }
+    //
+    // pub fn clearRemovedNodesretainingCapacity() callconv(.c) void {
+    //     Vapor.removed_nodes.clearRetainingCapacity();
+    // }
+
+    // --- Render Cycle & Dirty State ---
+
+    pub fn shouldRerender() callconv(.c) bool {
+        return Vapor.global_rerender;
+    }
+
+    pub fn rerenderEverything() callconv(.c) bool {
+        return Vapor.rerender_everything;
+    }
+
+    pub fn hasDirty() callconv(.c) bool {
+        return Vapor.has_dirty;
+    }
+
+    pub fn resetRerender() callconv(.c) void {
+        Vapor.global_rerender = false;
+        Vapor.rerender_everything = false;
+        Vapor.has_dirty = false;
+    }
+
+    pub fn callRouteRenderCycle(ptr: [*:0]u8) callconv(.c) void {
+        Packer.animations.clearRetainingCapacity();
+        Packer.layouts.clearRetainingCapacity();
+        Packer.positions.clearRetainingCapacity();
+        Packer.margins_paddings.clearRetainingCapacity();
+        Packer.visuals.clearRetainingCapacity();
+        Packer.interactives.clearRetainingCapacity();
+        Packer.transforms.clearRetainingCapacity();
+        UIContext.element_style_hash_map.clearRetainingCapacity();
+        Vapor.renderCycle(ptr);
+        Vapor.markChildrenDirty(Vapor.current_ctx.root.?);
+    }
+
+    pub fn setRouteRenderTree(ptr: [*:0]u8) callconv(.c) void {
+        Vapor.renderCycle(ptr);
+    }
+
+    pub fn setRerenderTrue() callconv(.c) void {
+        Vapor.cycle();
+    }
+
+    pub fn getDirtyValue(node: *UINode) callconv(.c) bool {
+        return node.dirty;
     }
 };
 
-pub fn convertFromDynamicToType(comptime T: type, dyn_object: *DynamicObject) T {
-    var new_object: T = undefined;
-    const fields = @typeInfo(T).@"struct".fields;
-    inline for (fields, 0..) |field, i| {
-        const dyn_field_value = dyn_object.fields.items[i].value;
-        const dyn_field_type = dyn_object.fields.items[i].type;
-        switch (@typeInfo(field.type)) {
-            .pointer => |ptr| {
-                if (ptr.size == .slice) {
-                    @field(new_object, field.name) = dyn_field_value.string;
-                } else {
-                    Vapor.printlnErr("Not implemented yet, TYPE: {any}", .{field.type});
-                }
-            },
-            .int => {
-                if (dyn_field_type == .int) {
-                    @field(new_object, field.name) = @as(field.type, @intCast(dyn_field_value.int));
-                } else {
-                    Vapor.printlnErr("Not implemented yet, TYPE: {any}", .{field.type});
-                }
-            },
-            .float => {
-                if (dyn_field_type == .float) {
-                    @field(new_object, field.name) = @as(field.type, @intCast(dyn_field_value.float));
-                } else {
-                    Vapor.printlnErr("Not implemented yet, TYPE: {any}", .{field.type});
-                }
-            },
-            .bool => {
-                if (dyn_field_type == .bool) {
-                    @field(new_object, field.name) = dyn_field_value.bool;
-                } else {
-                    Vapor.printlnErr("Not implemented yet, TYPE: {any}", .{field.type});
-                }
-            },
-            .@"struct" => {
-                if (dyn_field_type == .object) {
-                    @field(new_object, field.name) = convertFromDynamicToType(field.type, dyn_field_value.object);
-                } else {
-                    Vapor.printlnErr("Not implemented yet, TYPE: {any}", .{field.type});
-                }
-            },
-            else => {},
+// --- Auto-Export Magic ---
+comptime {
+    const decls = std.meta.declarations(API);
+    for (decls) |decl| {
+        // We only care about public functions inside the API struct
+        const val = @field(API, decl.name);
+        const Type = @TypeOf(val);
+
+        // Check if it is a function
+        if (@typeInfo(Type) == .@"fn") {
+            // Export it using its declared name
+            @export(&val, .{ .name = decl.name });
         }
     }
-    return new_object;
-}
-
-var current_object: ?*DynamicObject = null;
-
-export fn startObject() usize {
-    current_object = allocator_global.create(DynamicObject) catch return 0;
-    current_object.?.* = DynamicObject.init(allocator_global);
-    return @intFromPtr(current_object.?);
-}
-
-export fn addStringField(handle: i32, key_ptr: [*:0]u8, value_ptr: [*:0]u8) void {
-    const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
-    const key = std.mem.span(key_ptr);
-    const value = std.mem.span(value_ptr);
-
-    obj.fields.append(.{
-        .name = key,
-        .type = .string,
-        .value = .{ .string = value },
-    }) catch return;
-}
-
-export fn addIntField(handle: i32, key_ptr: [*:0]u8, value: i32) void {
-    const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
-    const key = std.mem.span(key_ptr);
-
-    obj.fields.append(.{
-        .name = key,
-        .type = .int,
-        .value = .{ .int = value },
-    }) catch return;
-}
-
-export fn addFloatField(handle: i32, key_ptr: [*:0]u8, value: f32) void {
-    const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
-    const key = std.mem.span(key_ptr);
-
-    obj.fields.append(.{
-        .name = key,
-        .type = .float,
-        .value = .{ .float = value },
-    }) catch return;
-}
-
-export fn addBoolField(handle: i32, key_ptr: [*:0]u8, value: bool) void {
-    const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
-    const key = std.mem.span(key_ptr);
-
-    obj.fields.append(.{
-        .name = key,
-        .type = .bool,
-        .value = .{ .bool = value },
-    }) catch return;
-}
-
-// Similar for float and bool fields...
-
-pub fn finalizeObject(handle: u32) *DynamicObject {
-    const obj = @as(*DynamicObject, @ptrFromInt(@as(usize, @intCast(handle))));
-    return obj;
-}
-
-// Zig Side - Automatic struct introspection
-pub fn FieldDescriptor() type {
-    return extern struct {
-        name_ptr: [*]const u8,
-        name_len: u32,
-        offset: u32,
-        type_id: u8,
-        size: u32,
-        can_be_null: bool,
-    };
-}
-
-pub fn exportStruct(comptime T: type) type {
-    return struct {
-        pub var instance: T = undefined;
-        var descriptors: [@typeInfo(T).@"struct".fields.len]FieldDescriptor() = undefined;
-
-        pub fn init() void {
-            const fields = @typeInfo(T).@"struct".fields;
-            inline for (fields, 0..) |field, i| {
-                descriptors[i] = .{
-                    .name_ptr = field.name.ptr,
-                    .name_len = field.name.len,
-                    .offset = @offsetOf(T, field.name),
-                    .type_id = getTypeId(field.type),
-                    .size = @sizeOf(Kit.getUnderlyingType(field.type)),
-                    .can_be_null = @typeInfo(field.type) == .optional,
-                };
-            }
-        }
-
-        pub fn getInstancePtr() [*]const u8 {
-            return @ptrCast(&instance);
-        }
-
-        pub fn getFieldCount() u32 {
-            return @typeInfo(T).@"struct".fields.len;
-        }
-
-        pub fn getFieldDescriptor(index: u32) *const FieldDescriptor() {
-            return &descriptors[index];
-        }
-
-        fn getTypeId(comptime FT: type) u8 {
-            return switch (@typeInfo(Kit.getUnderlyingType(FT))) {
-                .int => |info| if (info.signedness == .unsigned) 1 else 2,
-                .float => 3,
-                .bool => 4,
-                .array => |arr| if (arr.child == u8) 5 else 6,
-                .pointer => 7,
-                .@"enum" => {
-                    return 8;
-                },
-                else => {
-                    return 0;
-                },
-            };
-        }
-    };
 }

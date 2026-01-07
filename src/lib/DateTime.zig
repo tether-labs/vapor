@@ -66,6 +66,17 @@ pub fn fromTimestamp(timestamp: i64) DateTime {
     };
 }
 
+pub fn fromMonth(month: u8, year: i32) DateTime {
+    return .{
+        .year = year,
+        .month = month,
+        .day = 1,
+        .hour = 0,
+        .minute = 0,
+        .second = 0,
+    };
+}
+
 /// Gets the current date and time
 pub fn now() DateTime {
     const timestamp = std.time.timestamp();
@@ -123,11 +134,9 @@ pub fn format(self: DateTime, allocator: std.mem.Allocator) ![]const u8 {
     });
 }
 
-/// Returns a string representation of just the date (YYYY-MM-DD)
+/// Returns a string representation of just the date (DD-MM-YYYY)
 pub fn formatDate(self: DateTime, allocator: std.mem.Allocator) ![]const u8 {
-    return std.fmt.allocPrint(allocator, "{d:0>4}-{d:0>2}-{d:0>2}", .{
-        self.year, self.month, self.day,
-    });
+    return std.fmt.allocPrint(allocator, "{d:0>2}-{d:0>2}-{d}", .{ self.day, self.month, self.year });
 }
 
 /// Returns a string representation of just the time (HH:MM:SS)
@@ -287,6 +296,22 @@ pub fn getDaysInMonthArray(allocator: *std.mem.Allocator, month: u8, year: i32) 
     return result;
 }
 
+/// Retruns the months of the year in an array DateTime objects
+pub fn getMonths(allocator: *std.mem.Allocator, year: i32) ![]DateTime {
+    const months = try allocator.alloc(DateTime, 12);
+    var i: u8 = 0;
+    for (0..12) |_| {
+        months[i] = DateTime.fromMonth(i + 1, year);
+        i += 1;
+    }
+    return months;
+}
+
+/// Retruns if the passed DateTime is within the passed month
+pub fn isWithinMonth(date: DateTime, month: u8, year: i32) bool {
+    return date.month == month and date.year == year;
+}
+
 /// Returns a calendar view as an array of DateTime objects for the given month and year
 /// This includes days from previous and next months to create a full 5-week (35 day) view
 /// Starting from Monday of the week containing the 1st day of the month
@@ -317,8 +342,8 @@ pub fn getCalendarView(allocator: *std.mem.Allocator, month: u8, year: i32) ![]D
     const next_month = if (month == 12) 1 else month + 1;
     const next_year = if (month == 12) year + 1 else year;
 
-    // Calculate days from the next month needed to complete 5 weeks (35 days)
-    const total_days_needed: u8 = 35;
+    // Calculate days from the next month needed to complete 5 weeks (42 days)
+    const total_days_needed: u8 = 42;
     const days_from_current_month: u8 = days_in_current_month;
     const days_from_next_month: u8 = total_days_needed - days_from_prev_month - days_from_current_month;
 

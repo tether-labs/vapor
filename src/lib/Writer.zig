@@ -1,4 +1,5 @@
 const std = @import("std");
+const Vapor = @import("Vapor.zig");
 const Writer = @This();
 buffer: []u8,
 size: usize,
@@ -15,6 +16,7 @@ pub fn init(writer: *Writer, buffer: []u8) void {
 pub fn reset(self: *Writer) void {
     self.pos = 0;
 }
+
 
 pub fn writeByte(self: *Writer, byte: u8) !void {
     self.buffer[self.pos] = byte;
@@ -33,9 +35,11 @@ pub fn write(self: *Writer, value: []const u8) !void {
 }
 
 pub fn writeF32(self: *Writer, value: f32) !void {
-    const f32_string = fastFloatToString(value);
-    @memcpy(self.buffer[self.pos .. self.pos + f32_string.len], f32_string);
-    self.pos += f32_string.len;
+    const remaining_buffer = self.buffer[self.pos..];
+    const formatted = try std.fmt.bufPrint(remaining_buffer, "{d}", .{value});
+    // @memcpy(self.buffer[self.pos .. self.pos + f32_string.len], f32_string);
+    self.pos += formatted.len;
+    // self.pos += f32_string.len;
 }
 
 pub fn writeF16(self: *Writer, value: f16) !void {
@@ -229,9 +233,6 @@ fn fastLargeIntToString(value: anytype) []const u8 {
     return large_int_buffer[buf_idx..];
 }
 
-
-
-
 fn fastLargeF32ToString(value: f32) []const u8 {
     if (value == 0) return "0";
 
@@ -256,5 +257,6 @@ pub fn writeU32(self: *Writer, value: u32) !void {
 
 pub fn print(self: *Writer) !void {
     const len: usize = self.pos;
-    self.buffer[len] = 0;
+    // self.buffer[len] = 0;
+    Vapor.println("{s}", .{self.buffer[0..len]});
 }

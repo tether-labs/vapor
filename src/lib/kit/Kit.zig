@@ -4,6 +4,9 @@ const isWasi = Vapor.isWasi;
 const Wasm = Vapor.Wasm;
 const utils = @import("../utils.zig");
 const hashKey = utils.hashKey;
+const getUnderlyingType = utils.getUnderlyingType;
+const getUnderlyingValue = utils.getUnderlyingValue;
+const DynamicObject = @import("../Dynamic.zig");
 
 pub const Kit = @This();
 
@@ -29,20 +32,6 @@ pub fn glue(comptime T: type, slice: []const u8) !T {
     ) catch return error.MalformedJson;
 
     return parsed.value;
-}
-
-pub fn getUnderlyingType(comptime T: type) type {
-    return switch (@typeInfo(T)) {
-        .optional => std.meta.Child(T),
-        else => T,
-    };
-}
-
-pub fn getUnderlyingValue(comptime T: type, comptime OT: type, v: OT) T {
-    return switch (@typeInfo(OT)) {
-        .optional => v.?,
-        else => v,
-    };
 }
 
 pub const String = struct {
@@ -157,19 +146,10 @@ pub const FetchAction = struct {
     deinitFn: FetchNodeProto,
 };
 
-pub const FetchActionProto = *const fn (*FetchAction, Response) void;
-pub const FetchNodeProto = *const fn (*FetchNode) void;
+const FetchActionProto = *const fn (*FetchAction, Response) void;
+const FetchNodeProto = *const fn (*FetchNode) void;
 
 pub const FetchNode = struct { data: FetchAction };
-
-export fn scheduleTick(id: u32) void {
-    if (Vapor.response_registry.get(id)) |_| {
-        return;
-    }
-    if (isWasi) {
-        _ = Wasm.tick(id);
-    }
-}
 
 const Future = struct {
     id: u32,
@@ -335,9 +315,9 @@ pub fn fetch(url: []const u8, cb: fn (Response) void, http_req: HttpReq) void {
 }
 
 var last_time: i64 = 0;
-pub fn throttle() bool {
+pub fn throttle(delay: i64) bool {
     const current_time = std.time.milliTimestamp();
-    if (current_time - last_time < 8) {
+    if (current_time - last_time < delay) {
         return true;
     }
     last_time = current_time;
@@ -481,35 +461,56 @@ fn decoder(encoded: []const u8, decoded: *std.array_list.Managed(u8)) !void {
     }
 }
 
-pub fn parseParams(url: []const u8, allocator: *std.mem.Allocator) !?std.StringHashMap([]const u8) {
+pub fn parseParams(url: []const u8, allocator: std.mem.Allocator) !?std.StringHashMap([]const u8) {
     const params_start = findIndex(url, '?') orelse return null;
-    // Details
-    var params = std.StringHashMap([]const u8).init(allocator.*);
 
-    // Loop
-    var pos = params_start + 1;
-    while (pos < url.len) : (pos += 1) {
-        const param_pair_end = findIndex(url[pos..], '&') orelse {
-            // We only have one pair hence we add and return
-            const seperator = findIndex(url[pos..], '=') orelse return error.SeperatorNotFound;
-            const key = url[pos .. seperator + pos];
-            var decoded = std.array_list.Managed(u8).init(allocator.*);
-            try decoder(url[seperator + pos + 1 .. url.len], &decoded);
-            const value = try decoded.toOwnedSlice();
-            try params.put(key, value);
-            return params;
-        };
-        // now we find the sperator in this pair and add it to the hashmap and continue on to the next
-        // id=123
-        const pair = url[pos .. param_pair_end + pos];
-        const seperator = findIndex(pair, '=') orelse return error.SeperatorNotFound;
-        const key = pair[0..seperator];
-        var decoded = std.array_list.Managed(u8).init(allocator.*);
-        try decoder(pair[seperator + 1 ..], &decoded);
-        const value = try decoded.toOwnedSlice();
-        try params.put(key, value);
-        pos += param_pair_end;
+    var params = std.StringHashMap([]const u8).init(allocator);
+    errdefer {
+        // Clean up allocated values on error
+        var it = params.valueIterator();
+        while (it.next()) |value| {
+            allocator.free(value.*);
+        }
+        params.deinit();
     }
+
+    var pos = params_start + 1;
+
+    while (pos < url.len) {
+        // Find end of this pair
+        const remaining = url[pos..];
+        const param_pair_end = findIndex(remaining, '&') orelse remaining.len;
+        const pair = remaining[0..param_pair_end];
+
+        if (pair.len == 0) {
+            pos += 1;
+            continue;
+        }
+
+        // Find the separator
+        const seperator = findIndex(pair, '=') orelse return error.SeperatorNotFound;
+
+        const key_encoded = pair[0..seperator];
+        const value_encoded = pair[seperator + 1 ..];
+
+        // Decode key (also needs decoding!)
+        var key_decoded = std.array_list.Managed(u8).init(allocator);
+        defer key_decoded.deinit();
+        try decoder(key_encoded, &key_decoded);
+        const key = try key_decoded.toOwnedSlice();
+        errdefer allocator.free(key);
+
+        // Decode value
+        var value_decoded = std.array_list.Managed(u8).init(allocator);
+        defer value_decoded.deinit();
+        try decoder(value_encoded, &value_decoded);
+        const value = try value_decoded.toOwnedSlice();
+
+        try params.put(key, value);
+
+        pos += param_pair_end + 1; // +1 to skip the '&'
+    }
+
     return params;
 }
 
@@ -550,31 +551,6 @@ pub const Response = union(enum) {
         };
     }
 };
-
-export fn resumeCallback(id: u32, resp_ptr: [*:0]u8) void {
-    const resp = std.mem.span(resp_ptr);
-    // this std.json.parseFromSlice is extermely memory costly 43kb alone
-    const parsed_value: std.json.Parsed(Response) = std.json.parseFromSlice(Response, Vapor.arena(.persist), resp, .{}) catch |err| {
-        Vapor.printlnSrcErr("Error could not parse response {any}\n", .{err}, @src());
-        return;
-    };
-
-    if (parsed_value.value == .err) {
-        Vapor.printlnErr("\nERROR CODE: {d}\nERROR TYPE: {s}\nERROR MESSAGE: {s}\n", .{
-            parsed_value.value.err.code,
-            parsed_value.value.err.type,
-            parsed_value.value.err.message,
-        });
-    }
-
-    const json_resp: Response = parsed_value.value;
-    // Vapor.response_registry.put(id, json_resp) catch |err| {
-    //     Vapor.println("Button Function Registry {any}\n", .{err});
-    //     return;
-    // };
-    const node = Vapor.fetch_registry.get(id) orelse return;
-    @call(.auto, node.data.runFn, .{ &node.data, json_resp });
-}
 
 pub const HttpReqOffset = struct {
     method_ptr: [*]const u8 = undefined,
@@ -1141,7 +1117,7 @@ pub const Observer = struct {
                     Vapor.printlnSrcErr("No object found", .{}, @src());
                     return;
                 };
-                const target: Target = Vapor.convertFromDynamicToType(Target, object);
+                const target: Target = DynamicObject.convertFromDynamicToType(Target, object);
                 @call(.auto, callback, .{target});
             }
             fn deinitFn(_: *Vapor.Node) void {}
@@ -1204,37 +1180,151 @@ pub const Observer = struct {
     // fn addCallBack(name: []const u8, cb: anytype, comptime T: type) void {}
 };
 
-const ObserverExport = Vapor.exportStruct(ObserverOptions);
-pub export fn getObserverOptions(options: *ObserverOptions) [*]const u8 {
-    ObserverExport.init();
-    ObserverExport.instance = options.*;
-    return ObserverExport.getInstancePtr();
+const ObserverExport = DynamicObject.exportStruct(ObserverOptions);
+
+// --- THE EXPORTS ---
+// Everything inside here gets auto-exported to JS
+pub const API = struct {
+    pub fn hookInstCallback(id: u32) callconv(.c) void {
+        const hook_cb = Vapor.hooks_inst_callbacks.get(id).?;
+        const params_str = Kit.getWindowParams() orelse "";
+        const path = Kit.getWindowPath() orelse {
+            Vapor.printlnSrcErr("Hooks ERROR: Could not get window path", .{}, @src());
+            return;
+        };
+        var params = std.StringHashMap([]const u8).init(Vapor.arena(.frame));
+        if (params_str.len != 0) {
+            params = Kit.parseParams(params_str, Vapor.allocator_global) catch return orelse return;
+        }
+        const context = Vapor.HookContext{
+            .from_path = "",
+            .to_path = path,
+            .params = params,
+            .query = params,
+        };
+        Vapor.println("Hook {any}\n", .{context});
+        @call(.auto, hook_cb, .{context});
+    }
+
+    pub fn resumeCallback(id: u32, resp_ptr: [*:0]u8) callconv(.c) void {
+        const resp = std.mem.span(resp_ptr);
+        // this std.json.parseFromSlice is extermely memory costly 43kb alone
+        const parsed_value: std.json.Parsed(Response) = std.json.parseFromSlice(Response, Vapor.arena(.persist), resp, .{}) catch |err| {
+            Vapor.printlnSrcErr("Error could not parse response {any} {s}\n", .{ err, resp }, @src());
+            return;
+        };
+
+        if (parsed_value.value == .err) {
+            Vapor.printlnErr("\nERROR CODE: {d}\nERROR TYPE: {s}\nERROR MESSAGE: {s}\n", .{
+                parsed_value.value.err.code,
+                parsed_value.value.err.type,
+                parsed_value.value.err.message,
+            });
+        }
+
+        const json_resp: Response = parsed_value.value;
+        // Vapor.response_registry.put(id, json_resp) catch |err| {
+        //     Vapor.println("Button Function Registry {any}\n", .{err});
+        //     return;
+        // };
+        const node = Vapor.fetch_registry.get(id) orelse return;
+        @call(.auto, node.data.runFn, .{ &node.data, json_resp });
+    }
+
+    pub fn getObserverOptions(options: *ObserverOptions) callconv(.c) [*]const u8 {
+        ObserverExport.init();
+        ObserverExport.instance = options.*;
+        return ObserverExport.getInstancePtr();
+    }
+
+    pub fn getObserverFieldCount() callconv(.c) u32 {
+        return ObserverExport.getFieldCount();
+    }
+
+    pub fn getObserverFieldDescriptor(index: u32) callconv(.c) ?*const DynamicObject.FieldDescriptor() {
+        return ObserverExport.getFieldDescriptor(index);
+    }
+
+    pub fn getObserverNodeCount(observer_name: [*:0]u8) callconv(.c) usize {
+        const name = std.mem.span(observer_name);
+        const nodes = Vapor.observer_nodes.get(name) orelse return 0;
+        return nodes.items.len;
+    }
+
+    pub fn getObserverNode(observer_name: [*:0]u8, index: usize) callconv(.c) ?[*]const u8 {
+        const name = std.mem.span(observer_name);
+        const nodes = Vapor.observer_nodes.get(name) orelse return null;
+        const node = nodes.items[index];
+        return node.uuid.ptr;
+    }
+
+    pub fn getObserverNodeLength(observer_name: [*:0]u8, index: usize) callconv(.c) usize {
+        const name = std.mem.span(observer_name);
+        const nodes = Vapor.observer_nodes.get(name) orelse return 0;
+        const node = nodes.items[index];
+        return node.uuid.len;
+    }
+};
+
+// 1. This variable will hold our list of names.
+// It is calculated at compile-time but stored in the binary for runtime use.
+const export_names = blk: {
+    const decls = @typeInfo(API).@"struct".decls;
+
+    // We need to count valid exports first to know the array size
+    var count = 0;
+    for (decls) |decl| {
+        // if (std.ascii.startsWithIgnoreCase(decl.name, "export")) {
+        const val = @field(API, decl.name);
+        if (@typeInfo(@TypeOf(val)) == .@"fn") {
+            count += 1;
+        }
+        // }
+    }
+
+    // Create the array with the exact size needed
+    var names: [count][]const u8 = undefined;
+    var i = 0;
+
+    // Fill the array
+    for (decls) |decl| {
+        // if (std.ascii.startsWithIgnoreCase(decl.name, "export")) {
+        const val = @field(API, decl.name);
+        if (@typeInfo(@TypeOf(val)) == .@"fn") {
+            names[i] = decl.name;
+            i += 1;
+
+            // Do the actual export here too!
+            // @export(val, .{ .name = decl.name });
+        }
+        // }
+    }
+
+    // Return the final array to be stored in 'export_names'
+    break :blk names;
+};
+
+// 2. Runtime logging function
+pub fn log() void {
+    Vapor.println("Exported functions: {d}\n", .{export_names.len});
+    // We simply iterate over the const slice we created above
+    for (export_names) |name| {
+        Vapor.print("Exported: {s}\n", .{name});
+        // Or: Vapor.print("{s}\n", .{name});
+    }
 }
 
-pub export fn getObserverFieldCount() u32 {
-    return ObserverExport.getFieldCount();
-}
+// --- Auto-Export Magic ---
+// This runs automatically when this file is imported
+comptime {
+    const decls = std.meta.declarations(API);
 
-pub export fn getObserverFieldDescriptor(index: u32) ?*const Vapor.FieldDescriptor() {
-    return ObserverExport.getFieldDescriptor(index);
-}
-
-export fn getObserverNodeCount(observer_name: [*:0]u8) usize {
-    const name = std.mem.span(observer_name);
-    const nodes = Vapor.observer_nodes.get(name) orelse return 0;
-    return nodes.items.len;
-}
-
-export fn getObserverNode(observer_name: [*:0]u8, index: usize) ?[*]const u8 {
-    const name = std.mem.span(observer_name);
-    const nodes = Vapor.observer_nodes.get(name) orelse return null;
-    const node = nodes.items[index];
-    return node.uuid.ptr;
-}
-
-export fn getObserverNodeLength(observer_name: [*:0]u8, index: usize) usize {
-    const name = std.mem.span(observer_name);
-    const nodes = Vapor.observer_nodes.get(name) orelse return 0;
-    const node = nodes.items[index];
-    return node.uuid.len;
+    for (decls) |decl| {
+        const val = @field(API, decl.name);
+        const Type = @TypeOf(val);
+        if (@typeInfo(Type) == .@"fn") {
+            // Export it with its own name
+            @export(&val, .{ .name = decl.name });
+        }
+    }
 }

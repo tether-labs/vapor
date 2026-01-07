@@ -185,8 +185,9 @@ pub extern fn mutateDomElementStyleStringWasm(
 pub extern fn translate3dWasm(
     id_ptr: [*]const u8,
     id_len: usize,
-    translation_ptr: [*]const u8,
-    translation_len: usize,
+    x: f32,
+    y: f32,
+    z: f32,
 ) void;
 
 // =============================================================================
@@ -410,7 +411,7 @@ pub extern fn setLocalStorageStringWasm(
 ) void;
 
 /// Retrieves a string value from local storage.
-pub extern fn getLocalStorageStringWasm(ptr: [*]const u8, len: usize) [*:0]u8;
+pub extern fn getLocalStorageStringWasm(ptr: [*]const u8, len: usize) ?[*:0]u8;
 
 /// Stores a number in local storage.
 pub extern fn setLocalStorageNumberWasm(ptr: [*]const u8, len: usize, value: u32) void;
@@ -1361,3 +1362,18 @@ pub extern fn shareWasm(
 
 pub extern fn batchRemoveTombStonesWasm() void;
 
+pub extern fn setAttributeWasm(
+    id_ptr: [*]const u8,
+    id_len: usize,
+    attribute_ptr: [*]const u8,
+    attribute_len: usize,
+    value_ptr: [*]const u8,
+    value_len: usize,
+) void;
+
+pub extern fn removeAttributeWasm(
+    id_ptr: [*]const u8,
+    id_len: usize,
+    attribute_ptr: [*]const u8,
+    attribute_len: usize,
+) void;

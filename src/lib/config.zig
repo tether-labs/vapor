@@ -157,4 +157,5 @@ pub const IconTokens = struct {
     pub const screw_driver = &IconTokens{ .web = "bi bi-screwdriver", .svg = "\u{f0e8}" };
     pub const memory = &IconTokens{ .web = "bi bi-memory", .svg = "\u{f0e8}" };
     pub const grip_horizontal = &IconTokens{ .web = "bi bi-grip-horizontal", .svg = "\u{f0e8}" };
+    pub const bug = &IconTokens{ .web = "bi bi-bug", .svg = "\u{f0e8}" };
 };

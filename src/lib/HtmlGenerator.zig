@@ -42,10 +42,9 @@ pub fn generate(root: *UINode, new_writer: *std.Io.Writer, style_path: []const u
 
     // Write everything after the head
     writer.writeAll(html_template[start..end]) catch unreachable;
-    if (root.children) |children| {
-        for (children.items) |child| {
-            createHtmlTree(child);
-        }
+    var children = root.children();
+    while (children.next()) |child| {
+        createHtmlTree(child);
     }
     writer.writeAll("</div>\n</body>\n</html>") catch unreachable;
 }
@@ -345,10 +344,9 @@ pub fn createHtmlTree(node: *UINode) void {
     // and it HAS text, write it as content.
     // This is for <button>Text</button> or <a>Text</a>
     _ = writer.write("\n") catch unreachable;
-    if (node.children) |children| {
-        for (children.items) |child| {
-            createHtmlTree(child);
-        }
+    var children = node.children();
+    while (children.next()) |child| {
+        createHtmlTree(child);
     }
 
     // Only call close for non-atomic elements

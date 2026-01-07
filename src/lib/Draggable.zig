@@ -24,12 +24,14 @@ pub const Draggable = struct {
     // Callbacks
     on_drag_start: ?*const fn (self: *Draggable, evt: *Vapor.Event) void = null,
     on_drag: ?*const fn (self: *Draggable, evt: *Vapor.Event) void = null,
+    on_drag_ctx: ?*const fn (self: *Draggable, evt: *Vapor.Event, ctx: ?*anyopaque) void = null,
     on_drag_end: ?*const fn (self: *Draggable, evt: *Vapor.Event) void = null,
     on_drop: ?*const fn (self: *Draggable, evt: *Vapor.Event, target: ?*Vapor.Binded) void = null,
 
     // Internal listener IDs
     move_listener_id: ?usize = null,
     up_listener_id: ?usize = null,
+    ctx: ?*anyopaque = null,
 
     pub const Config = struct {
         // Constraint options
@@ -213,6 +215,8 @@ pub const Draggable = struct {
         // User callback
         if (self.on_drag) |callback| {
             callback(self, evt);
+        } else if (self.on_drag_ctx) |callback| {
+            callback(self, evt, self.ctx);
         } else {
             self.updatePosition(new_x, new_y);
         }
@@ -263,7 +267,7 @@ pub const Draggable = struct {
     pub fn updatePosition(self: *Draggable, x: f32, y: f32) void {
 
         // if (self.config.use_gpu) {
-        self.element.translate3d(.{ .x = x, .y = y });
+        _ = self.element.translate3d(.{ .x = x, .y = y });
         // } else {
         //     self.element.style(.{ .left = x, .top = y });
         // }

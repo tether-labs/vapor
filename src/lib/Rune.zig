@@ -162,16 +162,16 @@ pub fn Signal(comptime T: type) type {
                 ._has_pending_update = false,
                 ._pending_value = null,
                 ._closure = sig_closure,
-                ._sub_index = Vapor.component_subscribers.items.len,
+                // ._sub_index = Vapor.component_subscribers.items.len,
             };
 
             sig_closure.* = .{
                 .signal = sig,
             };
 
-            Vapor.component_subscribers.append(
-                &sig_closure.node,
-            ) catch unreachable;
+            // Vapor.component_subscribers.append(
+            //     &sig_closure.node,
+            // ) catch unreachable;
 
             return;
         }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Vapor = @import("../Vapor.zig");
 const Kit = Vapor.Kit;
+const JWT = @import("JWT.zig");
 
 const Provider = enum {
     google,
@@ -38,6 +39,8 @@ pub const Clients = struct {
 
 const KeyStone = @This();
 var options: Options = Options{};
+var on_auth_change: ?*const fn (Kit.Response) void = null;
+
 pub var keystone: KeyStone = undefined;
 clients: Clients = undefined,
 provider: Provider = undefined,
@@ -47,12 +50,55 @@ pub fn init(clients: Clients) void {
     keystone = KeyStone{
         .clients = clients,
     };
+
+    initHooks();
+}
+
+pub fn onAuthChange(cb: *const fn (Kit.Response) void) void {
+    on_auth_change = cb;
+}
+
+fn initHooks() void {
+    _ = Vapor.registerHook("/auth", exchange, .before);
+}
+
+fn exchange(_: Vapor.HookContext) void {
+    KeyStone.handleAuthExchanges();
+}
+
+fn validateGoogle(is_authenticated: *const fn (Kit.Response) void) void {
+    const token = Vapor.getStore([]const u8, "google_session_token") orelse {
+        Vapor.printErr("Failed to get token", .{});
+        return;
+    };
+    Vapor.print("Token: {s}", .{token});
+    Vapor.Kit.fetch("http://localhost:8080/auth/validate/google/session", is_authenticated, .{
+        .method = .POST,
+        .credentials = "include",
+        .headers = .{ .authorization = Vapor.fmtln("Bearer {s}", .{token}) },
+    });
+}
+
+pub fn isAuthenticated() bool {
+    const token = Vapor.getStore([]const u8, "google_session_token") orelse {
+        Vapor.printErr("Failed to get token", .{});
+        return false;
+    };
+    return !JWT.isExpired(token);
+}
+
+pub fn getSession() ?[]const u8 {
+    return Vapor.getStore([]const u8, "google_session_token");
+}
+
+pub fn signout() void {
+    Vapor.store("google_session_token", "");
 }
 
 fn hooks(_: void) void {
     const params_str = Vapor.Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
-    const params = Kit.parseParams(params_str, &Vapor.allocator_global) catch return orelse return;
+    const params = Kit.parseParams(params_str, Vapor.allocator_global) catch return orelse return;
     const code = params.get("code") orelse return;
     const cookie = Vapor.getCookie("oauth_provider") orelse return;
     const provider = std.meta.stringToEnum(Provider, cookie) orelse return;
@@ -64,10 +110,10 @@ fn hooks(_: void) void {
     }
 }
 
-pub fn handleAuthExchanges(_: void) void {
+pub fn handleAuthExchanges() void {
     const params_str = Vapor.Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
-    const params = Kit.parseParams(params_str, &Vapor.allocator_global) catch return orelse return;
+    const params = Kit.parseParams(params_str, Vapor.allocator_global) catch return orelse return;
     const code = params.get("code") orelse return;
     const cookie = Vapor.getCookie("oauth_provider") orelse return;
     const provider = std.meta.stringToEnum(Provider, cookie) orelse return;
@@ -83,8 +129,8 @@ fn exchangeGithub(code: []const u8) void {
     const params_str = Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
     const body = Vapor.fmtln("auth-code={s}", .{code});
-    Kit.fetchWithParams("http://localhost:8443/exchange/github/token", {}, logToken, .{
-        .method = "POST",
+    Kit.fetch("http://localhost:8443/exchange/github/token", logToken, .{
+        .method = .POST,
         .body = body,
         .credentials = "include",
         .headers = .{
@@ -96,11 +142,11 @@ fn exchangeGithub(code: []const u8) void {
 fn exchangeGoogle() void {
     const params_str = Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
-    const params = Kit.parseParams(params_str, &Vapor.allocator_global) catch return orelse return;
+    const params = Kit.parseParams(params_str, Vapor.allocator_global) catch return orelse return;
     const code = params.get("code") orelse return;
     const body = Vapor.fmtln("auth-code={s}", .{code});
-    Kit.fetchWithParams("http://localhost:8443/exchange/google/token", {}, logToken, .{
-        .method = "POST",
+    Kit.fetch("http://localhost:8080/exchange/google/token", handleToken, .{
+        .method = .POST,
         .body = body,
         .credentials = "include",
         .headers = .{
@@ -114,12 +160,12 @@ fn exchangeApple() void {
     const params_str = Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
     Vapor.printlnSrc("Params {s}", .{params_str}, @src());
-    const params = Kit.parseParams(params_str, &Vapor.allocator_global) catch return orelse return;
+    const params = Kit.parseParams(params_str, Vapor.allocator_global) catch return orelse return;
     Vapor.printlnSrc("{s}", .{params.get("code") orelse ""}, @src());
     const code = params.get("code") orelse return;
     const body = Vapor.fmtln("auth-code={s}", .{code});
-    Kit.fetchWithParams("http://localhost:8443/exchange/google/token", {}, logToken, .{
-        .method = "POST",
+    Kit.fetch("http://localhost:8443/exchange/google/token", logToken, .{
+        .method = .POST,
         .body = body,
         .credentials = "include",
         .headers = .{
@@ -132,12 +178,12 @@ fn exchangeAzure() void {
     const params_str = Kit.getWindowParams() orelse return;
     if (params_str.len == 0) return;
     Vapor.printlnSrc("Params {s}", .{params_str}, @src());
-    const params = Kit.parseParams(params_str, &Vapor.allocator_global) catch return orelse return;
+    const params = Kit.parseParams(params_str, Vapor.allocator_global) catch return orelse return;
     Vapor.printlnSrc("{s}", .{params.get("code") orelse ""}, @src());
     const code = params.get("code") orelse return;
     const body = Vapor.fmtln("auth-code={s}", .{code});
-    Kit.fetchWithParams("http://localhost:8443/exchange/google/token", {}, logToken, .{
-        .method = "POST",
+    Kit.fetch("http://localhost:8443/exchange/google/token", logToken, .{
+        .method = .POST,
         .body = body,
         .credentials = "include",
         .headers = .{
@@ -146,21 +192,36 @@ fn exchangeAzure() void {
     });
 }
 
-fn logToken(_: void, resp: Kit.Response) void {
-    Vapor.printlnSrc("Logged response {any}", .{resp.code}, @src());
-    const path = Kit.getWindowPath();
-    if (resp.code == 401 and !std.mem.eql(u8, "/nightwatch/auth", path)) {
-        Kit.routePush("/nightwatch/auth");
-    } else if (resp.code == 200 and std.mem.eql(u8, "/nightwatch/auth", path)) {
-        Kit.routePush("/nightwatch/routes");
-    } else if (resp.code == 500 and !std.mem.eql(u8, "/nightwatch/auth", path)) {
-        Kit.routePush("/nightwatch/auth");
+const GoogleResponse = struct {
+    success: bool,
+    token: []const u8,
+    user: struct { name: []const u8, email: []const u8 },
+};
+
+fn handleToken(resp: Kit.Response) void {
+    if (on_auth_change) |cb| {
+        cb(resp);
+    } else if (resp.isOk()) {
+        Vapor.printlnSrc("Logged response {s}", .{resp.ok.body}, @src());
+        const parsed_value: std.json.Parsed(GoogleResponse) = std.json.parseFromSlice(GoogleResponse, Vapor.arena(.persist), resp.ok.body, .{}) catch |err| {
+            Vapor.printlnSrcErr("Error could not parse response {any} {s}\n", .{ err, resp.ok.body }, @src());
+            return;
+        };
+        const google_resp: GoogleResponse = parsed_value.value;
+        Vapor.store("google_session_token", google_resp.token);
     }
-    // Kit.navigate("/nightwatch/routes");
 }
 
-pub fn getSession() ?[]const u8 {
-    return Vapor.getCookie("_nightwatch-session");
+fn logToken(resp: Kit.Response) void {
+    if (resp.isOk()) {
+        Vapor.printlnSrc("Logged response {s}", .{resp.ok.body}, @src());
+        const parsed_value: std.json.Parsed(GoogleResponse) = std.json.parseFromSlice(GoogleResponse, Vapor.arena(.persist), resp.ok.body, .{}) catch |err| {
+            Vapor.printlnSrcErr("Error could not parse response {any} {s}\n", .{ err, resp.ok.body }, @src());
+            return;
+        };
+        const google_resp: GoogleResponse = parsed_value.value;
+        Vapor.store("google_session_token", google_resp.token);
+    }
 }
 
 pub fn validate() void {
@@ -179,7 +240,7 @@ pub fn signInWithOauth(provider: Provider) void {
         .google => {
             const googleClient = keystone.clients.google orelse return;
             options.client_id = googleClient.client_id;
-            options.redirect_uri = "http://localhost:5173/nightwatch/auth";
+            options.redirect_uri = "http://localhost:5173/auth";
             options.response_type = "code";
             options.scope = "openid email profile";
             options.access_type = "offline";
@@ -192,13 +253,13 @@ pub fn signInWithOauth(provider: Provider) void {
             const appleClient = keystone.clients.apple orelse return;
             options.response_type = "code id_token";
             options.client_id = appleClient.client_id;
-            options.redirect_uri = "http://localhost:5173/nightwatch/auth";
+            options.redirect_uri = "http://localhost:5173/auth";
             options.scope = "name email";
             options.response_mode = "form_post";
             options.state = "random_csrf_token";
             options.nonce = "random_nonce_value";
-            const cookie = "oauth_provider=apple; path=/; secure; samesite=strict";
-            Vapor.setCookie(cookie);
+            // const cookie = "oauth_provider=apple; path=/; secure; samesite=strict";
+            // Vapor.setCookie(cookie);
             keystone.apple() catch return;
         },
         .github => {
@@ -207,8 +268,8 @@ pub fn signInWithOauth(provider: Provider) void {
             options.redirect_uri = "http://localhost:5173/nightwatch/auth";
             options.scope = "read:user user:email";
             options.state = "random_csrf_token";
-            const cookie = "oauth_provider=github; path=/; secure; samesite=strict";
-            Vapor.setCookie(cookie);
+            // const cookie = "oauth_provider=github; path=/; secure; samesite=strict";
+            // Vapor.setCookie(cookie);
             keystone.github() catch return;
         },
         else => {},
@@ -263,11 +324,11 @@ fn google(_: KeyStone) !void {
     try query.add("scope", options.scope); // or your actual callback URL
     try query.add("access_type", options.access_type); // or your actual callback URL
     try query.add("prompt", options.prompt); // or your actual callback URL
-    //
+
     try query.queryStrEncode();
     const full_url = try query.generateUrl("https://accounts.google.com/o/oauth2/v2/auth", query.str);
     defer Vapor.allocator_global.free(full_url);
 
-    Vapor.printlnSrc("{s}\n", .{full_url}, @src());
+    Vapor.print("{s}\n", .{full_url});
     Kit.setWindowLocation(full_url);
 }

@@ -12,21 +12,12 @@ pub const color_theme: ColorTheme = ColorTheme{};
 const isMobile = @import("utils.zig").isMobile;
 const Event = @import("Event.zig");
 const Theme = @import("theme");
+pub const NewShadow = @import("Shadow.zig");
 
 pub const ThemeDefinition = struct {
     default: bool = false,
     name: []const u8,
     theme: Theme.Colors,
-};
-
-pub const TimingFunction = enum(u8) {
-    linear,
-    ease,
-    ease_in,
-    ease_out,
-    ease_in_out,
-    bounce,
-    elastic,
 };
 
 pub fn switchColorTheme() void {
@@ -53,6 +44,10 @@ pub const SizingType = enum(u8) {
     clamp_percent,
     min_max_vp,
     auto,
+    top,
+    bottom,
+    left,
+    right,
 };
 
 const MinMax = packed struct {
@@ -493,7 +488,7 @@ pub const Color = union(enum) {
     pub const yellow = Color{ .Literal = .{ .r = 255, .g = 255, .b = 0, .a = 1 } };
     pub const cyan = Color{ .Literal = .{ .r = 0, .g = 255, .b = 255, .a = 1 } };
     pub const magenta = Color{ .Literal = .{ .r = 255, .g = 0, .b = 255, .a = 1 } };
-    pub const vapor_blue = Color.hex("#2108FF");
+    pub const vapor_blue = Color.hex("#4400FF");
     pub fn palette(thematic: ThemeTokens) Color {
         return .{ .Thematic = .{ .token = thematic } };
     }
@@ -588,6 +583,46 @@ pub const Color = union(enum) {
             .b = b,
             .a = alpha,
         } };
+    }
+
+    pub fn toCss(self: Color, writer: anytype) !void {
+        switch (self) {
+            .Thematic => |thematic| {
+                if (thematic.alpha > -1) {
+                    try writer.write("rgba(");
+                    try writer.write("var(--");
+                    try writer.write(@tagName(thematic.token));
+                    try writer.write("), ");
+                    try writer.writeF32(thematic.alpha);
+                    try writer.writeByte(')');
+                } else {
+                    try writer.write("rgb(var(--");
+                    try writer.write(@tagName(thematic.token));
+                    try writer.write("))");
+                }
+            },
+            .Literal => |_rgba| {
+                if (_rgba.a == 1) {
+                    try writer.write("rgb(");
+                    try writer.writeU8Num(_rgba.r);
+                    try writer.writeByte(',');
+                    try writer.writeU8Num(_rgba.g);
+                    try writer.writeByte(',');
+                    try writer.writeU8Num(_rgba.b);
+                    try writer.writeByte(')');
+                } else {
+                    try writer.write("rgba(");
+                    try writer.writeU8Num(_rgba.r);
+                    try writer.writeByte(',');
+                    try writer.writeU8Num(_rgba.g);
+                    try writer.writeByte(',');
+                    try writer.writeU8Num(_rgba.b);
+                    try writer.writeByte(',');
+                    try writer.writeF32(_rgba.a);
+                    try writer.writeByte(')');
+                }
+            },
+        }
     }
 };
 
@@ -738,6 +773,20 @@ pub const Margin = packed struct {
             .right = right,
         };
     }
+
+    pub fn vertical(size: i16) Margin {
+        return Margin{
+            .top = size,
+            .bottom = size,
+        };
+    }
+
+    pub fn horizontal(size: i16) Margin {
+        return Margin{
+            .left = size,
+            .right = size,
+        };
+    }
 };
 
 pub const Overflow = enum(u8) {
@@ -775,10 +824,10 @@ pub const Scroll = packed struct {
 };
 
 pub const BorderRadius = packed struct {
-    top_left: u8 = 0,
-    top_right: u8 = 0,
-    bottom_left: u8 = 0,
-    bottom_right: u8 = 0,
+    top_left: u16 = 0,
+    top_right: u16 = 0,
+    bottom_left: u16 = 0,
+    bottom_right: u16 = 0,
     fn default() BorderRadius {
         return BorderRadius{
             .top_left = 0,
@@ -787,7 +836,7 @@ pub const BorderRadius = packed struct {
             .bottom_right = 0,
         };
     }
-    pub fn all(radius: u8) BorderRadius {
+    pub fn all(radius: u16) BorderRadius {
         return BorderRadius{
             .top_left = radius,
             .top_right = radius,
@@ -795,7 +844,7 @@ pub const BorderRadius = packed struct {
             .bottom_right = radius,
         };
     }
-    pub fn specific(top_left: u8, top_right: u8, bottom_left: u8, bottom_right: u8) BorderRadius {
+    pub fn specific(top_left: u16, top_right: u16, bottom_left: u16, bottom_right: u16) BorderRadius {
         return BorderRadius{
             .top_left = top_left,
             .top_right = top_right,
@@ -803,7 +852,7 @@ pub const BorderRadius = packed struct {
             .bottom_right = bottom_right,
         };
     }
-    pub fn top_bottom(top_radius: u8, bottom_radius: u8) BorderRadius {
+    pub fn top_bottom(top_radius: u16, bottom_radius: u16) BorderRadius {
         return BorderRadius{
             .top_left = top_radius,
             .top_right = top_radius,
@@ -811,7 +860,7 @@ pub const BorderRadius = packed struct {
             .bottom_right = bottom_radius,
         };
     }
-    pub fn bottom(radius: u8) BorderRadius {
+    pub fn bottom(radius: u16) BorderRadius {
         return BorderRadius{
             .top_left = 0,
             .top_right = 0,
@@ -819,7 +868,7 @@ pub const BorderRadius = packed struct {
             .bottom_right = radius,
         };
     }
-    pub fn top(radius: u8) BorderRadius {
+    pub fn top(radius: u16) BorderRadius {
         return BorderRadius{
             .top_left = radius,
             .top_right = radius,
@@ -827,7 +876,7 @@ pub const BorderRadius = packed struct {
             .bottom_right = 0,
         };
     }
-    pub fn left_right(left: u8, right: u8) BorderRadius {
+    pub fn left_right(left: u16, right: u16) BorderRadius {
         return BorderRadius{
             .top_left = left,
             .top_right = right,
@@ -837,7 +886,14 @@ pub const BorderRadius = packed struct {
     }
 };
 
+const ShadowType = enum(u8) {
+    none,
+    drop,
+    inset,
+};
+
 pub const Shadow = struct {
+    type: ShadowType = .none,
     top: i16 = 0,
     left: i16 = 0,
     blur: u8 = 0,
@@ -853,47 +909,6 @@ pub const Shadow = struct {
             .color = color,
         };
     }
-
-    // // Material Design-style elevation levels
-    // pub fn elevationSmall(color: Color) Shadow {
-    //     return .{
-    //         .top = 1,
-    //         .left = 0,
-    //         .blur = 3,
-    //         .spread = 0,
-    //         .color = color,
-    //     };
-    // }
-    //
-    // pub fn elevationMedium(color: Color) Shadow {
-    //     return .{
-    //         .top = 4,
-    //         .left = 0,
-    //         .blur = 8,
-    //         .spread = 0,
-    //         .color = color,
-    //     };
-    // }
-    //
-    // pub fn elevationLarge(color: Color) Shadow {
-    //     return .{
-    //         .top = 8,
-    //         .left = 0,
-    //         .blur = 16,
-    //         .spread = 0,
-    //         .color = color,
-    //     };
-    // }
-    //
-    // pub fn elevationXLarge(color: Color) Shadow {
-    //     return .{
-    //         .top = 12,
-    //         .left = 0,
-    //         .blur = 24,
-    //         .spread = 0,
-    //         .color = color,
-    //     };
-    // }
 
     // Flat/subtle shadow for cards
     pub fn card(color: Color) Shadow {
@@ -1046,6 +1061,9 @@ pub const Alignment = enum(u8) {
     between,
     even,
     in_line,
+    anchor_start,
+    anchor_end,
+    anchor_center,
 };
 
 pub const BoundingBox = struct {
@@ -1092,6 +1110,16 @@ pub const Position = struct {
         .top = .px(0),
         .z_index = 999,
     };
+
+    pub fn full(pos_type: PositionType) Position {
+        return .{
+            .top = .px(0),
+            .right = .px(0),
+            .bottom = .px(0),
+            .left = .px(0),
+            .type = pos_type,
+        };
+    }
 
     /// Creates a top bottom left right position
     pub fn tblr(top: Pos, bottom: Pos, left: Pos, right: Pos, pos_type: PositionType) Position {
@@ -1186,6 +1214,10 @@ pub const Transform = struct {
 
     pub fn scale() Transform {
         return .{ .scale_size = 1.04, .type = &.{.scale}, .size_type = .scale };
+    }
+
+    pub fn translate(x: f16, y: f16, unit: SizeType) Transform {
+        return .{ .trans_x = x, .trans_y = y, .type = &.{ .translateX, .translateY }, .size_type = unit };
     }
 
     pub fn scaleDecimal(value: f16) Transform {
@@ -1517,15 +1549,6 @@ const Iteration = struct {
     }
 };
 
-pub const AnimationType = struct {
-    tag: []const u8,
-    delay: f32 = 0,
-    direction: AnimDir = .normal,
-    duration: f32 = 0,
-    iteration_count: Iteration = .count(1),
-    timing_function: TimingFunction = .ease,
-};
-
 pub const ChildStyle = struct {
     style_id: []const u8,
     display: ?FlexType = null,
@@ -1578,6 +1601,11 @@ pub const Cursor = enum(u8) {
     grab,
     zoom_in,
     zoom_out,
+    ew_resize,
+    ns_resize,
+    col_resize,
+    row_resize,
+    all_scroll,
 };
 
 pub const Appearance = enum(u8) {
@@ -1607,10 +1635,13 @@ pub const BoxSizing = enum(u8) {
 };
 
 pub const TransformOrigin = enum(u8) {
-    top = 0,
-    bottom = 1,
-    right = 2,
-    left = 3,
+    default,
+    top,
+    bottom,
+    right,
+    left,
+    top_center,
+    bottom_center,
 };
 
 pub const Layout = packed struct {
@@ -1636,6 +1667,9 @@ pub const Layout = packed struct {
     pub const x_between_bottom = Layout{ .x = .between, .y = .end };
     pub const x_between_top = Layout{ .x = .between, .y = .start };
     pub const y_between_center = Layout{ .x = .center, .y = .between };
+    pub const anchor_start = Layout{ .x = .anchor_start, .y = .start };
+    pub const anchor_end = Layout{ .x = .anchor_end, .y = .end };
+    pub const anchor_center = Layout{ .x = .anchor_center, .y = .anchor_center };
 };
 
 pub const BorderGrouped = struct {
@@ -1657,6 +1691,7 @@ pub const BorderGrouped = struct {
         return .{
             .thickness = thickness,
             .color = color,
+            .radius = .all(0),
         };
     }
 
@@ -1774,6 +1809,10 @@ pub const PackedCaret = packed struct {
 pub const Visual = struct {
     /// Color color as RGBA array [red, green, blue, alpha] (0-255 each)
     /// Default: transparent black
+    animation_name: ?[]const u8 = null,
+
+    animation: ?*const Animation = null,
+
     background: ?Background = null,
 
     layer: ?BackgroundLayer = null,
@@ -1821,6 +1860,8 @@ pub const Visual = struct {
     /// Shadow configuration for drop shadows
     shadow: ?Shadow = null,
 
+    new_shadow: ?NewShadow = null,
+
     /// 2D/3D transformation configuration
     transform: ?Transform = null,
 
@@ -1847,6 +1888,12 @@ pub const Visual = struct {
         return .{
             .font_size = size,
             .font_weight = weight,
+            .text_color = color,
+        };
+    }
+
+    pub fn textColor(color: Color) Visual {
+        return .{
             .text_color = color,
         };
     }
@@ -1944,6 +1991,7 @@ pub const PackedLayout = packed struct {
     flex_wrap: FlexWrap = .none,
     text_align: Layout = .{},
     aspect_ratio: AspectRatio = .none,
+    placement: Layout = .{},
 };
 
 pub const PackedPosition = packed struct {
@@ -1953,6 +2001,8 @@ pub const PackedPosition = packed struct {
     bottom: Pos = .{},
     left: Pos = .{},
     z_index: i16 = 0,
+    anchor_name_ptr: ?[*]const u8 = null,
+    anchor_name_len: usize = 0,
 };
 
 pub const PackedMarginsPaddings = packed struct {
@@ -2071,6 +2121,9 @@ pub const PackedTextDecoration = packed struct {
 };
 
 pub const PackedVisual = packed struct {
+    animation_name_ptr: ?[*]const u8 = null,
+    animation_name_len: usize = 0,
+    animation: ?*const Animation = null,
     background: PackedColor = .{},
     packed_layers: PackedLayers = .{},
     has_border_radius: bool = false,
@@ -2099,10 +2152,11 @@ pub const PackedVisual = packed struct {
     font_family_ptr: ?[*]const u8 = null,
     font_family_len: usize = 0,
     has_transitions: bool = false,
-    transitions: PackedTransition = undefined,
+    transitions: PackedTransition = .{},
     is_text_gradient: bool = false,
     caret: PackedCaret = .{},
     resize: Resize = .default,
+    new_shadow: ?*NewShadow = null,
 };
 
 pub const PackedInteractive = packed struct {
@@ -2114,11 +2168,21 @@ pub const PackedInteractive = packed struct {
     focus: PackedVisual = undefined,
     has_focus_within: bool = false,
     focus_within: PackedVisual = undefined,
+    has_hover_transform: bool = false,
+    hover_transform: PackedTransform = undefined,
 };
 
 pub const PackedAnimations = packed struct {
+    has_animation_enter: bool = false,
+    has_animation_exit: bool = false,
+    animation_enter: ?*const Animation = null,
+    animation_exit: ?*const Animation = null,
+};
+
+pub const PackedTransforms = packed struct {
     has_transform: bool = false,
     transform: PackedTransform = undefined,
+    transform_origin: TransformOrigin = .default,
 };
 
 /// Global user-defined default style that overrides system defaults
@@ -2175,6 +2239,9 @@ pub const Style = struct {
     /// Alignment configuration for child elements
     layout: ?Layout = null,
 
+    /// Placement configuration for child elements
+    placement: ?Layout = null,
+
     /// Gap between child elements in pixels
     child_gap: ?u8 = null,
 
@@ -2191,7 +2258,7 @@ pub const Style = struct {
     key_frames: ?[]const KeyFrame = null,
 
     /// Animation specifications (duration, timing, etc.)
-    animation: ?Animation.Specs = null,
+    // animation: ?Animation.Specs = null,
 
     /// Animation name for exit/removal animations
     exit_animation: ?[]const u8 = null,
@@ -2231,6 +2298,8 @@ pub const Style = struct {
 
     /// Backface visibility for 3D transforms
     backface_visibility: ?[]const u8 = null,
+
+    anchor: ?[]const u8 = null,
 
     /// Gets the current base style to use for inheritance.
     /// Returns user-defined defaults if set, otherwise returns system defaults.
@@ -2440,7 +2509,6 @@ pub const StyleFields = enum {
     show_scrollbar,
 };
 
-
 pub const Config = struct {
     style: Style,
 };
@@ -2517,6 +2585,8 @@ pub const InputParamsInt = struct {
     type: InputTypes = .int,
     default: ?i32 = null,
     value: ?i32 = null,
+    min_len: ?u32 = null,
+    max_len: ?u32 = null,
 };
 
 pub const InputParamsString = struct {
@@ -2525,6 +2595,8 @@ pub const InputParamsString = struct {
     default_len: usize = 0,
     value_ptr: ?[*]const u8 = null,
     value_len: usize = 0,
+    min_len: ?u32 = null,
+    max_len: ?u32 = null,
 };
 
 const InputParamsRadio = struct {
@@ -2555,6 +2627,11 @@ pub const InputParamsFile = struct {
     default_len: usize = 0,
     value_ptr: ?[*]const u8 = null,
     value_len: usize = 0,
+};
+
+pub const TextFieldConfig = struct {
+    min: ?u32 = null,
+    max: ?u32 = null,
 };
 
 pub const InputTypes = enum(u8) {
@@ -2614,6 +2691,7 @@ pub const ElementDeclaration = struct {
     aria_label: ?[]const u8 = null,
     tooltip: ?*const Tooltip = null,
     animation_enter: ?*const Animation = null,
+    animation: ?*const Animation = null,
     animation_exit: ?*const Animation = null,
     video: ?*const Video = null,
     /// Used for passing ect data
@@ -2622,6 +2700,7 @@ pub const ElementDeclaration = struct {
     name: ?[]const u8 = null,
     style_fields: ?[]const StyleFields = null,
     hover_style_fields: ?[]const StyleFields = null,
+    inlineStyle: ?[]const u8 = null,
 };
 
 pub const Tooltip = struct {

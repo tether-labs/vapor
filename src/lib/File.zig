@@ -5,6 +5,7 @@ const isWasi = Vapor.lib.isWasi;
 const utils = @import("utils.zig");
 const hashKey = utils.hashKey;
 const Event = @import("Event.zig");
+const DynamicObject = @import("Dynamic.zig");
 
 const FileInfo = struct {
     name: []const u8 = undefined,
@@ -47,6 +48,7 @@ pub const FileTypes = enum {
     @"image/png",
     @"image/jpeg",
     @"image/webp",
+    @"text/csv",
 };
 
 pub fn readText(file_reader: *FileReader, file_index: usize, onload: fn ([]const u8) void) void {
@@ -138,7 +140,7 @@ pub fn createURLfromFile(file_reader: *FileReader, file_index: usize) ![]const u
 pub fn fileInfo(file_reader: *FileReader, file_index: usize) !FileInfo {
     if (isWasi) {
         const handle = Wasm.getFileInfoWasm(file_reader.event.id, file_index);
-        const obj = Vapor.lib.finalizeObject(handle);
+        const obj = DynamicObject.finalizeObject(handle);
         var cloned_form: FileInfo = .{};
         const fields = @typeInfo(FileInfo).@"struct".fields;
         inline for (fields, 0..) |field, i| {

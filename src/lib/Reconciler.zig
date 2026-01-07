@@ -50,7 +50,8 @@ fn removeAllChildren(old_node: *UINode) void {
     var j: usize = 0;
     var child = old_node.first_child;
     while (child) |old_child| {
-        Vapor.removed_nodes.append(.{ .uuid = old_child.uuid, .index = j }) catch {};
+        // Vapor.removed_nodes.append(.{ .uuid = old_child.uuid, .index = j }) catch {};
+        Vapor.Animation.removal_queue.enqueue(old_child, j) catch unreachable;
         j += 1;
         child = old_child.next_sibling;
     }
@@ -161,8 +162,10 @@ fn reconcileDeletions(old_node: *UINode, new_node: *UINode, len_old: usize, len_
     var node_itr = node_map.iterator();
     while (node_itr.next()) |entry| {
         const j = entry.value_ptr.*;
-        const uuid = entry.key_ptr.*;
-        Vapor.removed_nodes.append(.{ .uuid = uuid, .index = j }) catch {};
+        // const uuid = entry.key_ptr.*;
+        const old_child = old_items[j];
+        // Vapor.removed_nodes.append(.{ .uuid = uuid, .index = j }) catch {};
+        Vapor.Animation.removal_queue.enqueue(old_child, j) catch unreachable;
     }
 }
 
@@ -216,7 +219,8 @@ fn reconcileSame(old_node: *UINode, new_node: *UINode, len: usize) void {
             traverseNodes(old_child, new_child);
             Vapor.has_dirty = true;
         } else {
-            Vapor.removed_nodes.append(.{ .uuid = old_child.uuid, .index = offset }) catch {};
+            // Vapor.removed_nodes.append(.{ .uuid = old_child.uuid, .index = offset }) catch {};
+            Vapor.Animation.removal_queue.enqueue(old_child, offset) catch unreachable;
         }
     }
 
@@ -285,7 +289,8 @@ fn reconcileAdditions(old_node: *UINode, new_node: *UINode, len_old: usize, len_
             traverseNodes(old_child, new_child);
             Vapor.has_dirty = true;
         } else {
-            Vapor.removed_nodes.append(.{ .uuid = old_child.uuid, .index = offset }) catch {};
+            // Vapor.removed_nodes.append(.{ .uuid = old_child.uuid, .index = offset }) catch {};
+            Vapor.Animation.removal_queue.enqueue(old_child, offset) catch unreachable;
         }
     }
 
@@ -302,6 +307,7 @@ fn reconcileAdditions(old_node: *UINode, new_node: *UINode, len_old: usize, len_
 
 // --- Main Reconciler Function ---
 pub fn traverseNodes(old_node: *UINode, new_node: *UINode) void {
+
     // --- 1. Reconcile current node properties ---
     const changed = (new_node.finger_print != old_node.finger_print);
     new_node.style_changed = (new_node.style_hash != old_node.style_hash);
